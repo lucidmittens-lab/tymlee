@@ -166,6 +166,7 @@ body {
 #status .sync-synced { color: var(--accent); }
 #status .sync-error, #status .sync-offline { color: var(--warn); }
 #status .run { color: var(--accent); }
+#status .stopped { color: var(--muted); }
 #status .dim { color: var(--muted); }
 
 /* Touch screens: 16px text in the input stops iOS from zooming in on focus,

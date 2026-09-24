@@ -5,6 +5,12 @@
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+  // /off is stored as an entry with this text. Typed entries can never start
+  // with "/" (that is a command), so it cannot clash with a real entry. Time
+  // from an off marker to the next entry is not tracked.
+  const OFF = '/off';
+  const isOff = (e) => Boolean(e) && e.text === OFF;
+
   // "dev fixing login bug" -> { category: "dev", note: "fixing login bug" }
   // The category is everything before the first space.
   function parseInput(text) {
@@ -19,6 +25,7 @@
   function knownCategories(entries) {
     const seen = new Map();
     for (let i = entries.length - 1; i >= 0; i--) {
+      if (isOff(entries[i])) continue;
       const cat = parseInput(entries[i].text).category;
       const key = cat.toLowerCase();
       if (cat && !seen.has(key)) seen.set(key, cat);
@@ -41,14 +48,17 @@
   }
 
   // Each entry runs until the next one starts; the last one is still running.
-  // `n` is the entry's 1-based position in the whole log.
+  // `n` is the entry's 1-based position in the whole log. Off markers become
+  // spans with `off: true`: gaps that are shown but never counted.
   function withSpans(entries, now) {
     return entries.map((e, i) => {
       const next = entries[i + 1];
       const end = next ? next.ts : now;
+      const off = isOff(e);
       return {
         ...e,
-        ...parseInput(e.text),
+        ...(off ? { category: '(off)', note: '' } : parseInput(e.text)),
+        off,
         n: i + 1,
         end,
         running: !next,
@@ -61,6 +71,7 @@
   function summarize(spans) {
     const totals = new Map();
     for (const s of spans) {
+      if (s.off) continue;
       const key = s.category.toLowerCase();
       const cur = totals.get(key) || { category: s.category, ms: 0 };
       cur.ms += s.duration;
@@ -179,8 +190,9 @@
       out.push(`  ${'#'.padStart(numWidth)}  start  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
         const end = compact ? '' : `${s.running ? 'now  ' : hhmm(s.end)}  `;
+        const dur = s.off ? '-' : formatHM(s.duration);
         out.push(
-          `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}${formatHM(s.duration).padStart(6)}  ` +
+          `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}${dur.padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
       }
@@ -206,7 +218,7 @@
   function toCSV(entries, range, now) {
     const rows = [['n', 'start', 'end', 'minutes', 'category', 'note']];
     for (const s of withSpans(entries, now)) {
-      if (s.ts < range.from || s.ts >= range.to) continue;
+      if (s.off || s.ts < range.from || s.ts >= range.to) continue;
       rows.push([
         s.n,
         new Date(s.ts).toISOString(),
@@ -291,6 +303,10 @@
       }
       const { category, note } = parseInput(m[4]);
       const entryText = note ? `${category} ${note}` : category;
+      if (entryText.startsWith('/') && entryText !== OFF) {
+        errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
+        return;
+      }
       const at = new Date(day);
       at.setHours(h, min, 0, 0);
       let ts = at.getTime();
@@ -401,6 +417,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, enqueue, nextBatch,
     formatEditable, parseEditable,
+    OFF, isOff,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tymlee = api;

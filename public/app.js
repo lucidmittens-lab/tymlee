@@ -79,6 +79,7 @@
   }
 
   function describe(s) {
+    if (s.off) return 'off';
     return s.note ? `${s.category} ${s.note}` : s.category;
   }
 
@@ -88,7 +89,7 @@
     const entry = store.add(note ? `${category} ${note}` : category);
     const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
     const parts = [T.hhmm(entry.ts)];
-    if (prev) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
+    if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
     parts.push(`in #${store.entries.length} ${describe(T.parseInput(entry.text))}`);
     print(parts.join('  '), 'ok');
   }
@@ -138,8 +139,20 @@
         const last = T.withSpans(store.entries, now).pop();
         store.remove(last.id);
         const msg = [`undid #${last.n} ${T.hhmm(last.ts)} ${describe(last)}`];
-        if (store.entries.length) msg.push(`resumed ${describe(T.withSpans(store.entries, now).pop())}`);
+        const cur = T.withSpans(store.entries, now).pop();
+        if (cur) msg.push(cur.off ? 'still off' : `resumed ${describe(cur)}`);
         print(msg.join('  '), 'ok');
+      },
+    },
+    off: {
+      usage: '/off',
+      about: 'clock out without starting anything new',
+      run() {
+        const before = T.withSpans(store.entries, Date.now());
+        const cur = before[before.length - 1];
+        if (!cur || cur.off) return print('not clocked in', 'err');
+        const entry = store.add(T.OFF);
+        print(`${T.hhmm(entry.ts)}  out ${cur.category} (${T.formatHM(entry.ts - cur.ts)})  off`, 'ok');
       },
     },
     rm: {
@@ -562,10 +575,15 @@
       const cur = spans[spans.length - 1];
       // Same rule as the report: an entry counts toward the day it started on.
       const dayStart = T.startOfDay(now);
-      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= dayStart ? s.duration : 0), 0);
-      left.append(span('run', `▶ ${T.formatClock(cur.duration)}`), span('what', `  ${describe(cur)}`));
-      today = span('today', `today ${T.formatHM(todayMs)}`);
-      today.append(span('since', ` · since ${T.hhmm(cur.ts)}`));
+      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= dayStart && !s.off ? s.duration : 0), 0);
+      if (cur.off) {
+        left.append(span('stopped', '■ off'), span('what dim', `  since ${T.hhmm(cur.ts)}`));
+        today = span('today', `today ${T.formatHM(todayMs)}`);
+      } else {
+        left.append(span('run', `▶ ${T.formatClock(cur.duration)}`), span('what', `  ${describe(cur)}`));
+        today = span('today', `today ${T.formatHM(todayMs)}`);
+        today.append(span('since', ` · since ${T.hhmm(cur.ts)}`));
+      }
     }
     const right = span('sync sync-' + store.status, syncLabel());
     statusEl.replaceChildren(...[left, today, right].filter(Boolean));

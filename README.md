@@ -23,7 +23,7 @@ Thu 2026-09-24
 
 ## How it works
 
-- **Every line is a clock-in and a clock-out.** Typing a line starts a new entry and ends the previous one. The newest entry keeps running, and the status bar at the bottom shows its live timer.
+- **Every line is a clock-in and a clock-out.** Typing a line starts a new entry and ends the previous one. The newest entry keeps running, and the status bar at the bottom shows its live timer. To stop without starting something new, use `/off`. The time until your next entry is shown in the log as `(off)` and isn't counted in any totals.
 - **The first word is the category.** Everything before the first space is the category (`dev`, `mtg` above). The rest is a free-text note.
 - **Tab completion.** Once a category has been used, typing its first letters shows the rest in grey. **Tab** or **→** accepts it, and pressing **Tab** again cycles through the other matches. You can also just type the whole word yourself. Commands complete the same way after `/`.
 - **History.** **↑/↓** recalls earlier inputs, like a shell.
@@ -34,6 +34,7 @@ Thu 2026-09-24
 |---|---|
 | `/log [range]` | print the formatted readout (alias `/ls`) |
 | `/undo` | remove the last entry (**Ctrl/Cmd+Z** on an empty line does the same) |
+| `/off` | clock out without starting anything new; off time isn't counted |
 | `/rm <#>` | delete an entry by its number; its time goes to the entry before it |
 | `/edit [range]` | edit entries as text; defaults to the last 24 hours |
 | `/save` | apply the changes from `/edit` (**Ctrl/Cmd+Enter** in the editor) |

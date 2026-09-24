@@ -257,3 +257,46 @@ test('parseEditable: new lines before any header use today', () => {
   const r = T.parseEditable('08:15 gym', [], NOW);
   assert.equal(r.ops[0].entry.ts, at('2026-09-24T08:15:00Z'));
 });
+
+// ---- /off ------------------------------------------------------------------
+
+const OFF_LOG = [
+  { id: 'a', ts: at('2026-09-24T09:00:00Z'), text: 'dev fixing login bug' },
+  { id: 'b', ts: at('2026-09-24T09:45:00Z'), text: T.OFF },
+  { id: 'c', ts: at('2026-09-24T10:00:00Z'), text: 'mtg standup' },
+  { id: 'd', ts: at('2026-09-24T10:05:00Z'), text: T.OFF },
+];
+
+test('off time is shown but not counted', () => {
+  const spans = T.withSpans(OFF_LOG, NOW);
+  assert.deepEqual(spans.map((s) => s.off), [false, true, false, true]);
+  assert.deepEqual(T.summarize(spans), [
+    { category: 'dev', ms: 45 * 60000 },
+    { category: 'mtg', ms: 5 * 60000 },
+  ]);
+  assert.deepEqual(T.knownCategories(OFF_LOG), ['mtg', 'dev']);
+  assert.equal(T.formatReport(OFF_LOG, T.parseRange('today', NOW), NOW), [
+    'Thu 2026-09-24',
+    '  #  start  end       dur  category  note',
+    '  1  09:00  09:45    0:45  dev       fixing login bug',
+    '  2  09:45  10:00       -  (off)',
+    '  3  10:00  10:05    0:05  mtg       standup',
+    '  4  10:05  now         -  (off)',
+    '  ' + '-'.repeat(56),
+    '  dev         0:45   90%',
+    '  mtg         0:05   10%',
+    '  total       0:50',
+  ].join('\n'));
+  const csv = T.toCSV(OFF_LOG, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
+  assert.equal(csv.length, 3);
+});
+
+test('/edit keeps /off lines and rejects other "/" text', () => {
+  const { text, items } = T.formatEditable(OFF_LOG, { from: 0, to: Infinity, label: 'all' }, NOW);
+  assert.match(text, /  2  09:45  \/off\n/);
+  assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
+  const added = T.parseEditable(text + '10:10 /off\n', items, NOW);
+  assert.equal(added.added, 1);
+  const bad = T.parseEditable(text + '10:10 /log\n', items, NOW);
+  assert.match(bad.errors[0], /can't start with/);
+});

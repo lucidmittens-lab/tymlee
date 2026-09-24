@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tymlee</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>tymlee</h1>
+      <div class="actions">
+        <button id="undo" type="button" title="Remove the last entry (Ctrl+Z with an empty input)">Undo</button>
+        <button id="export" type="button" title="Download the log as plain text">Export</button>
+      </div>
+    </header>
+
+    <form id="entry-form" autocomplete="off">
+      <div class="field">
+        <div id="ghost" aria-hidden="true"></div>
+        <input id="entry" type="text" spellcheck="false" autofocus
+               placeholder="category what you're doing…"
+               aria-label="New entry" aria-autocomplete="both" aria-controls="suggestions">
+      </div>
+      <ul id="suggestions" role="listbox"></ul>
+      <p class="hint">Enter to clock in · Tab to accept a category · Ctrl+Z on an empty line to undo</p>
+    </form>
+
+    <section id="current" hidden></section>
+
+    <section>
+      <h2>Today</h2>
+      <ul id="totals"></ul>
+    </section>
+
+    <section>
+      <h2>Log</h2>
+      <div id="log"></div>
+    </section>
+  </main>
+
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

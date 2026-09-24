@@ -2,6 +2,7 @@
   'use strict';
 
   const T = window.Tymlee;
+  const V = window.TymleeVault;
 
   const $ = (id) => document.getElementById(id);
   const appEl = $('app');
@@ -84,6 +85,7 @@
   }
 
   function add(text) {
+    if (text.length > T.MAX_TEXT) return print(`entries are limited to ${T.MAX_TEXT} characters`, 'err');
     const { category, note } = T.parseInput(text);
     const before = store.entries;
     const entry = store.add(note ? `${category} ${note}` : category);
@@ -236,6 +238,46 @@
         print(`signed out of ${email}`, 'ok');
       },
     },
+    link: {
+      usage: '/link [code]',
+      about: 'add a device: /link here shows a code; type /link <code> on the new one',
+      async run(args) {
+        const code = args.join('');
+        if (!code) {
+          const shown = await store.createLink();
+          print([
+            'On your other device, sign in, then type:',
+            '',
+            `  /link ${shown}`,
+            '',
+            'The code works once, for 10 minutes, and only for someone signed in to your account.',
+          ].join('\n'), 'key');
+          return;
+        }
+        if (!V.looksLikeCode(code, 12)) return print('usage: /link XXXX-XXXX-XXXX  (the code shown by /link on your other device)', 'err');
+        print('checking the code…', 'dim');
+        await store.unlockWith('link', code);
+        print('this device is set up: entries are decrypted here and encrypted on upload', 'ok');
+      },
+    },
+    recover: {
+      usage: '/recover <key>',
+      about: 'set up this device with your recovery key',
+      async run(args) {
+        const code = args.join('');
+        if (!V.looksLikeCode(code, 20)) return print('usage: /recover XXXXX-XXXXX-XXXXX-XXXXX  (your recovery key)', 'err');
+        print('checking the recovery key…', 'dim');
+        await store.unlockWith('recovery', code);
+        print('this device is set up: entries are decrypted here and encrypted on upload', 'ok');
+      },
+    },
+    recovery: {
+      usage: '/recovery',
+      about: 'make a new recovery key (the old one stops working)',
+      async run() {
+        print(await store.newRecoveryKey(), 'key');
+      },
+    },
     whoami: {
       usage: '/whoami',
       about: 'show the account and sync state',
@@ -244,7 +286,13 @@
         if (!store.user) return print('signed out: entries are kept in this browser. /login <email> to sync', 'dim');
         const state = store.pending ? `${store.pending} change(s) waiting to sync` : 'all changes synced';
         const err = store.lastError ? `\nlast error: ${store.lastError}` : '';
-        print(`${store.user.email} · ${store.entries.length} entries · ${state}${err}`, 'dim');
+        const crypt = {
+          ready: 'encrypted: this device has the key',
+          locked: "encrypted: this device doesn't have the key yet (/link or /recover)",
+          plain: 'not encrypted: the server is not set up for it yet',
+          pending: 'encryption: checking…',
+        }[store.encryption] || '';
+        print(`${store.user.email} · ${store.entries.length} entries · ${state}\n${crypt}${err}`, 'dim');
       },
     },
     sync: {
@@ -660,6 +708,7 @@
     pending: 'waiting to sync',
     offline: 'offline',
     error: 'not synced · /whoami',
+    locked: 'locked · /link',
   };
 
   function syncLabel() {
@@ -679,7 +728,7 @@
     const left = span('now', '');
     let today = null;
     if (!store.entries.length) {
-      left.textContent = 'not clocked in · type /help';
+      left.append(span('what', 'not clocked in · type /help'));
     } else {
       const spans = T.withSpans(store.entries, now);
       const cur = spans[spans.length - 1];

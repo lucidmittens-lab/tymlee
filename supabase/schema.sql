@@ -33,3 +33,40 @@ create policy "entries: delete own" on public.entries
 
 revoke all on public.entries from anon;
 grant select, insert, update, delete on public.entries to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- End-to-end encryption (added later; safe to run on an existing project).
+-- Entry text is now stored encrypted, which is longer than the plain text.
+
+alter table public.entries drop constraint if exists entries_text_check;
+alter table public.entries add constraint entries_text_check check (char_length(text) between 1 and 8000);
+
+-- One row per user holding the account's master key, but only in locked form:
+-- `recovery` is locked with the recovery key, `link` briefly with a /link
+-- code. Both codes stay on the user's devices, so this table can't be used
+-- to read anyone's entries.
+create table if not exists public.keyring (
+  user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  recovery   jsonb not null,
+  link       jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.keyring enable row level security;
+
+drop policy if exists "keyring: read own" on public.keyring;
+create policy "keyring: read own" on public.keyring
+  for select to authenticated using (user_id = (select auth.uid()));
+
+drop policy if exists "keyring: insert own" on public.keyring;
+create policy "keyring: insert own" on public.keyring
+  for insert to authenticated with check (user_id = (select auth.uid()));
+
+drop policy if exists "keyring: update own" on public.keyring;
+create policy "keyring: update own" on public.keyring
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+revoke all on public.keyring from anon;
+grant select, insert, update on public.keyring to authenticated;

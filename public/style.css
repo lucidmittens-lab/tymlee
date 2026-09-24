@@ -85,6 +85,7 @@ body {
 #out .ok { color: var(--accent); }
 #out .err { color: var(--warn); }
 #out .dim { color: var(--muted); }
+#out .key { color: var(--fg); border-left: 3px solid var(--accent); padding-left: 1ch; margin: 6px 0; }
 #out .report { margin: 4px 0; white-space: pre; overflow-x: auto; }
 
 /* /edit: a plain-text editor inside the scrollback. */
@@ -164,7 +165,7 @@ body {
 #status .today { color: var(--muted); flex-shrink: 0; }
 #status .sync { color: var(--muted); flex-shrink: 0; }
 #status .sync-synced { color: var(--accent); }
-#status .sync-error, #status .sync-offline { color: var(--warn); }
+#status .sync-error, #status .sync-offline, #status .sync-locked { color: var(--warn); }
 #status .run { color: var(--accent); }
 #status .stopped { color: var(--muted); }
 #status .dim { color: var(--muted); }

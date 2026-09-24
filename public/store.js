@@ -1,10 +1,12 @@
 // Entry storage. Always works offline from localStorage; when Supabase is
 // configured (config.js) and the user is signed in, changes are queued and
 // synced to their account, and the account's entries are pulled back down.
+// Entry text is encrypted before upload once the account has a key (vault.js).
 (function () {
   'use strict';
 
   const T = window.Tymlee;
+  const V = window.TymleeVault;
   const LEGACY_KEY = 'tymlee.entries.v1';
   const LOCAL = 'local'; // owner id for the signed-out, this-browser-only log
   const SUPABASE_SRC = 'vendor/supabase.js';
@@ -14,6 +16,7 @@
   // page load, sign-in, /sync, and at least every few hours.
   const RECENT_MS = 14 * 86400000;
   const FULL_EVERY_MS = 6 * 3600000;
+  const LINK_TTL_MS = 10 * 60000;
 
   function createStore({ onChange, onNotice }) {
     const config = window.TYMLEE_CONFIG || {};
@@ -29,6 +32,12 @@
     let lastError = '';
     let chain = Promise.resolve(); // serializes all network work
     let lastFullPull = 0;
+    // Encryption for the signed-in account:
+    //   'pending'  not checked yet (or the check failed; retried on next sync)
+    //   'plain'    the server has no keyring table yet: sync without encryption
+    //   'locked'   the account is encrypted but this device has no key yet
+    //   'ready'    this device holds the key; text is encrypted on upload
+    let vault = { mode: 'pending' };
 
     // ---- local persistence -------------------------------------------------
 
@@ -69,6 +78,12 @@
     function clearOwner(who) {
       localStorage.removeItem(key(who, 'entries'));
       localStorage.removeItem(key(who, 'queue'));
+      localStorage.removeItem(key(who, 'key'));
+    }
+
+    // This device's copy of the account's master key.
+    function localKey(who) {
+      try { return localStorage.getItem(key(who, 'key')) || ''; } catch (_) { return ''; }
     }
 
     // One-time move from the first version's storage format.
@@ -135,6 +150,7 @@
     // Send queued changes, in order, in batches.
     async function flush() {
       if (!user || !client) return;
+      if (!(await vaultOpen())) return;
       const who = owner;
       let batch;
       while (owner === who && (batch = T.nextBatch(queue, 500))) {
@@ -143,7 +159,7 @@
         try {
           const table = client.from('entries');
           const { error } = batch.kind === 'put'
-            ? await table.upsert(batch.ops.map((q) => ({ ...q.entry, user_id: who })))
+            ? await table.upsert(await Promise.all(batch.ops.map((q) => sealRow(q.entry, who))))
             : await table.delete().in('id', batch.ops.map((q) => q.id));
           if (error) throw error;
         } finally {
@@ -156,26 +172,192 @@
       settle();
     }
 
+    // The row to upload for an entry: its text encrypted when this device
+    // holds the account's key.
+    async function sealRow(entry, who) {
+      const text = vault.mode === 'ready' ? await V.encryptText(vault.key, entry.id, entry.text) : entry.text;
+      return { id: entry.id, ts: entry.ts, text, user_id: who };
+    }
+
     // Download the account's entries (all of them, or only those since
     // `since`), then re-apply unsent changes on top.
     async function pull(since) {
       if (!user || !client) return;
+      if (!(await vaultOpen())) return;
       const who = owner;
       const rows = [];
+      const plain = []; // uploaded before encryption was on; re-sent encrypted
+      let unreadable = 0;
       const page = 1000;
       for (let from = 0; ; from += page) {
         let query = client.from('entries').select('id,ts,text');
         if (since != null) query = query.gte('ts', since);
         const { data, error } = await query.order('ts', { ascending: true }).range(from, from + page - 1);
         if (error) throw error;
-        rows.push(...data.map((r) => ({ id: r.id, ts: Number(r.ts), text: r.text })));
+        const opened = await Promise.all(data.map(async (r) => {
+          const e = { id: r.id, ts: Number(r.ts), text: r.text };
+          if (V.isEncrypted(r.text)) {
+            if (vault.mode !== 'ready') return null;
+            try {
+              e.text = await V.decryptText(vault.key, r.id, r.text);
+            } catch (_) {
+              unreadable++;
+              return null;
+            }
+          } else if (vault.mode === 'ready') {
+            plain.push(e);
+          }
+          return e;
+        }));
+        rows.push(...opened.filter(Boolean));
         if (data.length < page) break;
       }
       if (owner !== who) return;
       const base = since == null ? rows : T.mergeRecent(entries, rows, since);
+      // Encrypt anything that is still stored as plain text, unless a newer
+      // local change for it is already waiting to be sent.
+      const waiting = new Set(queue.map((q) => (q.op === 'put' ? q.entry.id : q.id)));
+      for (const e of plain) {
+        if (!waiting.has(e.id)) queue = T.enqueue(queue, { op: 'put', entry: e }, inFlight);
+      }
       entries = T.applyOps(base, queue);
-      write(key(owner, 'entries'), entries);
+      persist();
+      if (unreadable) onNotice(`${unreadable} entr${unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
+      if (plain.length) schedule(flush);
       settle();
+    }
+
+    // ---- encryption ----------------------------------------------------------
+
+    function missingTable(error) {
+      return error.code === 'PGRST205' || error.code === '42P01' || /could not find the table|does not exist/i.test(error.message || '');
+    }
+
+    function fetchKeyring() {
+      return client.from('keyring').select('recovery,link').maybeSingle();
+    }
+
+    async function unlock(raw) {
+      try { localStorage.setItem(key(owner, 'key'), raw); } catch (_) { /* this session only */ }
+      vault = { mode: 'ready', raw, key: await V.importMasterKey(raw) };
+    }
+
+    function lock() {
+      vault = { mode: 'locked' };
+      status = 'locked';
+      onChange();
+      onNotice([
+        "This account's log is encrypted, and this device doesn't have the key yet.",
+        '',
+        'On a device that is already set up, type /link, then type the code it shows here:',
+        '  /link XXXX-XXXX-XXXX',
+        '',
+        'Or use your recovery key:',
+        '  /recover XXXXX-XXXXX-XXXXX-XXXXX',
+      ].join('\n'), 'key');
+    }
+
+    function recoveryMessage(code, first) {
+      return [
+        first ? 'Encryption is on for this account. Your recovery key:' : 'Your new recovery key (the old one no longer works):',
+        '',
+        `  ${code}`,
+        '',
+        'Save it somewhere safe, like a password manager. It is the only way back into your log if you lose access to all your devices, and nobody else, including whoever runs this site, can recover it for you.',
+        ...(first ? ['', 'To add another device, type /link here.'] : []),
+      ].join('\n');
+    }
+
+    // Work out this device's encryption state, creating the account's key if
+    // this is the first device to get here.
+    async function prepareVault() {
+      const who = owner;
+      const saved = localKey(who);
+      if (saved) {
+        await unlock(saved);
+        return;
+      }
+      const { data, error } = await fetchKeyring();
+      if (owner !== who) return;
+      if (error) {
+        if (missingTable(error)) { vault = { mode: 'plain' }; return; }
+        throw error;
+      }
+      if (data) { lock(); return; }
+      const raw = V.newMasterKey();
+      const code = V.newRecoveryCode();
+      const recovery = await V.wrap(raw, code);
+      const created = await client.from('keyring').insert({ user_id: who, recovery });
+      if (owner !== who) return;
+      if (created.error) {
+        if (created.error.code === '23505') { lock(); return; } // another device got there first
+        if (missingTable(created.error)) { vault = { mode: 'plain' }; return; }
+        throw created.error;
+      }
+      await unlock(raw);
+      onNotice(recoveryMessage(code, true), 'key');
+    }
+
+    // True when entries can be synced (encrypted, or plain on a server that
+    // doesn't support encryption yet).
+    async function vaultOpen() {
+      if (vault.mode === 'pending') await prepareVault();
+      if (vault.mode === 'locked') {
+        status = 'locked';
+        onChange();
+        return false;
+      }
+      return vault.mode === 'ready' || vault.mode === 'plain';
+    }
+
+    function requireKey() {
+      requireClient();
+      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet (run supabase/schema.sql)');
+      if (vault.mode !== 'ready') throw new Error("this device doesn't have the key yet: /link <code> or /recover <key>");
+    }
+
+    // Show-once code that lets another device fetch the key for 10 minutes.
+    async function createLink() {
+      requireKey();
+      const code = V.newLinkCode();
+      const link = { ...(await V.wrap(vault.raw, code)), expires: Date.now() + LINK_TTL_MS };
+      const { error } = await client.from('keyring').update({ link }).eq('user_id', owner);
+      if (error) throw error;
+      return code;
+    }
+
+    async function newRecoveryKey() {
+      requireKey();
+      const code = V.newRecoveryCode();
+      const recovery = await V.wrap(vault.raw, code);
+      const { error } = await client.from('keyring').update({ recovery }).eq('user_id', owner);
+      if (error) throw error;
+      return recoveryMessage(code, false);
+    }
+
+    // Unlock this device with a /link code or the recovery key.
+    async function unlockWith(kind, code) {
+      requireClient();
+      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (vault.mode === 'ready') throw new Error('this device already has the key');
+      if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet');
+      const { data, error } = await fetchKeyring();
+      if (error) throw error;
+      if (!data) throw new Error('this account has no encryption key yet');
+      const blob = kind === 'link' ? data.link : data.recovery;
+      if (kind === 'link' && (!blob || blob.expires < Date.now())) {
+        throw new Error('no active link code. On a device that is set up, type /link (codes last 10 minutes)');
+      }
+      let raw;
+      try {
+        raw = await V.unwrap(blob, code);
+      } catch (_) {
+        throw new Error(kind === 'link' ? 'that link code is not right' : 'that recovery key is not right');
+      }
+      await unlock(raw);
+      if (kind === 'link') await client.from('keyring').update({ link: null }).eq('user_id', owner);
+      await sync({ full: true });
     }
 
     // Send queued changes, then fetch. `full` downloads the whole log;
@@ -183,9 +365,14 @@
     function sync({ full = false } = {}) {
       if (!user) return Promise.resolve();
       return schedule(async () => {
-        await flush();
         const now = Date.now();
-        if (full || now - lastFullPull > FULL_EVERY_MS) {
+        const fullNow = full || now - lastFullPull > FULL_EVERY_MS;
+        // Re-check servers without encryption support now and then, so it
+        // switches on after supabase/schema.sql has been run.
+        if (fullNow && vault.mode === 'plain') vault = { mode: 'pending' };
+        await flush();
+        if (vault.mode === 'locked') return;
+        if (fullNow) {
           await pull();
           lastFullPull = now;
         } else {
@@ -213,6 +400,8 @@
         return;
       }
       user = next ? { id: next.id, email: next.email } : null;
+      vault = { mode: 'pending' };
+      lastFullPull = 0;
       loadOwner(user ? user.id : LOCAL);
       status = user ? 'syncing' : 'signed-out';
       onChange();
@@ -319,6 +508,10 @@
       verify,
       logout,
       importLocal,
+      createLink,
+      unlockWith,
+      newRecoveryKey,
+      get encryption() { return vault.mode; },
       get entries() { return entries; },
       get user() { return user; },
       get pending() { return queue.length; },

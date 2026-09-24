@@ -9,6 +9,8 @@
   // with "/" (that is a command), so it cannot clash with a real entry. Time
   // from an off marker to the next entry is not tracked.
   const OFF = '/off';
+  // Longest entry text accepted (the server allows room for encryption).
+  const MAX_TEXT = 1000;
   const isOff = (e) => Boolean(e) && e.text === OFF;
 
   // "dev fixing login bug" -> { category: "dev", note: "fixing login bug" }
@@ -307,6 +309,10 @@
         errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
         return;
       }
+      if (entryText.length > MAX_TEXT) {
+        errors.push(`${where}: entries are limited to ${MAX_TEXT} characters`);
+        return;
+      }
       const at = new Date(day);
       at.setHours(h, min, 0, 0);
       let ts = at.getTime();
@@ -401,7 +407,12 @@
         errors.push(`${where}: could not read the start, end or category`);
         return;
       }
-      entries.push({ ts, end, text: note ? `${category} ${note}` : category });
+      const entryText = note ? `${category} ${note}` : category;
+      if (entryText.length > MAX_TEXT) {
+        errors.push(`${where}: entries are limited to ${MAX_TEXT} characters`);
+        return;
+      }
+      entries.push({ ts, end, text: entryText });
     });
     entries.sort((a, b) => a.ts - b.ts);
     const out = [];
@@ -465,6 +476,10 @@
       }
       if (entryText.startsWith('/') && entryText !== OFF) {
         errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
+        return;
+      }
+      if (entryText.length > MAX_TEXT) {
+        errors.push(`${where}: entries are limited to ${MAX_TEXT} characters`);
         return;
       }
       const at = new Date(day);
@@ -561,7 +576,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    OFF, isOff,
+    OFF, isOff, MAX_TEXT,
     parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

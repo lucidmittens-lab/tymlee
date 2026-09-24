@@ -49,6 +49,9 @@ Thu 2026-09-24
 | `/sync` | send and fetch changes now (this also happens automatically) |
 | `/import` | add entries logged while signed out to your account |
 | `/logout` | sign out and remove your synced log from this browser |
+| `/link [code]` | add a device: `/link` on a set-up device shows a code, `/link <code>` on the new one uses it |
+| `/recover <key>` | set up this device with your recovery key |
+| `/recovery` | make a new recovery key (the old one stops working) |
 | `/help` | list commands |
 
 Ranges: `today` (the default), `yesterday`, `week` (the last 7 days), `month` (the last 30 days), `all`, `Nd` (the last N days), `YYYY-MM-DD`, or `YYYY-MM-DD..YYYY-MM-DD`.
@@ -100,6 +103,21 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 - The status bar shows `synced`, `waiting to sync (n)`, `offline` or `not synced`. `/whoami` shows the last error.
 - Signing out removes that account's entries from the browser. `/logout` refuses while changes are still unsent, unless you use `/logout force`.
 
+## Encryption
+
+When you're signed in, entry text is encrypted in your browser before it's uploaded, so the database only holds ciphertext. That includes whoever runs the Supabase project. Entry times, the number of entries and your email address are not encrypted.
+
+- **One master key per account.** The first device to sign in creates it and shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`). Save that somewhere safe. Nobody can recover it for you.
+- **The server stores the master key only in locked form:** once locked with the recovery key, and for 10 minutes locked with a `/link` code while you add a device. The codes are shown on screen and never sent anywhere.
+- **Adding a device:** sign in on it (it says it's locked), type `/link` on a device that's already set up, then type the code it shows on the new device. You can use `/recover <key>` instead.
+- **Signing out** removes the key from that browser. Signing in again means linking again.
+- **Losing every device and the recovery key** means the log can't be decrypted by anyone.
+- **`/export`, `/log` and `/restore`** work on the decrypted copy in your browser, so exports are plain text.
+
+The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
+
+While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption. Encryption switches on at the next full sync after the script has been run.
+
 ## Deploy
 
 There is no build step. The website is the static files in `public/`, and `public/vendor/supabase.js` (supabase-js 2.117.1, MIT) is loaded only when sync is configured.
@@ -111,7 +129,7 @@ npm start        # local server on http://localhost:8000
 ### 1. Create the Supabase project
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor**, paste in the contents of [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. You should see "Success. No rows returned". This creates the `entries` table and row-level security rules so each user can only read and write their own rows.
+2. Open **SQL Editor**, paste in the contents of [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. It is safe to run again after updates; it only adds what's missing. You should see "Success. No rows returned". This creates the `entries` table and row-level security rules so each user can only read and write their own rows.
 3. Check that **Project Settings → Data API** is enabled.
 4. Click **Connect** at the top of the project (or open **Project Settings → Data API** and **API Keys**). Copy the **Project URL** and the **publishable** key (`sb_publishable_...`, or the legacy `anon` key) into `public/config.js`:
 

@@ -42,8 +42,7 @@ Thu 2026-09-24
 | `/export [range] [csv]` | download the readout as `.txt`, or the raw rows as `.csv` |
 | `/copy [range]` | copy the readout to the clipboard |
 | `/clear` | clear the screen; the log is kept (**Ctrl+L**) |
-| `/login <email>` | sign in to sync; emails you a sign-in link and code |
-| `/code <code>` | finish signing in with the code from that email |
+| `/login <email>` | sign in to sync; emails you a sign-in link |
 | `/whoami` | show the account and sync state |
 | `/sync` | send and fetch changes now (this also happens automatically) |
 | `/import` | add entries logged while signed out to your account |
@@ -111,7 +110,7 @@ npm start        # local server on http://localhost:8000
 
    The publishable key is meant to be public. The row-level security rules are what protect the data. Never put a **secret** or `service_role` key in this file.
 
-Optional: to sign in by typing a code (`/code 123456`) as well as by clicking the emailed link, add `{{ .Token }}` to the **Magic Link** email template. Supabase only allows editing templates once you set up a custom SMTP provider (**Authentication → Emails → SMTP Settings**). Without it, click the link in the email, ideally on the same device and browser where you use tymlee.
+To sign in, type `/login you@example.com` and click the link in the email. Open it on the same device and browser where you use tymlee, since the link signs in whichever browser opens it.
 
 ### 2. Host the files on Cloudflare
 

@@ -200,25 +200,13 @@
     },
     login: {
       usage: '/login <email>',
-      about: 'sign in to sync across devices (emails you a link and code)',
+      about: 'sign in to sync across devices (emails you a sign-in link)',
       async run(args) {
         const email = (args[0] || '').trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return print('usage: /login you@example.com', 'err');
         if (store.user) return print(`already signed in as ${store.user.email}; /logout first`, 'err');
         await store.login(email);
-        pendingEmail = email;
-        print(`sent a sign-in email to ${email}. Open the link, or type /code <code from the email>`, 'ok');
-      },
-    },
-    code: {
-      usage: '/code <code>',
-      about: 'finish signing in with the code from the email',
-      async run(args) {
-        const code = (args[0] || '').trim();
-        if (!pendingEmail) return print('run /login <email> first', 'err');
-        if (!/^\d{6,10}$/.test(code)) return print('usage: /code 123456', 'err');
-        await store.verify(pendingEmail, code);
-        pendingEmail = '';
+        print(`sent a sign-in email to ${email}. Open the link in it on this device and browser.`, 'ok');
       },
     },
     logout: {
@@ -309,7 +297,6 @@
   };
   const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
   const COMMAND_WORDS = Object.keys(COMMANDS).map((c) => '/' + c);
-  let pendingEmail = '';
 
   function rangeFrom(args) {
     const word = args.join('');

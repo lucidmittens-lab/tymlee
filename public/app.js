@@ -326,15 +326,40 @@
 
   // The address used with /login, kept so /code still works if the page
   // reloads while you fetch the code (phones often reload background tabs).
+  // It expires with the emailed code (an hour).
   const LOGIN_EMAIL_KEY = 'tymlee.loginEmail';
+  const LOGIN_CODE_TTL_MS = 60 * 60 * 1000;
   function rememberLoginEmail(email) {
     try {
-      if (email) localStorage.setItem(LOGIN_EMAIL_KEY, email);
+      if (email) localStorage.setItem(LOGIN_EMAIL_KEY, JSON.stringify({ email, at: Date.now() }));
       else localStorage.removeItem(LOGIN_EMAIL_KEY);
     } catch (_) { /* storage unavailable; /code needs /login in this page */ }
   }
   function loginEmail() {
-    try { return localStorage.getItem(LOGIN_EMAIL_KEY) || ''; } catch (_) { return ''; }
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOGIN_EMAIL_KEY));
+      return saved && Date.now() - saved.at < LOGIN_CODE_TTL_MS ? saved.email : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // Clean up what was typed or pasted: text copied from an email can carry
+  // invisible characters, and some keyboards produce a full-width slash.
+  function cleanLine(raw) {
+    return raw.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '').replace(/\uFF0F/g, '/').trim();
+  }
+
+  // Sign-in codes must never be logged as entries. Catch the ways a code
+  // arrives without a clean "/code" in front: the keyboard's one-time-code
+  // suggestion (just the digits), "code 123456", or a whole pasted email line.
+  function asCodeCommand(line) {
+    if (line.startsWith('/')) return null;
+    const pasted = line.match(/(?:^|\s)\/code\s+(\d{6,10})(?:\s|$)/i);
+    if (pasted) return `/code ${pasted[1]}`;
+    if (store.user || !loginEmail()) return null;
+    const bare = line.match(/^(?:code\s*:?\s*)?(\d{6,10})$/i);
+    return bare ? `/code ${bare[1]}` : null;
   }
 
   function saveRestore() {
@@ -606,7 +631,8 @@
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const line = input.value.trim();
+    const typed = cleanLine(input.value);
+    const line = asCodeCommand(typed) || typed;
     input.value = '';
     cycle = null;
     renderHints();

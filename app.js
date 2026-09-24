@@ -5,19 +5,14 @@
   const STORAGE_KEY = 'tymlee.entries.v1';
 
   const $ = (id) => document.getElementById(id);
-  const form = $('entry-form');
+  const out = $('out');
+  const form = $('prompt');
   const input = $('entry');
   const ghost = $('ghost');
-  const list = $('suggestions');
-  const undoBtn = $('undo');
-  const exportBtn = $('export');
-  const currentEl = $('current');
-  const totalsEl = $('totals');
-  const logEl = $('log');
+  const matchesEl = $('matches');
+  const statusEl = $('status');
 
   let entries = load();
-  let suggestions = [];
-  let selected = 0;
 
   // ---- storage -------------------------------------------------------------
 
@@ -34,7 +29,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     } catch (_) {
-      // Storage full or blocked; the in-memory log still works for this tab.
+      print('warning: could not save to browser storage; this session is not persisted', 'err');
     }
   }
 
@@ -42,225 +37,342 @@
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY) {
       entries = load();
-      render();
+      renderStatus();
     }
   });
 
-  // ---- actions -------------------------------------------------------------
+  // ---- output --------------------------------------------------------------
+
+  function print(text, cls) {
+    const pre = document.createElement('pre');
+    if (cls) pre.className = cls;
+    pre.textContent = text;
+    out.append(pre);
+    return pre;
+  }
+
+  function echo(text) {
+    const pre = print('', 'echo');
+    const b = document.createElement('b');
+    b.textContent = text;
+    pre.append('> ', b);
+  }
+
+  // Like a terminal, jump to the bottom after every command.
+  function scrollToPrompt() {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+
+  // ---- entries -------------------------------------------------------------
+
+  function describe(s) {
+    return s.note ? `${s.category} ${s.note}` : s.category;
+  }
 
   function add(text) {
-    const clean = T.parseInput(text);
-    if (!clean.category) return;
-    const ts = Math.max(Date.now(), entries.length ? entries[entries.length - 1].ts + 1 : 0);
-    entries.push({ ts, text: clean.note ? `${clean.category} ${clean.note}` : clean.category });
+    const { category, note } = T.parseInput(text);
+    const now = Math.max(Date.now(), entries.length ? entries[entries.length - 1].ts + 1 : 0);
+    const prev = entries.length ? T.withSpans(entries, now).pop() : null;
+    entries.push({ ts: now, text: note ? `${category} ${note}` : category });
     save();
-    render();
+    const parts = [T.hhmm(now)];
+    if (prev) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
+    parts.push(`in #${entries.length} ${describe(T.parseInput(text))}`);
+    print(parts.join('  '), 'ok');
   }
 
-  function undo() {
-    if (!entries.length) return;
-    entries.pop();
-    save();
-    render();
+  // ---- commands ------------------------------------------------------------
+
+  const COMMANDS = {
+    help: {
+      usage: '/help',
+      about: 'show this help',
+      run() {
+        print([
+          'Type what you are starting and press Enter. That clocks you in to the new',
+          'entry and out of the previous one. The first word is the category.',
+          '',
+          '  dev fixing the login bug',
+          '  mtg standup',
+          '',
+          'Commands:',
+          ...Object.values(COMMANDS).map((c) => `  ${c.usage.padEnd(26)}${c.about}`),
+          '',
+          'Ranges: today (default), yesterday, week, month, all, Nd (last N days),',
+          '        YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
+          '',
+          'Keys:   Tab / Right   complete category (Tab again to cycle)',
+          '        Up / Down     previous inputs',
+          '        Ctrl+Z        undo (on an empty line)',
+          '        Ctrl+L        clear the screen',
+        ].join('\n'), 'report dim');
+      },
+    },
+    log: {
+      usage: '/log [range]',
+      about: 'print the log for a range',
+      run(args) {
+        const range = rangeFrom(args);
+        if (range) print(T.formatReport(entries, range, Date.now()), 'report');
+      },
+    },
+    undo: {
+      usage: '/undo',
+      about: 'remove the last entry',
+      run() {
+        if (!entries.length) return print('nothing to undo', 'err');
+        const now = Date.now();
+        const last = T.withSpans(entries, now).pop();
+        entries.pop();
+        save();
+        const msg = [`undid #${last.n} ${T.hhmm(last.ts)} ${describe(last)}`];
+        if (entries.length) msg.push(`resumed ${describe(T.withSpans(entries, now).pop())}`);
+        print(msg.join('  '), 'ok');
+      },
+    },
+    rm: {
+      usage: '/rm <#>',
+      about: 'delete an entry by number (its time goes to the one before)',
+      run(args) {
+        const n = Number(args[0]);
+        if (!Number.isInteger(n) || n < 1 || n > entries.length) {
+          return print(`usage: /rm <#>   (# between 1 and ${entries.length || 1}, see /log)`, 'err');
+        }
+        const s = T.withSpans(entries, Date.now())[n - 1];
+        entries.splice(n - 1, 1);
+        save();
+        print(`removed #${n} ${T.ymd(s.ts)} ${T.hhmm(s.ts)} ${describe(s)}`, 'ok');
+      },
+    },
+    export: {
+      usage: '/export [range] [csv]',
+      about: 'download the log as .txt (or .csv)',
+      run(args) {
+        const csv = args.some((a) => a.toLowerCase() === 'csv');
+        const range = rangeFrom(args.filter((a) => a.toLowerCase() !== 'csv'));
+        if (!range) return;
+        const now = Date.now();
+        const count = entries.filter((e) => e.ts >= range.from && e.ts < range.to).length;
+        if (!count) return print(`no entries (${range.label})`, 'err');
+        const body = csv ? T.toCSV(entries, range, now) : T.formatReport(entries, range, now) + '\n';
+        const name = `tymlee-${range.label === 'today' ? T.ymd(now) : range.label}.${csv ? 'csv' : 'txt'}`;
+        download(name, body, csv ? 'text/csv' : 'text/plain');
+        print(`exported ${count} entr${count === 1 ? 'y' : 'ies'} -> ${name}`, 'ok');
+      },
+    },
+    copy: {
+      usage: '/copy [range]',
+      about: 'copy the log to the clipboard',
+      run(args) {
+        const range = rangeFrom(args);
+        if (!range) return;
+        const text = T.formatReport(entries, range, Date.now());
+        if (!navigator.clipboard) return print('clipboard not available here; use /export', 'err');
+        navigator.clipboard.writeText(text).then(
+          () => print(`copied ${range.label} to clipboard`, 'ok'),
+          () => print('could not copy; use /export', 'err'),
+        );
+      },
+    },
+    clear: {
+      usage: '/clear',
+      about: 'clear the screen (the log is kept)',
+      run() { out.replaceChildren(); },
+    },
+  };
+  const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
+  const COMMAND_WORDS = Object.keys(COMMANDS).map((c) => '/' + c);
+
+  function rangeFrom(args) {
+    const word = args.join('');
+    const range = T.parseRange(word, Date.now());
+    if (!range) print(`unknown range "${word}"; try today, yesterday, week, month, all, 3d or 2026-01-31`, 'err');
+    return range;
   }
 
-  function remove(ts) {
-    const i = entries.findIndex((e) => e.ts === ts);
-    if (i === -1) return;
-    if (i !== entries.length - 1 && !confirm(`Delete "${entries[i].text}"?\nIts time will be added to the entry before it.`)) return;
-    entries.splice(i, 1);
-    save();
-    render();
+  function runCommand(line) {
+    const [word, ...args] = line.slice(1).trim().split(/\s+/);
+    const name = ALIASES[word.toLowerCase()] || word.toLowerCase();
+    const cmd = COMMANDS[name];
+    if (!cmd) return print(`unknown command "/${word}"; type /help`, 'err');
+    cmd.run(args);
   }
 
-  function exportLog() {
-    const blob = new Blob([T.toText(entries)], { type: 'text/plain' });
+  function download(name, body, type) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `tymlee-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.href = URL.createObjectURL(new Blob([body], { type }));
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  // ---- category autocomplete ----------------------------------------------
+  // ---- input: completion ---------------------------------------------------
 
-  function updateSuggestions() {
-    suggestions = T.suggest(input.value, T.knownCategories(entries));
-    selected = 0;
-    renderSuggestions();
+  // Candidates for the first word: commands after "/", categories otherwise.
+  function candidates(text) {
+    return text.startsWith('/') ? COMMAND_WORDS : T.knownCategories(entries);
   }
 
-  function renderSuggestions() {
-    list.replaceChildren(...suggestions.map((c, i) => {
-      const li = document.createElement('li');
-      li.textContent = c;
-      li.setAttribute('role', 'option');
-      li.setAttribute('aria-selected', String(i === selected));
-      li.addEventListener('mousedown', (e) => {
-        e.preventDefault(); // keep focus in the input
-        accept(i);
-      });
-      return li;
-    }));
+  // Tab cycling state: the list being cycled and the current position.
+  let cycle = null;
 
-    // Inline completion for the highlighted category, only once typing has begun.
+  function renderHints() {
     const typed = input.value;
-    const pick = suggestions[selected];
     ghost.replaceChildren();
-    if (typed && pick) {
-      const span = document.createElement('span');
-      span.className = 'typed';
-      span.textContent = typed;
-      ghost.append(span, pick.slice(typed.length));
+    let list = [];
+    let sel = -1;
+    if (cycle) {
+      list = cycle.matches;
+      sel = cycle.idx;
+    } else if (typed) {
+      list = T.suggest(typed, candidates(typed));
+      sel = 0;
+      if (list[0]) {
+        const span = document.createElement('span');
+        span.className = 'typed';
+        span.textContent = typed;
+        ghost.append(span, list[0].slice(typed.length));
+      }
     }
+    matchesEl.replaceChildren(...list.map((m, i) => {
+      const span = document.createElement('span');
+      span.textContent = m;
+      if (i === sel) span.className = 'sel';
+      span.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // keep focus in the input
+        complete(m);
+      });
+      return span;
+    }));
   }
 
-  function accept(i) {
-    const pick = suggestions[i];
-    if (!pick) return false;
-    input.value = pick + ' ';
+  function complete(word) {
+    input.value = word + ' ';
     input.setSelectionRange(input.value.length, input.value.length);
-    updateSuggestions();
-    return true;
   }
 
-  input.addEventListener('input', updateSuggestions);
+  function tab() {
+    if (cycle && input.value === cycle.matches[cycle.idx] + ' ') {
+      cycle.idx = (cycle.idx + 1) % cycle.matches.length;
+    } else {
+      const typed = input.value;
+      const matches = T.suggest(typed, candidates(typed), { includeExact: true, limit: 20 });
+      if (!matches.length) return;
+      cycle = { matches, idx: 0 };
+    }
+    complete(cycle.matches[cycle.idx]);
+    renderHints();
+  }
+
+  // ---- input: history ------------------------------------------------------
+
+  const history = entries.slice(-100).map((e) => e.text);
+  let histIdx = history.length;
+  let draft = '';
+
+  function recall(step) {
+    const next = histIdx + step;
+    if (next < 0 || next > history.length) return;
+    if (histIdx === history.length) draft = input.value;
+    histIdx = next;
+    input.value = histIdx === history.length ? draft : history[histIdx];
+    input.setSelectionRange(input.value.length, input.value.length);
+    cycle = null;
+    renderHints();
+  }
+
+  // ---- input: events -------------------------------------------------------
+
+  input.addEventListener('input', () => {
+    cycle = null;
+    renderHints();
+  });
   input.addEventListener('scroll', () => { ghost.scrollLeft = input.scrollLeft; });
 
   input.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
     const atEnd = input.selectionStart === input.value.length;
-    if (e.key === 'Tab' && !e.shiftKey && suggestions.length) {
+    if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
-      accept(selected);
-    } else if (e.key === 'ArrowRight' && atEnd && input.value && suggestions.length) {
+      tab();
+    } else if (e.key === 'ArrowRight' && atEnd && ghost.textContent) {
       e.preventDefault();
-      accept(selected);
-    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && suggestions.length) {
+      complete(T.suggest(input.value, candidates(input.value))[0]);
+      cycle = null;
+      renderHints();
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      const step = e.key === 'ArrowDown' ? 1 : -1;
-      selected = (selected + step + suggestions.length) % suggestions.length;
-      renderSuggestions();
+      recall(-1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      recall(1);
     } else if (e.key === 'Escape') {
-      suggestions = [];
-      renderSuggestions();
-    } else if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !input.value) {
+      input.value = '';
+      cycle = null;
+      renderHints();
+    } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey && !input.value) {
       e.preventDefault();
-      undo();
+      submit('/undo');
+    } else if (e.ctrlKey && e.key.toLowerCase() === 'l') {
+      e.preventDefault();
+      out.replaceChildren();
     }
   });
+
+  function submit(line) {
+    echo(line);
+    if (line.startsWith('/')) runCommand(line);
+    else add(line);
+    if (history[history.length - 1] !== line) history.push(line);
+    histIdx = history.length;
+    draft = '';
+    renderStatus();
+    scrollToPrompt();
+  }
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    add(input.value);
+    const line = input.value.trim();
     input.value = '';
-    updateSuggestions();
+    cycle = null;
+    renderHints();
+    if (line) submit(line);
   });
 
-  undoBtn.addEventListener('click', () => { undo(); input.focus(); });
-  exportBtn.addEventListener('click', exportLog);
+  // Clicking anywhere in the terminal focuses the prompt, unless selecting text.
+  $('term').addEventListener('click', () => {
+    if (!String(window.getSelection())) input.focus();
+  });
 
-  // ---- rendering -----------------------------------------------------------
+  // ---- status bar ----------------------------------------------------------
 
-  function el(tag, cls, text) {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  }
-
-  function label(span) {
-    const frag = document.createDocumentFragment();
-    frag.append(el('span', 'cat', span.category));
-    if (span.note) frag.append(' ', el('span', 'note', span.note));
-    return frag;
-  }
-
-  const timeFmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-  const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-
-  function startOfDay(ts) {
-    const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  }
-
-  function renderCurrent(spans) {
+  function renderStatus() {
+    const now = Date.now();
+    if (!entries.length) {
+      statusEl.textContent = 'not clocked in · type /help';
+      return;
+    }
+    const spans = T.withSpans(entries, now);
     const cur = spans[spans.length - 1];
-    currentEl.hidden = !cur;
-    if (!cur) return;
-    currentEl.replaceChildren(
-      el('span', null),
-      el('span', 'timer', T.formatDuration(cur.duration)),
-    );
-    currentEl.firstChild.append(label(cur));
+    // Same rule as the report: an entry counts toward the day it started on.
+    const today = T.startOfDay(now);
+    const todayMs = spans.reduce((sum, s) => sum + (s.ts >= today ? s.duration : 0), 0);
+    const run = document.createElement('span');
+    run.className = 'run';
+    run.textContent = `▶ ${T.formatClock(cur.duration)}`;
+    const dim = document.createElement('span');
+    dim.className = 'dim';
+    dim.textContent = `   today ${T.formatHM(todayMs)} · since ${T.hhmm(cur.ts)}`;
+    statusEl.replaceChildren(run, `  ${describe(cur)}`, dim);
   }
 
-  function renderTotals(now) {
-    const from = startOfDay(now);
-    const totals = T.totalsByCategory(entries, from, from + 86400000, now);
-    if (!totals.length) {
-      totalsEl.replaceChildren(el('li', 'empty', 'Nothing tracked yet today.'));
-      return;
-    }
-    totalsEl.replaceChildren(...totals.map((t) => {
-      const li = el('li');
-      li.append(el('span', 'cat', t.category), el('span', null, T.formatDuration(t.ms)));
-      return li;
-    }));
-  }
+  // ---- boot ----------------------------------------------------------------
 
-  function renderLog(spans) {
-    if (!spans.length) {
-      logEl.replaceChildren(el('p', 'log-empty', 'Type what you are starting and press Enter. The first word is the category.'));
-      return;
-    }
-    const days = [];
-    for (let i = spans.length - 1; i >= 0; i--) {
-      const s = spans[i];
-      const day = startOfDay(s.ts);
-      if (!days.length || days[days.length - 1].day !== day) days.push({ day, rows: [] });
-      days[days.length - 1].rows.push(s);
-    }
-    logEl.replaceChildren(...days.map(({ day, rows }) => {
-      const sec = el('div', 'day');
-      sec.append(el('h3', null, dayFmt.format(day)));
-      for (const s of rows) {
-        const row = el('div', 'row' + (s.running ? ' running' : ''));
-        const text = el('span');
-        text.append(label(s));
-        const del = el('button', 'del', '×');
-        del.type = 'button';
-        del.title = 'Delete entry';
-        del.addEventListener('click', () => remove(s.ts));
-        row.append(el('span', 'time', timeFmt.format(s.ts)), text, el('span', 'dur', T.formatDuration(s.duration)), del);
-        sec.append(row);
-      }
-      return sec;
-    }));
+  print('tymlee · type what you are starting and press Enter · /help for commands', 'dim');
+  if (entries.length) {
+    print(T.formatReport(entries, T.parseRange('today', Date.now()), Date.now()), 'report');
   }
-
-  function render() {
-    const now = Date.now();
-    const spans = T.withSpans(entries, now);
-    renderCurrent(spans);
-    renderTotals(now);
-    renderLog(spans);
-    undoBtn.disabled = !entries.length;
-    exportBtn.disabled = !entries.length;
-    updateSuggestions();
-  }
-
-  // Live-update only the running parts every second.
-  function tick() {
-    if (!entries.length) return;
-    const now = Date.now();
-    const spans = T.withSpans(entries, now);
-    renderCurrent(spans);
-    renderTotals(now);
-    const runningDur = logEl.querySelector('.row.running .dur');
-    if (runningDur) runningDur.textContent = T.formatDuration(spans[spans.length - 1].duration);
-  }
-
-  render();
-  setInterval(tick, 1000);
+  renderStatus();
+  renderHints();
+  setInterval(renderStatus, 1000);
 })();

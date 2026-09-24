@@ -4,7 +4,7 @@
   "private": true,
   "description": "Text-only time tracker. Static files, no build step.",
   "scripts": {
-    "test": "node --test",
+    "test": "TZ=UTC node --test",
     "start": "python3 -m http.server 8000"
   }
 }

@@ -261,11 +261,22 @@
         if (range) openEditor(range);
       },
     },
+    restore: {
+      usage: '/restore [file]',
+      about: 'add entries from a backup: paste it, or pick a .txt/.csv file',
+      run(args) {
+        if (editor) return print('already editing; /save or /cancel first', 'err');
+        if (args[0] && args[0].toLowerCase() !== 'file') return print('usage: /restore  or  /restore file', 'err');
+        if (args[0]) chooseBackupFile();
+        else openRestore('');
+      },
+    },
     save: {
       usage: '/save',
-      about: 'apply the changes made in /edit (Ctrl+Enter)',
+      about: 'apply /edit changes or add /restore entries (Ctrl+Enter)',
       run() {
-        if (!editor) return print('nothing to save; start with /edit', 'err');
+        if (!editor) return print('nothing to save; start with /edit or /restore', 'err');
+        if (editor.mode === 'restore') return saveRestore();
         const result = T.parseEditable(editor.el.value, editor.items, Date.now());
         if (result.errors.length) {
           print([...result.errors, 'nothing was saved; fix the lines above and /save again'].join('\n'), 'err');
@@ -282,11 +293,12 @@
     },
     cancel: {
       usage: '/cancel',
-      about: 'discard the changes made in /edit',
+      about: 'close /edit or /restore without changing anything',
       run() {
         if (!editor) return print('nothing to cancel', 'err');
+        const what = editor.mode === 'restore' ? 'restore' : 'edit';
         closeEditor();
-        print('edit discarded; nothing was changed', 'ok');
+        print(`${what} cancelled; nothing was changed`, 'ok');
       },
     },
     clear: {
@@ -297,6 +309,23 @@
   };
   const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
   const COMMAND_WORDS = Object.keys(COMMANDS).map((c) => '/' + c);
+
+  function saveRestore() {
+    const { entries, errors } = T.parseBackup(editor.el.value);
+    if (errors.length) {
+      const shown = errors.slice(0, 10);
+      if (errors.length > shown.length) shown.push(`…and ${errors.length - shown.length} more`);
+      print([...shown, 'nothing was added; fix the lines above and /save again'].join('\n'), 'err');
+      return;
+    }
+    if (!entries.length) return print('no entries found in the text; paste a backup, or /cancel', 'err');
+    const fresh = T.mergeBackup(store.entries, entries);
+    store.apply(fresh.map((entry) => ({ op: 'put', entry })));
+    closeEditor();
+    const skipped = entries.length - fresh.length;
+    const msg = `restored ${fresh.length} entr${fresh.length === 1 ? 'y' : 'ies'}`;
+    print(skipped ? `${msg} (${skipped} already in your log)` : msg, 'ok');
+  }
 
   function rangeFrom(args) {
     const word = args.join('');
@@ -335,7 +364,8 @@
 
   // ---- editor (/edit) ------------------------------------------------------
 
-  // The open editor: its textarea and the entries it was opened with.
+  // The open text box: its textarea, what it is for ('edit' or 'restore'),
+  // and for /edit the entries it was opened with.
   let editor = null;
 
   function fitEditor(el) {
@@ -345,6 +375,43 @@
 
   function openEditor(range) {
     const { text, items } = T.formatEditable(store.entries, range, Date.now());
+    print(`editing ${range.label} (${items.length} entr${items.length === 1 ? 'y' : 'ies'}) · /save to apply, /cancel to discard`, 'dim');
+    openTextBox({ text, items, mode: 'edit', label: `Edit entries (${range.label})`, cursorAtEnd: true });
+  }
+
+  const RESTORE_HELP = [
+    '# paste a backup below',
+    '# (.txt or .csv from /export)',
+    '# duplicates are skipped',
+    '',
+  ].join('\n');
+
+  function openRestore(text) {
+    print('restoring from a backup · /save to add the entries, /cancel to discard', 'dim');
+    openTextBox({ text: RESTORE_HELP + (text || ''), mode: 'restore', label: 'Backup to restore', cursorAtEnd: true });
+  }
+
+  // Let the user pick a backup file, then show its contents for review.
+  function chooseBackupFile() {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.txt,.csv,text/plain,text/csv';
+    picker.hidden = true;
+    picker.addEventListener('change', () => {
+      const file = picker.files && picker.files[0];
+      picker.remove();
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) return print(`${file.name} is too large to be a tymlee backup`, 'err');
+      file.text().then(
+        (text) => { if (!editor) { openRestore(text); scrollToPrompt(); } },
+        () => print(`could not read ${file.name}`, 'err'),
+      );
+    });
+    document.body.append(picker);
+    picker.click();
+  }
+
+  function openTextBox({ text, items, mode, label, cursorAtEnd }) {
     const el = document.createElement('textarea');
     el.className = 'editor';
     el.value = text;
@@ -352,7 +419,7 @@
     el.wrap = 'off';
     el.setAttribute('autocapitalize', 'off');
     el.setAttribute('autocorrect', 'off');
-    el.setAttribute('aria-label', `Edit entries (${range.label})`);
+    el.setAttribute('aria-label', label);
     el.addEventListener('input', () => fitEditor(el));
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -363,21 +430,24 @@
         input.focus();
       }
     });
-    print(`editing ${range.label} (${items.length} entr${items.length === 1 ? 'y' : 'ies'}) · /save to apply, /cancel to discard`, 'dim');
     out.append(el);
-    editor = { el, items };
+    editor = { el, items, mode };
     fitEditor(el);
-    input.placeholder = 'editing · /save or /cancel';
+    input.placeholder = `${mode === 'restore' ? 'restoring' : 'editing'} · /save or /cancel`;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    if (cursorAtEnd) el.setSelectionRange(el.value.length, el.value.length);
   }
 
   // Leave the edited text on screen as a read-only record.
   function closeEditor() {
-    const pre = document.createElement('pre');
-    pre.className = 'report dim';
-    pre.textContent = editor.el.value.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n').trimEnd();
-    editor.el.replaceWith(pre);
+    if (editor.mode === 'restore') {
+      editor.el.remove();
+    } else {
+      const pre = document.createElement('pre');
+      pre.className = 'report dim';
+      pre.textContent = editor.el.value.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n').trimEnd();
+      editor.el.replaceWith(pre);
+    }
     editor = null;
     input.placeholder = '';
     input.focus();

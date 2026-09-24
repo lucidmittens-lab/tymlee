@@ -300,3 +300,55 @@ test('/edit keeps /off lines and rejects other "/" text', () => {
   const bad = T.parseEditable(text + '10:10 /log\n', items, NOW);
   assert.match(bad.errors[0], /can't start with/);
 });
+
+// ---- restore ---------------------------------------------------------------
+
+const BACKUP_LOG = [
+  { id: 'a', ts: at('2026-09-23T16:00:00Z'), text: 'dev wrap up' },
+  { id: 'b', ts: at('2026-09-23T17:30:00Z'), text: T.OFF },
+  { id: 'c', ts: at('2026-09-24T09:00:00Z'), text: 'dev fixing login bug' },
+  { id: 'd', ts: at('2026-09-24T09:45:00Z'), text: 'mtg standup' },
+  { id: 'e', ts: at('2026-09-24T10:00:00Z'), text: 'dev code review' },
+];
+const strip = (list) => list.map(({ ts, text }) => ({ ts, text }));
+const ALL = { from: -Infinity, to: Infinity, label: 'all' };
+
+test('restore reads back the .txt export (full and compact)', () => {
+  for (const compact of [false, true]) {
+    const r = T.parseBackup(T.formatReport(BACKUP_LOG, ALL, NOW, { compact }));
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.entries, strip(BACKUP_LOG));
+  }
+});
+
+test('restore reads back the csv export, rebuilding off time', () => {
+  const r = T.parseBackup(T.toCSV(BACKUP_LOG, ALL, NOW));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.entries, strip(BACKUP_LOG));
+  // A trailing /off (entry that ended with nothing after it) is kept too.
+  const ended = [...BACKUP_LOG, { id: 'f', ts: at('2026-09-24T10:10:00Z'), text: T.OFF }];
+  assert.deepEqual(T.parseBackup(T.toCSV(ended, ALL, NOW)).entries, strip(ended));
+});
+
+test('restore reads the /edit format and pasted text with comments', () => {
+  const { text } = T.formatEditable(BACKUP_LOG, ALL, NOW);
+  assert.deepEqual(T.parseBackup(text).entries, strip(BACKUP_LOG));
+  const r = T.parseBackup('# pasted\nThu 2026-09-24\n08:15 gym\n  09:00  dev x\n');
+  assert.deepEqual(r.entries.map((e) => e.text), ['gym', 'dev x']);
+});
+
+test('restore reports unreadable lines', () => {
+  const r = T.parseBackup('08:00 gym\nThu 2026-09-24\n25:00 late\nhello there\n10:00 /log\n');
+  assert.deepEqual(r.errors.map((e) => e.split(':')[0]), ['line 1', 'line 3', 'line 4', 'line 5']);
+  assert.match(r.errors[0], /no date above/);
+  const csv = T.parseBackup('n,start,end,minutes,category,note\n1,not a date,,1.0,dev,x\n');
+  assert.match(csv.errors[0], /csv row 2/);
+});
+
+test('mergeBackup skips entries already in the log', () => {
+  const backup = T.parseBackup(T.formatReport(BACKUP_LOG, ALL, NOW)).entries;
+  assert.equal(T.mergeBackup(BACKUP_LOG, backup).length, 0);
+  const fresh = T.mergeBackup(BACKUP_LOG.slice(0, 2), backup);
+  assert.deepEqual(strip(fresh), strip(BACKUP_LOG.slice(2)));
+  assert.ok(fresh.every((e) => typeof e.id === 'string'));
+});

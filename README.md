@@ -37,8 +37,9 @@ Thu 2026-09-24
 | `/off` | clock out without starting anything new; off time isn't counted |
 | `/rm <#>` | delete an entry by its number; its time goes to the entry before it |
 | `/edit [range]` | edit entries as text; defaults to the last 24 hours |
-| `/save` | apply the changes from `/edit` (**Ctrl/Cmd+Enter** in the editor) |
-| `/cancel` | discard the changes from `/edit` |
+| `/restore [file]` | add entries from a backup: paste it in, or `/restore file` to pick a `.txt`/`.csv` |
+| `/save` | apply `/edit` changes or add `/restore` entries (**Ctrl/Cmd+Enter** in the box) |
+| `/cancel` | close `/edit` or `/restore` without changing anything |
 | `/export [range] [csv]` | download the readout as `.txt`, or the raw rows as `.csv` |
 | `/copy [range]` | copy the readout to the clipboard |
 | `/clear` | clear the screen; the log is kept (**Ctrl+L**) |
@@ -73,6 +74,17 @@ Thu 2026-09-24
 - The number at the start of a line links it to its entry, so don't change it.
 
 `/save` applies everything at once. If any line has a problem, such as a bad time, a time in the future, or an unknown number, nothing is saved and the problems are listed so you can fix them and `/save` again. `/cancel` leaves the log untouched.
+
+## Backups
+
+`/export all` downloads your whole log as text, and `/export all csv` as a spreadsheet file. Either one can be read back with `/restore`:
+
+- `/restore file` opens a file picker, or `/restore` gives you a box to paste text into. Text copied from `/log` or `/edit` works too.
+- The entries are shown for review first. Nothing is added until you `/save`.
+- Restoring only adds entries. Anything already in your log (same start minute and text) is skipped, so restoring the same backup twice is harmless and nothing gets deleted.
+- If any line can't be read, nothing is added and the problem lines are listed.
+
+Times in the `.txt` backup are in the time zone of the device that exported it, to the minute. The CSV uses UTC timestamps and leaves out off rows, which `/restore` rebuilds from the start and end times.
 
 ## Storage and sync
 

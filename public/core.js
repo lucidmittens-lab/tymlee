@@ -354,6 +354,141 @@
     return { ops, errors, changed, added, removed };
   }
 
+  // ---- restore from a backup -----------------------------------------------
+  // Reads the formats tymlee writes: the /log or /export .txt readout (full
+  // or compact), the /edit format, and the /export csv file.
+
+  // Split CSV text into rows of fields (handles quotes, "" and newlines).
+  function parseCSV(text) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else field += c;
+      } else if (c === '"') quoted = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c !== '\r') field += c;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  const CSV_HEADER = 'n,start,end,minutes,category,note';
+
+  // The CSV leaves out off time, so an entry whose end is earlier than the
+  // next start (or that ended with nothing after it) was followed by /off.
+  function backupFromCSV(text) {
+    const entries = [];
+    const errors = [];
+    const rows = parseCSV(text);
+    rows.slice(1).forEach((r, i) => {
+      const where = `csv row ${i + 2}`;
+      if (r.length === 1 && !r[0].trim()) return;
+      if (r.length < 6) {
+        errors.push(`${where}: expected ${CSV_HEADER.split(',').length} columns`);
+        return;
+      }
+      const ts = Date.parse(r[1]);
+      const end = r[2] ? Date.parse(r[2]) : null;
+      const { category, note } = parseInput(`${r[4]} ${r[5]}`);
+      if (Number.isNaN(ts) || Number.isNaN(end) || !category) {
+        errors.push(`${where}: could not read the start, end or category`);
+        return;
+      }
+      entries.push({ ts, end, text: note ? `${category} ${note}` : category });
+    });
+    entries.sort((a, b) => a.ts - b.ts);
+    const out = [];
+    entries.forEach((e, i) => {
+      out.push({ ts: e.ts, text: e.text });
+      const next = entries[i + 1];
+      if (e.end != null && (!next || e.end < next.ts)) out.push({ ts: e.end, text: OFF });
+    });
+    return { entries: out, errors };
+  }
+
+  // Returns { entries: [{ ts, text }], errors }.
+  function parseBackup(text) {
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    const content = lines.filter((l) => !l.trim().startsWith('#'));
+    const first = content.find((l) => l.trim());
+    if (first && first.trim() === CSV_HEADER) return backupFromCSV(content.join('\n'));
+
+    const entries = [];
+    const errors = [];
+    let day = null;
+    lines.forEach((raw, i) => {
+      const line = raw.trim();
+      const where = `line ${i + 1}`;
+      // Blank lines, comments and the report's column headings, rules,
+      // "no entries" notes and multi-day summaries carry no entries.
+      if (!line || line.startsWith('#') || /^-+$/.test(line) || /^no entries \(/.test(line)) return;
+      if (/^\S+: \d{4}-\d{2}-\d{2} \.\. \d{4}-\d{2}-\d{2}, \d+ days?$/.test(line)) return;
+
+      const header = line.match(/^(?:[A-Za-z]{3}\s+)?(\d{4})-(\d{2})-(\d{2})$/);
+      if (header) {
+        const d = new Date(+header[1], +header[2] - 1, +header[3]);
+        if (d.getMonth() !== +header[2] - 1) errors.push(`${where}: "${line}" is not a real date`);
+        else day = d.getTime();
+        return;
+      }
+
+      // Report row:  3  09:00  09:45    0:45  dev  note   (end column optional)
+      const row = line.match(/^\d+\s+(\d{1,2}):(\d{2})\s+(?:(?:\d{1,2}:\d{2}|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
+      // /edit line:  3  09:00  dev note   or   09:00 dev note
+      const edit = !row && line.match(/^(?:\d+\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      if (!row && !edit) {
+        // Per-category summary lines:  dev   0:57   79%
+        if (/^\S+\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
+        errors.push(`${where}: not a tymlee log line: "${line.slice(0, 40)}"`);
+        return;
+      }
+      const [h, min] = [+(row || edit)[1], +(row || edit)[2]];
+      let entryText;
+      if (row) entryText = row[3] === '(off)' ? OFF : [row[3], row[4]].filter(Boolean).join(' ');
+      else entryText = edit[3];
+      const { category, note } = parseInput(entryText);
+      entryText = note ? `${category} ${note}` : category;
+      if (h > 23 || min > 59) {
+        errors.push(`${where}: ${h}:${String(min).padStart(2, '0')} is not a valid time`);
+        return;
+      }
+      if (day == null) {
+        errors.push(`${where}: no date above this line (expected a line like "Thu 2026-09-24")`);
+        return;
+      }
+      if (entryText.startsWith('/') && entryText !== OFF) {
+        errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
+        return;
+      }
+      const at = new Date(day);
+      at.setHours(h, min, 0, 0);
+      entries.push({ ts: at.getTime(), text: entryText });
+    });
+    return { entries, errors };
+  }
+
+  // Backup entries that are not already in the log, as new entries. Matching
+  // is by start minute and text, so restoring the same backup twice is harmless.
+  function mergeBackup(existing, backup) {
+    const key = (e) => `${Math.floor(e.ts / 60000)}|${e.text.toLowerCase()}`;
+    const seen = new Set(existing.map(key));
+    const fresh = [];
+    for (const e of backup) {
+      const k = key(e);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      fresh.push({ id: uuid(), ts: e.ts, text: e.text });
+    }
+    return fresh;
+  }
+
   // ---- sync ----------------------------------------------------------------
   // Entries are { id, ts, text }. Local changes are recorded as a queue of
   // operations that are replayed against the server:
@@ -418,6 +553,7 @@
     uuid, sortEntries, applyOps, enqueue, nextBatch,
     formatEditable, parseEditable,
     OFF, isOff,
+    parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tymlee = api;

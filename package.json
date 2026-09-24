@@ -5,6 +5,6 @@
   "description": "Text-only time tracker. Static files, no build step.",
   "scripts": {
     "test": "TZ=UTC node --test",
-    "start": "python3 -m http.server 8000"
+    "start": "python3 -m http.server 8000 -d public"
   }
 }

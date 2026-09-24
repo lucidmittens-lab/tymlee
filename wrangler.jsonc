@@ -1,0 +1,9 @@
+// Cloudflare deploy settings. The site is plain static files served as-is;
+// there is no build step and no server code.
+{
+  "name": "tymlee",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public"
+  }
+}

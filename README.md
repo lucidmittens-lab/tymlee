@@ -64,7 +64,7 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 
 ## Deploy
 
-There is no build step. The site is the static files in this folder, and `vendor/supabase.js` (supabase-js 2.117.1, MIT) is loaded only when sync is configured.
+There is no build step. The website is the static files in `public/`, and `public/vendor/supabase.js` (supabase-js 2.117.1, MIT) is loaded only when sync is configured.
 
 ```
 npm start        # local server on http://localhost:8000
@@ -73,26 +73,30 @@ npm start        # local server on http://localhost:8000
 ### 1. Create the Supabase project
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor**, paste in [`supabase/schema.sql`](supabase/schema.sql) and run it. This creates the `entries` table and row-level security rules so each user can only read and write their own rows.
-3. Open **Authentication → Emails → Magic Link** and add the one-time code to the email body, for example `Or type /code {{ .Token }}`. That lets you sign in by typing the code, which helps when the email opens on a different device or browser from the app.
-4. Open **Project Settings → API**. Copy the **Project URL** and the **anon public** key into `config.js`:
+2. Open **SQL Editor**, paste in the contents of [`supabase/schema.sql`](supabase/schema.sql) and click **Run**. You should see "Success. No rows returned". This creates the `entries` table and row-level security rules so each user can only read and write their own rows.
+3. Check that **Project Settings → Data API** is enabled.
+4. Click **Connect** at the top of the project (or open **Project Settings → Data API** and **API Keys**). Copy the **Project URL** and the **publishable** key (`sb_publishable_...`, or the legacy `anon` key) into `public/config.js`:
 
    ```js
    window.TYMLEE_CONFIG = {
      supabaseUrl: 'https://abcdefghijkl.supabase.co',
-     supabaseAnonKey: 'eyJhbGciOi...',
+     supabaseAnonKey: 'sb_publishable_...',
    };
    ```
 
-   The anon key is meant to be public. The row-level security rules are what protect the data. Never put the `service_role` key in this file.
+   The publishable key is meant to be public. The row-level security rules are what protect the data. Never put a **secret** or `service_role` key in this file.
 
-### 2. Host the files (Cloudflare Pages)
+Optional: to sign in by typing a code (`/code 123456`) as well as by clicking the emailed link, add `{{ .Token }}` to the **Magic Link** email template. Supabase only allows editing templates once you set up a custom SMTP provider (**Authentication → Emails → SMTP Settings**). Without it, click the link in the email, ideally on the same device and browser where you use tymlee.
 
-1. In Cloudflare, go to **Workers & Pages → Create → Pages → Connect to Git** and pick this repository.
-2. Leave **Framework preset** as *None* and **Build command** empty. Set **Build output directory** to `/`.
-3. Deploy. You get a URL like `https://tymlee.pages.dev`, and every push redeploys the site.
+### 2. Host the files on Cloudflare
 
-GitHub Pages, Netlify or any other static host works the same way.
+The repository contains a `wrangler.jsonc` that tells Cloudflare to publish the `public/` folder as-is.
+
+1. In Cloudflare, go to **Workers & Pages → Create** and choose **Continue with GitHub** (or **Import a repository**). Allow access to this repository and select it.
+2. Leave the **Build command** empty. Leave the **Deploy command** as `npx wrangler deploy`.
+3. Deploy. You get a URL like `https://tymlee.<your-subdomain>.workers.dev`, and every push redeploys the site.
+
+If you use the older **Pages** flow instead, set the framework preset to *None*, leave the build command empty, and set the output directory to `public`. GitHub Pages, Netlify and other static hosts work the same way: publish the `public/` folder.
 
 ### 3. Point Supabase at the site
 
@@ -102,7 +106,7 @@ Supabase's built-in email sender is rate-limited to a few emails per hour and is
 
 ## Tests
 
-`core.js` holds the pure logic: parsing, completion, durations, ranges, the report and CSV formatting, and the sync queue and merge rules. It is tested with Node's built-in test runner. The tests run under `TZ=UTC` so the formatted times are the same on every machine.
+`public/core.js` holds the pure logic: parsing, completion, durations, ranges, the report and CSV formatting, and the sync queue and merge rules. It is tested with Node's built-in test runner. The tests run under `TZ=UTC` so the formatted times are the same on every machine.
 
 ```
 npm test

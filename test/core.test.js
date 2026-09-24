@@ -1,7 +1,7 @@
 // Run with TZ=UTC (see package.json) so local-time formatting is deterministic.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const T = require('../core.js');
+const T = require('../public/core.js');
 
 test('category is the text before the first space', () => {
   assert.deepEqual(T.parseInput('dev fixing the login bug'), { category: 'dev', note: 'fixing the login bug' });

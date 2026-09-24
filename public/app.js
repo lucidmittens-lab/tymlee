@@ -200,13 +200,27 @@
     },
     login: {
       usage: '/login <email>',
-      about: 'sign in to sync across devices (emails you a sign-in link)',
+      about: 'sign in to sync across devices (emails you a link and a code)',
       async run(args) {
         const email = (args[0] || '').trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return print('usage: /login you@example.com', 'err');
         if (store.user) return print(`already signed in as ${store.user.email}; /logout first`, 'err');
         await store.login(email);
-        print(`sent a sign-in email to ${email}. Open the link in it on this device and browser.`, 'ok');
+        rememberLoginEmail(email);
+        print(`sent a sign-in email to ${email}. Type /code <code from the email>, or open the link in it on this device.`, 'ok');
+      },
+    },
+    code: {
+      usage: '/code <code>',
+      about: 'finish signing in with the code from the email',
+      async run(args) {
+        const code = (args[0] || '').trim();
+        const email = loginEmail();
+        if (store.user) return print(`already signed in as ${store.user.email}`, 'err');
+        if (!email) return print('run /login <email> first', 'err');
+        if (!/^\d{6,10}$/.test(code)) return print('usage: /code 123456  (the number from the sign-in email)', 'err');
+        await store.verify(email, code);
+        rememberLoginEmail('');
       },
     },
     logout: {
@@ -309,6 +323,19 @@
   };
   const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
   const COMMAND_WORDS = Object.keys(COMMANDS).map((c) => '/' + c);
+
+  // The address used with /login, kept so /code still works if the page
+  // reloads while you fetch the code (phones often reload background tabs).
+  const LOGIN_EMAIL_KEY = 'tymlee.loginEmail';
+  function rememberLoginEmail(email) {
+    try {
+      if (email) localStorage.setItem(LOGIN_EMAIL_KEY, email);
+      else localStorage.removeItem(LOGIN_EMAIL_KEY);
+    } catch (_) { /* storage unavailable; /code needs /login in this page */ }
+  }
+  function loginEmail() {
+    try { return localStorage.getItem(LOGIN_EMAIL_KEY) || ''; } catch (_) { return ''; }
+  }
 
   function saveRestore() {
     const { entries, errors } = T.parseBackup(editor.el.value);

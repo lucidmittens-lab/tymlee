@@ -257,6 +257,13 @@
       if (error) throw error;
     }
 
+    async function verify(email, code) {
+      requireClient();
+      const { data, error } = await client.auth.verifyOtp({ email, token: code, type: 'email' });
+      if (error) throw error;
+      await setUser(data.user || (data.session && data.session.user));
+    }
+
     async function logout() {
       requireClient();
       const who = owner;
@@ -295,6 +302,7 @@
       apply,
       sync,
       login,
+      verify,
       logout,
       importLocal,
       get entries() { return entries; },

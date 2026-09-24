@@ -43,7 +43,8 @@ Thu 2026-09-24
 | `/export [range] [csv]` | download the readout as `.txt`, or the raw rows as `.csv` |
 | `/copy [range]` | copy the readout to the clipboard |
 | `/clear` | clear the screen; the log is kept (**Ctrl+L**) |
-| `/login <email>` | sign in to sync; emails you a sign-in link |
+| `/login <email>` | sign in to sync; emails you a sign-in link and code |
+| `/code <code>` | finish signing in by typing the code from that email |
 | `/whoami` | show the account and sync state |
 | `/sync` | send and fetch changes now (this also happens automatically) |
 | `/import` | add entries logged while signed out to your account |
@@ -122,7 +123,20 @@ npm start        # local server on http://localhost:8000
 
    The publishable key is meant to be public. The row-level security rules are what protect the data. Never put a **secret** or `service_role` key in this file.
 
-To sign in, type `/login you@example.com` and click the link in the email. Open it on the same device and browser where you use tymlee, since the link signs in whichever browser opens it.
+To sign in, type `/login you@example.com`, then either type `/code 123456` with the code from the email, or click the link in it. The link signs in whichever browser opens it, so the code is easier when the email is on a different device.
+
+The code needs the email templates to include it, and Supabase only allows editing templates with a custom email provider. tymlee.date uses [Resend](https://resend.com):
+
+1. In Resend, add and verify the domain, then create an API key with sending access.
+2. In Supabase, open **Authentication → Emails → SMTP Settings**, turn on custom SMTP, and fill in:
+   - Host: `smtp.resend.com`
+   - Port: `465`
+   - Username: `resend`
+   - Password: the API key
+   - Sender: an address at the verified domain
+3. In the **Magic Link** and **Confirm signup** templates, add: `<p>Or type this at the tymlee prompt: <strong>/code {{ .Token }}</strong></p>`
+
+Custom SMTP also lifts Supabase's built-in limit of a few emails per hour. The limit is then set under **Authentication → Rate Limits**.
 
 ### 2. Host the files on Cloudflare
 

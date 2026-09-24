@@ -9,6 +9,11 @@
   const LOCAL = 'local'; // owner id for the signed-out, this-browser-only log
   const SUPABASE_SRC = 'vendor/supabase.js';
   const PULL_EVERY_MS = 60000;
+  // Routine checks only download entries from the last two weeks, so their
+  // size stays small however long the log gets. A full download happens on
+  // page load, sign-in, /sync, and at least every few hours.
+  const RECENT_MS = 14 * 86400000;
+  const FULL_EVERY_MS = 6 * 3600000;
 
   function createStore({ onChange, onNotice }) {
     const config = window.TYMLEE_CONFIG || {};
@@ -23,6 +28,7 @@
     let status = configured ? 'signed-out' : 'local-only';
     let lastError = '';
     let chain = Promise.resolve(); // serializes all network work
+    let lastFullPull = 0;
 
     // ---- local persistence -------------------------------------------------
 
@@ -150,33 +156,41 @@
       settle();
     }
 
-    // Replace local entries with the account's, then re-apply unsent changes.
-    async function pull() {
+    // Download the account's entries (all of them, or only those since
+    // `since`), then re-apply unsent changes on top.
+    async function pull(since) {
       if (!user || !client) return;
       const who = owner;
       const rows = [];
       const page = 1000;
       for (let from = 0; ; from += page) {
-        const { data, error } = await client
-          .from('entries')
-          .select('id,ts,text')
-          .order('ts', { ascending: true })
-          .range(from, from + page - 1);
+        let query = client.from('entries').select('id,ts,text');
+        if (since != null) query = query.gte('ts', since);
+        const { data, error } = await query.order('ts', { ascending: true }).range(from, from + page - 1);
         if (error) throw error;
         rows.push(...data.map((r) => ({ id: r.id, ts: Number(r.ts), text: r.text })));
         if (data.length < page) break;
       }
       if (owner !== who) return;
-      entries = T.applyOps(rows, queue);
+      const base = since == null ? rows : T.mergeRecent(entries, rows, since);
+      entries = T.applyOps(base, queue);
       write(key(owner, 'entries'), entries);
       settle();
     }
 
-    function sync() {
+    // Send queued changes, then fetch. `full` downloads the whole log;
+    // otherwise only recent entries, unless a full download is overdue.
+    function sync({ full = false } = {}) {
       if (!user) return Promise.resolve();
       return schedule(async () => {
         await flush();
-        await pull();
+        const now = Date.now();
+        if (full || now - lastFullPull > FULL_EVERY_MS) {
+          await pull();
+          lastFullPull = now;
+        } else {
+          await pull(now - RECENT_MS);
+        }
       });
     }
 
@@ -204,7 +218,7 @@
       onChange();
       if (!user) return;
       onNotice(`signed in as ${user.email}`, 'ok');
-      await sync();
+      await sync({ full: true });
       const local = read(key(LOCAL, 'entries'), []).filter(valid);
       if (local.length) {
         onNotice(`${local.length} entr${local.length === 1 ? 'y was' : 'ies were'} logged in this browser while signed out. /import adds them to your account.`, 'dim');

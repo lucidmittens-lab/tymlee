@@ -521,6 +521,15 @@
     return sortEntries(Array.from(byId.values()));
   }
 
+  // Merge a partial download: `recent` holds every server entry with
+  // ts >= since, so it replaces that part of the local list; older local
+  // entries are kept as they are until the next full download.
+  function mergeRecent(local, recent, since) {
+    const byId = new Map(local.filter((e) => e.ts < since).map((e) => [e.id, e]));
+    for (const e of recent) byId.set(e.id, e);
+    return sortEntries(Array.from(byId.values()));
+  }
+
   // Add an operation to the queue, dropping work that no longer matters.
   // The first `locked` operations may already be on their way to the server
   // and are left untouched.
@@ -550,7 +559,7 @@
     parseInput, knownCategories, suggest, withSpans, summarize,
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
     parseRange, formatReport, toCSV,
-    uuid, sortEntries, applyOps, enqueue, nextBatch,
+    uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
     OFF, isOff,
     parseBackup, mergeBackup,

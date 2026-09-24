@@ -252,7 +252,7 @@
       about: 'send and fetch changes now',
       async run() {
         if (!store.user) return print('not signed in; /login <email> to sync', 'err');
-        await store.sync();
+        await store.sync({ full: true });
         if (store.status === 'synced') print(`synced · ${store.entries.length} entries`, 'ok');
         else print(`sync failed: ${store.lastError || store.status}`, 'err');
       },

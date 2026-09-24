@@ -95,7 +95,8 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 
 - Every change is saved in the browser immediately and queued.
 - The queue is sent to Supabase whenever you're signed in and online.
-- The account's entries are pulled back when you run `/sync`, when you switch back to the tab, and every minute.
+- The account's entries are fetched again every minute, when you switch back to the tab, and when you reconnect. These routine checks only download the last two weeks of entries, so they stay small however long the log gets.
+- The whole log is downloaded when the page loads, when you sign in, when you run `/sync`, and at least every six hours. An edit to an older entry made on another device appears then.
 - The status bar shows `synced`, `waiting to sync (n)`, `offline` or `not synced`. `/whoami` shows the last error.
 - Signing out removes that account's entries from the browser. `/logout` refuses while changes are still unsent, unless you use `/logout force`.
 

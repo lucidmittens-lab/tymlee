@@ -352,3 +352,25 @@ test('mergeBackup skips entries already in the log', () => {
   assert.deepEqual(strip(fresh), strip(BACKUP_LOG.slice(2)));
   assert.ok(fresh.every((e) => typeof e.id === 'string'));
 });
+
+// ---- partial sync ------------------------------------------------------------
+
+test('mergeRecent replaces only the recent part of the log', () => {
+  const local = [
+    { id: 'old', ts: 10, text: 'old' },
+    { id: 'gone', ts: 100, text: 'deleted on another device' },
+    { id: 'kept', ts: 110, text: 'kept' },
+  ];
+  const recent = [
+    { id: 'kept', ts: 110, text: 'kept, edited elsewhere' },
+    { id: 'new', ts: 120, text: 'added elsewhere' },
+    { id: 'old', ts: 130, text: 'old entry moved into the window' },
+  ];
+  assert.deepEqual(T.mergeRecent(local, recent, 100), [
+    { id: 'kept', ts: 110, text: 'kept, edited elsewhere' },
+    { id: 'new', ts: 120, text: 'added elsewhere' },
+    { id: 'old', ts: 130, text: 'old entry moved into the window' },
+  ]);
+  // Entries before the window are left alone.
+  assert.deepEqual(T.mergeRecent(local, [], 50), [{ id: 'old', ts: 10, text: 'old' }]);
+});

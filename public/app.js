@@ -295,7 +295,7 @@
         const state = store.pending ? `${store.pending} change(s) waiting to sync` : 'all changes synced';
         const err = store.lastError ? `\nlast error: ${store.lastError}` : '';
         const crypt = {
-          ready: 'encrypted: this device has the key',
+          ready: store.timesSealed ? 'encrypted (text and times): this device has the key' : 'encrypted (text): this device has the key',
           locked: "encrypted: this device doesn't have the key yet (/link or /recover)",
           plain: 'not encrypted: the server is not set up for it yet',
           none: 'not encrypted: type /encrypt to turn it on',

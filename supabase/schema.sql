@@ -70,3 +70,26 @@ create policy "keyring: update own" on public.keyring
 
 revoke all on public.keyring from anon;
 grant select, insert, update on public.keyring to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Change tracking (added later; safe to run on an existing project).
+-- The database stamps every insert and update with modified_at, and deleted
+-- entries leave a marker (deleted = true, no content) instead of vanishing.
+-- Devices then ask only for rows changed since their last check, which also
+-- lets encrypted entries keep their start time inside the encryption.
+
+alter table public.entries add column if not exists modified_at timestamptz not null default now();
+alter table public.entries add column if not exists deleted boolean not null default false;
+create index if not exists entries_user_modified_idx on public.entries (user_id, modified_at);
+
+create or replace function public.entries_touch() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.modified_at := clock_timestamp();
+  return new;
+end;
+$$;
+
+drop trigger if exists entries_touch on public.entries;
+create trigger entries_touch before insert or update on public.entries
+  for each row execute function public.entries_touch();

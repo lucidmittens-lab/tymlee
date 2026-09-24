@@ -38,3 +38,14 @@ test('entry text round-trips and is bound to its entry id', async () => {
   assert.ok(!V.isEncrypted('dev plain text'));
   assert.ok(!V.isEncrypted('/off'));
 });
+
+test('sealed entries hide the time as well as the text', async () => {
+  const key = await V.importMasterKey(V.newMasterKey());
+  const ts = Date.UTC(2026, 8, 24, 9, 45);
+  const stored = await V.sealEntry(key, 'id-1', { ts, text: 'mtg standup' });
+  assert.ok(V.isSealed(stored) && !V.isEncrypted(stored));
+  assert.ok(!stored.includes('standup') && !stored.includes(String(ts)));
+  assert.deepEqual(await V.openEntry(key, 'id-1', stored), { ts, text: 'mtg standup' });
+  await assert.rejects(V.openEntry(key, 'id-2', stored));
+  assert.ok(!V.isSealed('/e1/abc') && !V.isSealed('/off'));
+});

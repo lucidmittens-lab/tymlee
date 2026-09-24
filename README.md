@@ -99,14 +99,15 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 
 - Every change is saved in the browser immediately and queued.
 - The queue is sent to Supabase whenever you're signed in and online.
-- The account's entries are fetched again every minute, when you switch back to the tab, and when you reconnect. These routine checks only download the last two weeks of entries, so they stay small however long the log gets.
-- The whole log is downloaded when the page loads, when you sign in, when you run `/sync`, and at least every six hours. An edit to an older entry made on another device appears then.
+- The account is checked again every minute, when you switch back to the tab, and when you reconnect. These routine checks only download entries that changed since the last check. The database stamps each change itself, and deleted entries leave an empty marker, so deletions reach your other devices too.
+- The whole log is downloaded when the page loads, when you sign in, when you run `/sync`, and at least every six hours.
+- On a server that hasn't run the latest `supabase/schema.sql`, routine checks instead download the last two weeks of entries, and only entry text is encrypted.
 - The status bar shows `synced`, `waiting to sync (n)`, `offline` or `not synced`. `/whoami` shows the last error.
 - Signing out removes that account's entries from the browser. `/logout` refuses while changes are still unsent, unless you use `/logout force`.
 
 ## Encryption
 
-When you're signed in, entry text is encrypted in your browser before it's uploaded, so the database only holds ciphertext. That includes whoever runs the Supabase project. Entry times, the number of entries and your email address are not encrypted.
+When you're signed in, each entry's text and start time are encrypted together in your browser before upload, so the database only holds ciphertext. That includes whoever runs the Supabase project. The server still sees your email address, how many entries you have, and when your devices upload or change them. For live logging, upload time is roughly when you clock in.
 
 - **Turning it on:** after signing in, tymlee says if your log isn't encrypted yet. Type `/encrypt` to turn it on. Until then, syncing works without encryption.
 - **One master key per account.** `/encrypt` creates it, shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`), and re-uploads your existing entries encrypted. Save the recovery key somewhere safe. Nobody can recover it for you.
@@ -117,7 +118,7 @@ When you're signed in, entry text is encrypted in your browser before it's uploa
 - **Losing every device and the recovery key** means the log can't be decrypted by anyone.
 - **`/export`, `/log` and `/restore`** work on the decrypted copy in your browser, so exports are plain text.
 
-The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
+The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. Stored entries start with `/e2/` (time and text sealed together; the `ts` column is 0) or, on older servers, `/e1/` (text only). The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
 
 While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption, and `/encrypt` explains that the server needs the script.
 

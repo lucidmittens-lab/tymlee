@@ -149,10 +149,34 @@
       onChange();
     }
 
+    // ---- server format --------------------------------------------------------
+    // Servers set up with the latest supabase/schema.sql ("v2") record when
+    // each row last changed and keep a marker for deleted entries. That lets
+    // routine checks ask only for what changed, and lets encrypted entries
+    // hide their start time too. Older servers ("v1") are still supported.
+
+    let serverVersion = null; // null (not checked yet), 1 or 2
+    let changedCursor = null; // latest modified_at seen (ms), v2 only
+    const CURSOR_MARGIN_MS = 2 * 60000; // re-read a little overlap, in case of slow writes
+    const V2_COLUMNS = 'id,ts,text,modified_at,deleted';
+
+    function missingColumn(error) {
+      return error.code === '42703' || error.code === 'PGRST204' ||
+        /column .*does not exist|could not find the .* column/i.test(error.message || '');
+    }
+
+    async function detectServer() {
+      if (serverVersion) return;
+      const { error } = await client.from('entries').select(V2_COLUMNS).order('id', { ascending: true }).range(0, 0);
+      if (error && !missingColumn(error)) throw error;
+      serverVersion = error ? 1 : 2;
+    }
+
     // Send queued changes, in order, in batches.
     async function flush() {
       if (!user || !client) return;
       if (!(await vaultOpen())) return;
+      await detectServer();
       const who = owner;
       let batch;
       while (owner === who && (batch = T.nextBatch(queue, 500))) {
@@ -160,10 +184,16 @@
         inFlight = batch.ops.length;
         try {
           const table = client.from('entries');
-          const { error } = batch.kind === 'put'
-            ? await table.upsert(await Promise.all(batch.ops.map((q) => sealRow(q.entry, who))))
-            : await table.delete().in('id', batch.ops.map((q) => q.id));
-          if (error) throw error;
+          let result;
+          if (batch.kind === 'put') {
+            result = await table.upsert(await Promise.all(batch.ops.map((q) => sealRow(q.entry, who))));
+          } else if (serverVersion === 2) {
+            // Leave a marker so other devices' routine checks see the deletion.
+            result = await table.upsert(batch.ops.map((q) => ({ id: q.id, user_id: who, ts: 0, text: '/deleted', deleted: true })));
+          } else {
+            result = await table.delete().in('id', batch.ops.map((q) => q.id));
+          }
+          if (result.error) throw result.error;
         } finally {
           inFlight = 0;
         }
@@ -174,65 +204,105 @@
       settle();
     }
 
-    // The row to upload for an entry: its text encrypted when this device
-    // holds the account's key.
+    // The row to upload for an entry. With the account's key, the text (and
+    // on v2 servers the start time too) is encrypted.
     async function sealRow(entry, who) {
-      const text = vault.mode === 'ready' ? await V.encryptText(vault.key, entry.id, entry.text) : entry.text;
-      return { id: entry.id, ts: entry.ts, text, user_id: who };
+      const row = { id: entry.id, user_id: who, ts: entry.ts, text: entry.text };
+      if (vault.mode === 'ready' && serverVersion === 2) {
+        row.ts = 0;
+        row.text = await V.sealEntry(vault.key, entry.id, entry);
+      } else if (vault.mode === 'ready') {
+        row.text = await V.encryptText(vault.key, entry.id, entry.text);
+      }
+      if (serverVersion === 2) row.deleted = false;
+      return row;
     }
 
-    // Download the account's entries (all of them, or only those since
-    // `since`), then re-apply unsent changes on top.
-    async function pull(since) {
+    // Read one downloaded row: { id, deleted } for a deletion marker,
+    // { entry, reseal } for an entry, or null when it can't be read here.
+    // `reseal` means it should be uploaded again in the current format.
+    async function openRow(r, seen) {
+      if (r.deleted) return { id: r.id, deleted: true };
+      let ts = Number(r.ts);
+      let text = r.text;
+      let reseal = false;
+      const encrypted = V.isSealed(text) || V.isEncrypted(text);
+      if (encrypted && vault.mode !== 'ready') {
+        seen.encrypted = true;
+        return null;
+      }
+      try {
+        if (V.isEncrypted(text)) {
+          text = await V.decryptText(vault.key, r.id, text);
+          reseal = serverVersion === 2;
+        }
+        // A sealed entry, possibly wrapped again by a tab still running an
+        // older version: unwrap it, and fix the stored copy.
+        if (V.isSealed(text)) {
+          if (text !== r.text) reseal = true;
+          ({ ts, text } = await V.openEntry(vault.key, r.id, text));
+        }
+      } catch (_) {
+        seen.unreadable++;
+        return null;
+      }
+      if (!encrypted && vault.mode === 'ready') reseal = true;
+      return { entry: { id: r.id, ts, text }, reseal };
+    }
+
+    // Download changes and merge them with the local log, then re-apply unsent
+    // changes on top. `full` downloads everything; otherwise only rows changed
+    // since the last check (v2) or from the last two weeks (v1).
+    async function pull(full) {
       if (!user || !client) return;
       if (!(await vaultOpen())) return;
+      await detectServer();
       const who = owner;
-      const rows = [];
-      const plain = []; // uploaded before encryption was on; re-sent encrypted
-      let unreadable = 0;
-      let sawEncrypted = false;
+      const v2 = serverVersion === 2;
+      const incremental = !full && v2 && changedCursor != null;
+      const since = !full && !v2 ? Date.now() - RECENT_MS : null;
+      const opened = [];
+      const seen = { encrypted: false, unreadable: 0 };
+      let newest = changedCursor;
       const page = 1000;
       for (let from = 0; ; from += page) {
-        let query = client.from('entries').select('id,ts,text');
+        let query = client.from('entries').select(v2 ? V2_COLUMNS : 'id,ts,text');
+        if (incremental) query = query.gte('modified_at', new Date(changedCursor - CURSOR_MARGIN_MS).toISOString());
         if (since != null) query = query.gte('ts', since);
-        const { data, error } = await query.order('ts', { ascending: true }).range(from, from + page - 1);
+        const order = incremental ? 'modified_at' : v2 ? 'id' : 'ts';
+        const { data, error } = await query.order(order, { ascending: true }).range(from, from + page - 1);
         if (error) throw error;
-        const opened = await Promise.all(data.map(async (r) => {
-          const e = { id: r.id, ts: Number(r.ts), text: r.text };
-          if (V.isEncrypted(r.text)) {
-            if (vault.mode !== 'ready') {
-              sawEncrypted = true;
-              return null;
-            }
-            try {
-              e.text = await V.decryptText(vault.key, r.id, r.text);
-            } catch (_) {
-              unreadable++;
-              return null;
-            }
-          } else if (vault.mode === 'ready') {
-            plain.push(e);
-          }
-          return e;
-        }));
-        rows.push(...opened.filter(Boolean));
+        for (const r of data) {
+          const at = r.modified_at ? Date.parse(r.modified_at) : NaN;
+          if (!Number.isNaN(at) && (newest == null || at > newest)) newest = at;
+        }
+        opened.push(...(await Promise.all(data.map((r) => openRow(r, seen)))).filter(Boolean));
         if (data.length < page) break;
       }
       if (owner !== who) return;
-      const base = since == null ? rows : T.mergeRecent(entries, rows, since);
-      // Encrypt anything that is still stored as plain text, unless a newer
-      // local change for it is already waiting to be sent.
-      const waiting = new Set(queue.map((q) => (q.op === 'put' ? q.entry.id : q.id)));
-      for (const e of plain) {
-        if (!waiting.has(e.id)) queue = T.enqueue(queue, { op: 'put', entry: e }, inFlight);
+
+      const found = opened.filter((o) => !o.deleted).map((o) => o.entry);
+      let base;
+      if (incremental) {
+        base = T.applyOps(entries, opened.map((o) => (o.deleted ? { op: 'del', id: o.id } : { op: 'put', entry: o.entry })));
+      } else if (since != null) {
+        base = T.mergeRecent(entries, found, since);
+      } else {
+        base = found;
       }
+      if (v2) changedCursor = newest;
+      // Upload again anything not yet stored in the current format, unless a
+      // newer local change for it is already waiting to be sent.
+      const waiting = new Set(queue.map((q) => (q.op === 'put' ? q.entry.id : q.id)));
+      const reseal = opened.filter((o) => o.reseal && !waiting.has(o.entry.id));
+      for (const o of reseal) queue = T.enqueue(queue, { op: 'put', entry: o.entry }, inFlight);
       entries = T.applyOps(base, queue);
       persist();
-      if (unreadable) onNotice(`${unreadable} entr${unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
-      if (plain.length) schedule(flush);
+      if (seen.unreadable) onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
+      if (reseal.length) schedule(flush);
       settle();
       // Another device has turned encryption on: find out and lock this one.
-      if (sawEncrypted && (vault.mode === 'none' || vault.mode === 'plain')) {
+      if (seen.encrypted && (vault.mode === 'none' || vault.mode === 'plain')) {
         vault = { mode: 'pending' };
         schedule(prepareVault);
       }
@@ -404,17 +474,14 @@
       return schedule(async () => {
         const now = Date.now();
         const fullNow = full || now - lastFullPull > FULL_EVERY_MS;
-        // Re-check servers without encryption support now and then, so it
-        // switches on after supabase/schema.sql has been run.
+        // Re-check older servers now and then, so new features switch on
+        // after supabase/schema.sql has been run.
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
+        if (fullNow && serverVersion === 1) serverVersion = null;
         await flush();
         if (vault.mode === 'locked') return;
-        if (fullNow) {
-          await pull();
-          lastFullPull = now;
-        } else {
-          await pull(now - RECENT_MS);
-        }
+        await pull(fullNow);
+        if (fullNow) lastFullPull = now;
       });
     }
 
@@ -439,6 +506,7 @@
       user = next ? { id: next.id, email: next.email } : null;
       vault = { mode: 'pending' };
       lastFullPull = 0;
+      changedCursor = null;
       loadOwner(user ? user.id : LOCAL);
       status = user ? 'syncing' : 'signed-out';
       onChange();
@@ -550,6 +618,7 @@
       unlockWith,
       newRecoveryKey,
       get encryption() { return vault.mode; },
+      get timesSealed() { return vault.mode === 'ready' && serverVersion === 2; },
       get entries() { return entries; },
       get user() { return user; },
       get pending() { return queue.length; },

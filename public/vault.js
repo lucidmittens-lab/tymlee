@@ -14,9 +14,12 @@
   const enc = new TextEncoder();
   const dec = new TextDecoder();
 
-  // Stored entry text that starts with this is ciphertext. Typed entries can
-  // never start with "/" (that is a command), so plain text can't clash.
+  // Stored entry text that starts with one of these is ciphertext. Typed
+  // entries can never start with "/" (that is a command), so plain text can't
+  // clash. /e1/ holds just the text; /e2/ ("sealed") holds the time and text
+  // together, so the server doesn't see when entries start either.
   const PREFIX = '/e1/';
+  const SEALED = '/e2/';
   const ITERATIONS = 300000;
 
   // Crockford base32: no I, L, O or U, so codes are easy to read and type.
@@ -107,19 +110,23 @@
     return typeof text === 'string' && text.startsWith(PREFIX);
   }
 
+  function isSealed(text) {
+    return typeof text === 'string' && text.startsWith(SEALED);
+  }
+
   // The entry id is bound in as additional data, so ciphertext can't be
   // moved from one entry to another without detection.
-  async function encryptText(key, id, text) {
+  async function encryptWith(prefix, key, id, plain) {
     const iv = randomBytes(12);
-    const data = await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(id) }, key, enc.encode(text));
+    const data = await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(id) }, key, enc.encode(plain));
     const out = new Uint8Array(12 + data.byteLength);
     out.set(iv);
     out.set(new Uint8Array(data), 12);
-    return PREFIX + toBase64(out);
+    return prefix + toBase64(out);
   }
 
-  async function decryptText(key, id, stored) {
-    const bytes = fromBase64(stored.slice(PREFIX.length));
+  async function decryptWith(prefix, key, id, stored) {
+    const bytes = fromBase64(stored.slice(prefix.length));
     const data = await subtle.decrypt(
       { name: 'AES-GCM', iv: bytes.slice(0, 12), additionalData: enc.encode(id) },
       key,
@@ -128,9 +135,24 @@
     return dec.decode(data);
   }
 
+  const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
+  const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
+
+  // Seal an entry's start time and text together.
+  function sealEntry(key, id, entry) {
+    return encryptWith(SEALED, key, id, JSON.stringify({ t: entry.ts, x: entry.text }));
+  }
+
+  async function openEntry(key, id, stored) {
+    const { t, x } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
+    return { ts: t, text: x };
+  }
+
   const api = {
     PREFIX, newRecoveryCode, newLinkCode, normalizeCode, looksLikeCode,
     newMasterKey, importMasterKey, wrap, unwrap, isEncrypted, encryptText, decryptText,
+    isSealed, sealEntry, openEntry,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TymleeVault = api;

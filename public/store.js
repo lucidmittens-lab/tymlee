@@ -1,12 +1,13 @@
-// Entry storage. Always works offline from localStorage; when Supabase is
+// Entry storage. Always works offline from local storage; when Supabase is
 // configured (config.js) and the user is signed in, changes are queued and
 // synced to their account, and the account's entries are pulled back down.
 // Entry text is encrypted before upload once the account has a key (vault.js).
-(function () {
+//
+// Runs in the browser and in the terminal app: everything that depends on
+// where it runs (storage, the Supabase client, online/visibility events,
+// timers) comes from an `env` object. browserEnv() is the browser's.
+(function (root) {
   'use strict';
-
-  const T = window.Tymlee;
-  const V = window.TymleeVault;
   const LEGACY_KEY = 'tymlee.entries.v1';
   const LOCAL = 'local'; // owner id for the signed-out, this-browser-only log
   const SUPABASE_SRC = 'vendor/supabase.js';
@@ -18,8 +19,46 @@
   const FULL_EVERY_MS = 6 * 3600000;
   const LINK_TTL_MS = 10 * 60000;
 
-  function createStore({ onChange, onNotice }) {
-    const config = window.TYMLEE_CONFIG || {};
+  function browserEnv() {
+    const w = root;
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = w.document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(`could not load ${src}`));
+        w.document.head.append(s);
+      });
+    }
+    return {
+      T: w.Tymlee,
+      V: w.TymleeVault,
+      config: w.TYMLEE_CONFIG || {},
+      place: 'this browser',
+      storage: w.localStorage,
+      async createClient(url, key, auth) {
+        if (!w.supabase) await loadScript(SUPABASE_SRC);
+        return w.supabase.createClient(url, key, { auth: { ...auth, detectSessionInUrl: true } });
+      },
+      isOnline: () => w.navigator.onLine !== false,
+      // Calls `on.online`, `on.offline`, `on.visible` and, every `ms` while
+      // the page is visible, `on.tick`.
+      watch(on, ms) {
+        w.addEventListener('online', on.online);
+        w.addEventListener('offline', on.offline);
+        w.document.addEventListener('visibilitychange', () => {
+          if (w.document.visibilityState === 'visible') on.visible();
+        });
+        setInterval(() => { if (w.document.visibilityState !== 'hidden') on.tick(); }, ms);
+      },
+      redirectUrl: () => w.location.origin + w.location.pathname,
+    };
+  }
+
+  function createStore({ onChange, onNotice, env: givenEnv }) {
+    const env = givenEnv || browserEnv();
+    const { T, V, storage } = env;
+    const config = env.config || {};
     const configured = Boolean(config.supabaseUrl && config.supabaseAnonKey);
 
     let client = null;
@@ -47,7 +86,7 @@
 
     function read(k, fallback) {
       try {
-        const v = JSON.parse(localStorage.getItem(k));
+        const v = JSON.parse(storage.getItem(k));
         return Array.isArray(v) ? v : fallback;
       } catch (_) {
         return fallback;
@@ -56,9 +95,9 @@
 
     function write(k, v) {
       try {
-        localStorage.setItem(k, JSON.stringify(v));
+        storage.setItem(k, JSON.stringify(v));
       } catch (_) {
-        onNotice('warning: could not save to browser storage', 'err');
+        onNotice(`warning: could not save to storage on ${env.place}`, 'err');
       }
     }
 
@@ -78,14 +117,14 @@
     }
 
     function clearOwner(who) {
-      localStorage.removeItem(key(who, 'entries'));
-      localStorage.removeItem(key(who, 'queue'));
-      localStorage.removeItem(key(who, 'key'));
+      storage.removeItem(key(who, 'entries'));
+      storage.removeItem(key(who, 'queue'));
+      storage.removeItem(key(who, 'key'));
     }
 
     // This device's copy of the account's master key.
     function localKey(who) {
-      try { return localStorage.getItem(key(who, 'key')) || ''; } catch (_) { return ''; }
+      try { return storage.getItem(key(who, 'key')) || ''; } catch (_) { return ''; }
     }
 
     // One-time move from the first version's storage format.
@@ -97,7 +136,7 @@
         .filter((e) => e && typeof e.ts === 'number' && typeof e.text === 'string')
         .map((e) => ({ id: T.uuid(), ts: e.ts, text: e.text }));
       write(key(LOCAL, 'entries'), T.sortEntries(existing.concat(moved)));
-      localStorage.removeItem(LEGACY_KEY);
+      storage.removeItem(LEGACY_KEY);
     }
 
     // ---- local changes -----------------------------------------------------
@@ -138,13 +177,13 @@
 
     function fail(err) {
       lastError = (err && err.message) || String(err);
-      status = navigator.onLine === false ? 'offline' : 'error';
+      status = env.isOnline() ? 'error' : 'offline';
       onChange();
     }
 
     function settle() {
       if (!user) return;
-      status = queue.length ? (navigator.onLine === false ? 'offline' : 'pending') : 'synced';
+      status = queue.length ? (env.isOnline() ? 'pending' : 'offline') : 'synced';
       lastError = '';
       onChange();
     }
@@ -319,7 +358,7 @@
     }
 
     async function unlock(raw) {
-      try { localStorage.setItem(key(owner, 'key'), raw); } catch (_) { /* this session only */ }
+      try { storage.setItem(key(owner, 'key'), raw); } catch (_) { /* this session only */ }
       vault = { mode: 'ready', raw, key: await V.importMasterKey(raw) };
     }
 
@@ -487,16 +526,6 @@
 
     // ---- auth --------------------------------------------------------------
 
-    function loadScript(src) {
-      return new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = src;
-        s.onload = resolve;
-        s.onerror = () => reject(new Error(`could not load ${src}`));
-        document.head.append(s);
-      });
-    }
-
     async function setUser(next) {
       const id = next ? next.id : null;
       if ((user && user.id) === id) {
@@ -515,7 +544,7 @@
       await sync({ full: true });
       const local = read(key(LOCAL, 'entries'), []).filter(valid);
       if (local.length) {
-        onNotice(`${local.length} entr${local.length === 1 ? 'y was' : 'ies were'} logged in this browser while signed out. /import adds them to your account.`, 'dim');
+        onNotice(`${local.length} entr${local.length === 1 ? 'y was' : 'ies were'} logged on ${env.place} while signed out. /import adds them to your account.`, 'dim');
       }
     }
 
@@ -524,11 +553,10 @@
       loadOwner(LOCAL);
       if (!configured) return;
       try {
-        if (!window.supabase) await loadScript(SUPABASE_SRC);
         // Accept the project URL with or without the Data API path on the end.
         const url = config.supabaseUrl.trim().replace(/\/(rest|auth)\/v1\/?$/, '').replace(/\/+$/, '');
-        client = window.supabase.createClient(url, config.supabaseAnonKey.trim(), {
-          auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'tymlee.auth' },
+        client = await env.createClient(url, config.supabaseAnonKey.trim(), {
+          persistSession: true, autoRefreshToken: true, storageKey: 'tymlee.auth',
         });
       } catch (err) {
         status = 'error';
@@ -544,16 +572,16 @@
       const session = data && data.session;
       if (session) await setUser(session.user);
 
-      window.addEventListener('online', () => sync());
-      window.addEventListener('offline', () => { if (user) { status = 'offline'; onChange(); } });
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') sync();
-      });
-      setInterval(() => { if (document.visibilityState !== 'hidden') sync(); }, PULL_EVERY_MS);
+      env.watch({
+        online: () => sync(),
+        offline: () => { if (user) { status = 'offline'; onChange(); } },
+        visible: () => sync(),
+        tick: () => sync(),
+      }, PULL_EVERY_MS);
     }
 
     function redirectUrl() {
-      return location.origin + location.pathname;
+      return env.redirectUrl();
     }
 
     async function login(email) {
@@ -626,9 +654,14 @@
       get lastError() { return lastError; },
       get configured() { return configured; },
       reloadFromStorage() { loadOwner(owner); onChange(); },
+      // Resolves once queued network work (sending changes, syncing) is done.
+      whenIdle() { return chain; },
+      get client() { return client; },
       storageKey() { return key(owner, 'entries'); },
     };
   }
 
-  window.TymleeStore = { createStore };
-})();
+  const api = { createStore };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.TymleeStore = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

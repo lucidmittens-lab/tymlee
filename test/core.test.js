@@ -374,3 +374,10 @@ test('mergeRecent replaces only the recent part of the log', () => {
   // Entries before the window are left alone.
   assert.deepEqual(T.mergeRecent(local, [], 50), [{ id: 'old', ts: 10, text: 'old' }]);
 });
+
+test('restore finds the csv header after comments and blank lines', () => {
+  const csv = '# pasted\n\n\n' + T.toCSV(BACKUP_LOG, ALL, NOW);
+  const r = T.parseBackup(csv);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.entries, strip(BACKUP_LOG));
+});

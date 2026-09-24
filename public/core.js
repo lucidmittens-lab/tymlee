@@ -428,8 +428,8 @@
   function parseBackup(text) {
     const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
     const content = lines.filter((l) => !l.trim().startsWith('#'));
-    const first = content.find((l) => l.trim());
-    if (first && first.trim() === CSV_HEADER) return backupFromCSV(content.join('\n'));
+    const start = content.findIndex((l) => l.trim());
+    if (start !== -1 && content[start].trim() === CSV_HEADER) return backupFromCSV(content.slice(start).join('\n'));
 
     const entries = [];
     const errors = [];

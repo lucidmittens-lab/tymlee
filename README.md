@@ -122,6 +122,41 @@ The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-
 
 While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption, and `/encrypt` explains that the server needs the script.
 
+## Terminal app
+
+The same tymlee as a shell in your terminal: the same commands, account, sync and encryption as the website.
+
+```
+$ tymlee
+tymlee · type what you are starting and press Enter · /help for commands
+> dev fixing the login bug
+09:45  out mtg (0:15)  in #12 dev fixing the login bug
+>
+▶ 0:00:04  dev fixing the login bug        today 3:40 · since 09:45        synced
+```
+
+**Install.** You need Node.js 20 or newer.
+
+```
+git clone https://github.com/lucidmittens-lab/tymlee.git
+cd tymlee/cli
+npm install
+npm install -g .        # adds the `tymlee` command
+```
+
+To update later, run `git pull` in the repository. The installed command follows the checkout.
+
+**Differences from the website:**
+- **Signing in:** `/login you@example.com`, then `/code 123456` from the email. The emailed link only works in a browser.
+- **Encryption:** set the terminal up like any other device, with `/link` on a device that's already set up and then `/link <code>` in the terminal, or with `/recover <key>`.
+- **`/edit` and `/restore`** open your `$VISUAL` / `$EDITOR`. Save and close to apply; empty the file to cancel. If a line has a problem, you're offered the editor again.
+- **`/restore <file>`** reads a backup file. `/export` saves into the current folder, and `/copy` uses `pbcopy`, `clip`, `wl-copy` or `xclip`.
+- **Keys:** Tab completes a category or command (press it twice to list the options), Up and Down recall earlier inputs, Ctrl+L clears the screen, and Ctrl+D or `/exit` quits.
+- **One line at a time:** `tymlee <entry or /command>` runs one line and exits, for example `tymlee /log week` or `tymlee dev code review`.
+- **Your data:** the log, sign-in and this computer's key are kept in `~/.config/tymlee` (`%APPDATA%\tymlee` on Windows), readable only by you. `/logout` removes them.
+
+The terminal app shares `public/core.js`, `vault.js`, `store.js` and `commands.js` with the website; `cli/` only adds the terminal parts.
+
 ## Deploy
 
 There is no build step. The website is the static files in `public/`, and `public/vendor/supabase.js` (supabase-js 2.117.1, MIT) is loaded only when sync is configured.

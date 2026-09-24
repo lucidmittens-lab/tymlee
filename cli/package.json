@@ -1,0 +1,12 @@
+{
+  "name": "tymlee",
+  "version": "0.1.0",
+  "private": true,
+  "description": "tymlee in your terminal: a text-only time tracker shell that syncs with tymlee.date.",
+  "bin": { "tymlee": "tymlee.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.1"
+  },
+  "license": "MIT"
+}

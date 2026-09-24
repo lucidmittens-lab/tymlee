@@ -79,12 +79,18 @@
 
     // ---- local changes -----------------------------------------------------
 
-    function change(op) {
-      queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
-      entries = T.applyOps(entries, [op]);
+    // Apply local changes, save them, and queue them for the server.
+    function apply(ops) {
+      if (!ops.length) return;
+      for (const op of ops) queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
+      entries = T.applyOps(entries, ops);
       persist();
       onChange();
       if (user) schedule(flush);
+    }
+
+    function change(op) {
+      apply([op]);
     }
 
     function add(text) {
@@ -293,6 +299,7 @@
       init,
       add,
       remove,
+      apply,
       sync,
       login,
       verify,

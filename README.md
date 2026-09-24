@@ -35,6 +35,9 @@ Thu 2026-09-24
 | `/log [range]` | print the formatted readout (alias `/ls`) |
 | `/undo` | remove the last entry (**Ctrl/Cmd+Z** on an empty line does the same) |
 | `/rm <#>` | delete an entry by its number; its time goes to the entry before it |
+| `/edit [range]` | edit entries as text; defaults to the last 24 hours |
+| `/save` | apply the changes from `/edit` (**Ctrl/Cmd+Enter** in the editor) |
+| `/cancel` | discard the changes from `/edit` |
 | `/export [range] [csv]` | download the readout as `.txt`, or the raw rows as `.csv` |
 | `/copy [range]` | copy the readout to the clipboard |
 | `/clear` | clear the screen; the log is kept (**Ctrl+L**) |
@@ -49,6 +52,27 @@ Thu 2026-09-24
 Ranges: `today` (the default), `yesterday`, `week` (the last 7 days), `month` (the last 30 days), `all`, `Nd` (the last N days), `YYYY-MM-DD`, or `YYYY-MM-DD..YYYY-MM-DD`.
 
 The `.txt` export is exactly what `/log` prints. It groups entries by the day they started, gives each day a per-category summary, and adds an overall summary when the range covers more than one day. An entry counts toward the day it started on. The CSV has one row per entry: `n,start,end,minutes,category,note`, with ISO 8601 UTC timestamps.
+
+## Editing
+
+`/edit` opens the last 24 hours (or any range, such as `/edit yesterday`) as text:
+
+```
+# change a time or text
+# delete a line to remove it
+# new line: 14:30 dev review
+Thu 2026-09-24
+  3  09:00  dev fixing login bug
+  4  09:45  mtg standup
+  5  10:00  dev code review
+```
+
+- Change the time or text on a line to update that entry.
+- Delete a line to remove the entry.
+- Add a line without a number, such as `09:30 email inbox`, to insert an entry. It goes on the day of the header above it.
+- The number at the start of a line links it to its entry, so don't change it.
+
+`/save` applies everything at once. If any line has a problem, such as a bad time, a time in the future, or an unknown number, nothing is saved and the problems are listed so you can fix them and `/save` again. `/cancel` leaves the log untouched.
 
 ## Storage and sync
 

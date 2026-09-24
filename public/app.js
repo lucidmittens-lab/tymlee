@@ -117,6 +117,7 @@
           '        Up / Down     previous inputs',
           '        Ctrl+Z        undo (on an empty line)',
           '        Ctrl+L        clear the screen',
+          '        Ctrl+Enter    save (while editing)',
         ].join('\n'), 'report dim');
       },
     },
@@ -249,10 +250,48 @@
         print(n ? `imported ${n} entr${n === 1 ? 'y' : 'ies'}` : 'nothing to import', 'ok');
       },
     },
+    edit: {
+      usage: '/edit [range]',
+      about: 'edit entries as text (default: the last 24 hours)',
+      run(args) {
+        if (editor) return print('already editing; /save or /cancel first', 'err');
+        const now = Date.now();
+        const range = args.length ? rangeFrom(args) : { from: now - 86400000, to: Infinity, label: 'last 24 hours' };
+        if (range) openEditor(range);
+      },
+    },
+    save: {
+      usage: '/save',
+      about: 'apply the changes made in /edit (Ctrl+Enter)',
+      run() {
+        if (!editor) return print('nothing to save; start with /edit', 'err');
+        const result = T.parseEditable(editor.el.value, editor.items, Date.now());
+        if (result.errors.length) {
+          print([...result.errors, 'nothing was saved; fix the lines above and /save again'].join('\n'), 'err');
+          return;
+        }
+        store.apply(result.ops);
+        closeEditor();
+        const parts = [];
+        if (result.changed) parts.push(`${result.changed} changed`);
+        if (result.added) parts.push(`${result.added} added`);
+        if (result.removed) parts.push(`${result.removed} removed`);
+        print(parts.length ? `saved: ${parts.join(', ')}` : 'no changes', 'ok');
+      },
+    },
+    cancel: {
+      usage: '/cancel',
+      about: 'discard the changes made in /edit',
+      run() {
+        if (!editor) return print('nothing to cancel', 'err');
+        closeEditor();
+        print('edit discarded; nothing was changed', 'ok');
+      },
+    },
     clear: {
       usage: '/clear',
       about: 'clear the screen (the log is kept)',
-      run() { out.replaceChildren(); },
+      run() { clearScreen(); },
     },
   };
   const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
@@ -287,6 +326,61 @@
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function clearScreen() {
+    out.replaceChildren();
+    if (editor) out.append(editor.el); // keep an open editor
+  }
+
+  // ---- editor (/edit) ------------------------------------------------------
+
+  // The open editor: its textarea and the entries it was opened with.
+  let editor = null;
+
+  function fitEditor(el) {
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }
+
+  function openEditor(range) {
+    const { text, items } = T.formatEditable(store.entries, range, Date.now());
+    const el = document.createElement('textarea');
+    el.className = 'editor';
+    el.value = text;
+    el.spellcheck = false;
+    el.wrap = 'off';
+    el.setAttribute('autocapitalize', 'off');
+    el.setAttribute('autocorrect', 'off');
+    el.setAttribute('aria-label', `Edit entries (${range.label})`);
+    el.addEventListener('input', () => fitEditor(el));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        submit('/save');
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+    print(`editing ${range.label} (${items.length} entr${items.length === 1 ? 'y' : 'ies'}) · /save to apply, /cancel to discard`, 'dim');
+    out.append(el);
+    editor = { el, items };
+    fitEditor(el);
+    input.placeholder = 'editing · /save or /cancel';
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
+
+  // Leave the edited text on screen as a read-only record.
+  function closeEditor() {
+    const pre = document.createElement('pre');
+    pre.className = 'report dim';
+    pre.textContent = editor.el.value.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n').trimEnd();
+    editor.el.replaceWith(pre);
+    editor = null;
+    input.placeholder = '';
+    input.focus();
   }
 
   // ---- input: completion ---------------------------------------------------
@@ -398,7 +492,7 @@
       submit('/undo');
     } else if (e.ctrlKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
-      out.replaceChildren();
+      clearScreen();
     }
   });
 
@@ -425,7 +519,8 @@
   // Clicking the scrollback focuses the prompt, unless selecting text. Not on
   // touch screens, where a tap to scroll would pop up the keyboard.
   const finePointer = window.matchMedia('(pointer: fine)');
-  scrollEl.addEventListener('click', () => {
+  scrollEl.addEventListener('click', (e) => {
+    if (e.target.closest('.editor')) return;
     if (finePointer.matches && !String(window.getSelection())) input.focus();
   });
   $('dock').addEventListener('click', (e) => {

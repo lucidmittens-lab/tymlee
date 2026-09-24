@@ -173,3 +173,87 @@ test('compact report drops the end column', () => {
     '  total       1:12',
   ].join('\n'));
 });
+
+// ---- editing ---------------------------------------------------------------
+
+const EDIT_LOG = [
+  { id: 'a', ts: at('2026-09-23T17:30:00Z'), text: 'off' },
+  { id: 'b', ts: at('2026-09-24T09:00:05Z'), text: 'dev fixing login bug' },
+  { id: 'c', ts: at('2026-09-24T09:45:00Z'), text: 'mtg standup' },
+  { id: 'd', ts: at('2026-09-24T10:00:00Z'), text: 'dev code review' },
+];
+const last24h = { from: NOW - 86400000, to: Infinity, label: '24h' };
+
+test('formatEditable lists entries under day headers', () => {
+  const { text, items } = T.formatEditable(EDIT_LOG, last24h, NOW);
+  assert.deepEqual(items.map((i) => i.n), [1, 2, 3, 4]);
+  assert.equal(text.split('\n').filter((l) => !l.startsWith('#')).join('\n'), [
+    'Wed 2026-09-23',
+    '  1  17:30  off',
+    'Thu 2026-09-24',
+    '  2  09:00  dev fixing login bug',
+    '  3  09:45  mtg standup',
+    '  4  10:00  dev code review',
+    '',
+  ].join('\n'));
+});
+
+test('parseEditable: unchanged text produces no operations', () => {
+  const { text, items } = T.formatEditable(EDIT_LOG, last24h, NOW);
+  const r = T.parseEditable(text, items, NOW);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.ops, []);
+});
+
+test('parseEditable: edit text and time, delete, and add', () => {
+  const { items } = T.formatEditable(EDIT_LOG, last24h, NOW);
+  const edited = [
+    'Wed 2026-09-23',
+    '  1  17:30  off',
+    'Thu 2026-09-24',
+    '  2  09:00  dev   fixing the login bug',
+    '  4  09:55  dev code review',
+    '09:30 email inbox',
+  ].join('\n');
+  const r = T.parseEditable(edited, items, NOW);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual([r.changed, r.added, r.removed], [2, 1, 1]);
+  // Unchanged time keeps its seconds; the text is normalized.
+  assert.deepEqual(r.ops[0], { op: 'put', entry: { id: 'b', ts: at('2026-09-24T09:00:05Z'), text: 'dev fixing the login bug' } });
+  assert.deepEqual(r.ops[1], { op: 'put', entry: { id: 'd', ts: at('2026-09-24T09:55:00Z'), text: 'dev code review' } });
+  assert.equal(r.ops[2].op, 'put');
+  assert.equal(r.ops[2].entry.ts, at('2026-09-24T09:30:00Z'));
+  assert.equal(r.ops[2].entry.text, 'email inbox');
+  assert.deepEqual(r.ops[3], { op: 'del', id: 'c' });
+  // Applying the ops gives the expected log.
+  assert.deepEqual(T.applyOps(EDIT_LOG, r.ops).map((e) => e.text), [
+    'off', 'dev fixing the login bug', 'email inbox', 'dev code review',
+  ]);
+});
+
+test('parseEditable: reports errors and makes no changes', () => {
+  const { items } = T.formatEditable(EDIT_LOG, last24h, NOW);
+  const r = T.parseEditable([
+    'Thu 2026-09-24',
+    '  2  09:00  dev a',
+    '  2  09:10  dev b',
+    '  9  09:20  dev c',
+    '  3  25:00  mtg',
+    '  4  10:30  dev later than now',
+    'just some words',
+    'Mon 2026-02-30',
+  ].join('\n'), items, NOW);
+  assert.deepEqual(r.ops, []);
+  assert.deepEqual(r.errors.map((e) => e.split(':')[0]), ['line 3', 'line 4', 'line 5', 'line 6', 'line 7', 'line 8']);
+  assert.match(r.errors[0], /more than once/);
+  assert.match(r.errors[1], /no entry #9/);
+  assert.match(r.errors[2], /not a valid time/);
+  assert.match(r.errors[3], /in the future/);
+  assert.match(r.errors[4], /expected "HH:MM text"/);
+  assert.match(r.errors[5], /not a real date/);
+});
+
+test('parseEditable: new lines before any header use today', () => {
+  const r = T.parseEditable('08:15 gym', [], NOW);
+  assert.equal(r.ops[0].entry.ts, at('2026-09-24T08:15:00Z'));
+});

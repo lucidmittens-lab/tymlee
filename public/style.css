@@ -87,6 +87,25 @@ body {
 #out .dim { color: var(--muted); }
 #out .report { margin: 4px 0; white-space: pre; overflow-x: auto; }
 
+/* /edit: a plain-text editor inside the scrollback. */
+#out .editor {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  caret-color: var(--accent);
+}
+
 #prompt {
   display: flex;
   gap: 1ch;
@@ -152,7 +171,7 @@ body {
 /* Touch screens: 16px text in the input stops iOS from zooming in on focus,
    and completions get larger tap targets. */
 @media (pointer: coarse) {
-  #prompt { font-size: 16px; }
+  #prompt, #out .editor { font-size: 16px; }
   #matches { font-size: 15px; }
   #matches span { display: inline-block; padding: 6px 0; margin-right: 3ch; }
 }

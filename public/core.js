@@ -219,6 +219,125 @@
     return rows.map((r) => r.map(csvField).join(',')).join('\n') + '\n';
   }
 
+  // ---- editing -------------------------------------------------------------
+  // /edit shows entries as editable text, one per line, under day headers:
+  //
+  //   Thu 2026-09-24
+  //     13  09:00  dev fixing login bug
+  //
+  // The leading number ties a line back to its entry. Lines without one are
+  // new entries. Lines starting with # are comments.
+
+  const EDIT_HELP = [
+    '# change a time or text',
+    '# delete a line to remove it',
+    '# new line: 14:30 dev review',
+  ];
+
+  // Returns the text to edit and the entries it covers.
+  function formatEditable(entries, range, now) {
+    const items = withSpans(entries, now)
+      .filter((s) => s.ts >= range.from && s.ts < range.to)
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text }));
+    const lines = EDIT_HELP.slice();
+    const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
+    let day = '';
+    for (const it of items) {
+      const d = ymd(it.ts);
+      if (d !== day) {
+        day = d;
+        lines.push(`${DAY_NAMES[new Date(it.ts).getDay()]} ${d}`);
+      }
+      lines.push(`  ${String(it.n).padStart(numWidth)}  ${hhmm(it.ts)}  ${it.text}`);
+    }
+    if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
+    return { text: lines.join('\n') + '\n', items };
+  }
+
+  // Turn edited text back into operations against the original entries.
+  // Returns { ops, errors, changed, added, removed }; ops is empty on error.
+  function parseEditable(text, items, now) {
+    const byN = new Map(items.map((it) => [it.n, it]));
+    const seen = new Set();
+    const errors = [];
+    const ops = [];
+    let changed = 0;
+    let added = 0;
+    let day = startOfDay(now);
+
+    String(text).split('\n').forEach((raw, i) => {
+      const line = raw.trim();
+      const where = `line ${i + 1}`;
+      if (!line || line.startsWith('#')) return;
+
+      const header = line.match(/^(?:[A-Za-z]{3}\s+)?(\d{4})-(\d{2})-(\d{2})$/);
+      if (header) {
+        const d = new Date(+header[1], +header[2] - 1, +header[3]);
+        if (d.getMonth() !== +header[2] - 1) errors.push(`${where}: "${line}" is not a real date`);
+        else day = d.getTime();
+        return;
+      }
+
+      const m = line.match(/^(?:(\d+)\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      if (!m) {
+        errors.push(`${where}: expected "HH:MM text", e.g. "14:30 dev code review"`);
+        return;
+      }
+      const h = +m[2];
+      const min = +m[3];
+      if (h > 23 || min > 59) {
+        errors.push(`${where}: ${m[2]}:${m[3]} is not a valid time`);
+        return;
+      }
+      const { category, note } = parseInput(m[4]);
+      const entryText = note ? `${category} ${note}` : category;
+      const at = new Date(day);
+      at.setHours(h, min, 0, 0);
+      let ts = at.getTime();
+
+      if (m[1] != null) {
+        const n = +m[1];
+        const it = byN.get(n);
+        if (!it) {
+          errors.push(`${where}: there is no entry #${n} in this list (remove the number to add a new entry)`);
+          return;
+        }
+        if (seen.has(n)) {
+          errors.push(`${where}: entry #${n} appears more than once`);
+          return;
+        }
+        seen.add(n);
+        // An unchanged time keeps its original seconds.
+        if (ymd(it.ts) === ymd(ts) && hhmm(it.ts) === hhmm(ts)) ts = it.ts;
+        if (ts > now) {
+          errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
+          return;
+        }
+        if (ts !== it.ts || entryText !== it.text) {
+          ops.push({ op: 'put', entry: { id: it.id, ts, text: entryText } });
+          changed++;
+        }
+      } else {
+        if (ts > now) {
+          errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
+          return;
+        }
+        ops.push({ op: 'put', entry: { id: uuid(), ts, text: entryText } });
+        added++;
+      }
+    });
+
+    let removed = 0;
+    for (const it of items) {
+      if (!seen.has(it.n)) {
+        ops.push({ op: 'del', id: it.id });
+        removed++;
+      }
+    }
+    if (errors.length) return { ops: [], errors, changed: 0, added: 0, removed: 0 };
+    return { ops, errors, changed, added, removed };
+  }
+
   // ---- sync ----------------------------------------------------------------
   // Entries are { id, ts, text }. Local changes are recorded as a queue of
   // operations that are replayed against the server:
@@ -281,6 +400,7 @@
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, enqueue, nextBatch,
+    formatEditable, parseEditable,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tymlee = api;

@@ -118,3 +118,44 @@ test('csv export quotes fields and leaves the running end blank', () => {
   assert.equal(lines[1], '3,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug');
   assert.equal(lines[4], '6,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap"""');
 });
+
+// ---- sync ------------------------------------------------------------------
+
+const put = (id, ts, text) => ({ op: 'put', entry: { id, ts, text: text || id } });
+const del = (id) => ({ op: 'del', id });
+
+test('uuid looks like a v4 uuid and is unique', () => {
+  const a = T.uuid();
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(a, T.uuid());
+});
+
+test('applyOps puts, replaces and deletes, keeping ts order', () => {
+  const remote = [{ id: 'a', ts: 1, text: 'a' }, { id: 'c', ts: 3, text: 'c' }];
+  const out = T.applyOps(remote, [put('b', 2), del('a'), put('c', 3, 'c2')]);
+  assert.deepEqual(out, [{ id: 'b', ts: 2, text: 'b' }, { id: 'c', ts: 3, text: 'c2' }]);
+});
+
+test('enqueue: deleting an unsent entry cancels both operations', () => {
+  assert.deepEqual(T.enqueue([put('a', 1), put('b', 2)], del('a'), 0), [put('b', 2)]);
+});
+
+test('enqueue: deleting an entry that may be in flight still sends the delete', () => {
+  assert.deepEqual(T.enqueue([put('a', 1)], del('a'), 1), [put('a', 1), del('a')]);
+});
+
+test('enqueue: a later put replaces an earlier unsent put', () => {
+  assert.deepEqual(T.enqueue([put('a', 1, 'x')], put('a', 1, 'y'), 0), [put('a', 1, 'y')]);
+});
+
+test('enqueue: deleting a synced entry queues a delete', () => {
+  assert.deepEqual(T.enqueue([], del('a'), 0), [del('a')]);
+});
+
+test('nextBatch takes a run of same-kind operations', () => {
+  const q = [put('a', 1), put('b', 2), del('c'), put('d', 4)];
+  assert.deepEqual(T.nextBatch(q), { kind: 'put', ops: q.slice(0, 2) });
+  assert.deepEqual(T.nextBatch(q, 1), { kind: 'put', ops: q.slice(0, 1) });
+  assert.deepEqual(T.nextBatch(q.slice(2)), { kind: 'del', ops: [del('c')] });
+  assert.equal(T.nextBatch([]), null);
+});

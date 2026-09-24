@@ -101,12 +101,17 @@ body {
 #status {
   position: sticky;
   bottom: 0;
+  display: flex;
+  gap: 2ch;
+  justify-content: space-between;
   background: var(--accent-bg);
   color: var(--fg);
   padding: 4px 16px;
   white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
+#status .now { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#status .sync { color: var(--muted); flex-shrink: 0; }
+#status .sync-synced { color: var(--accent); }
+#status .sync-error, #status .sync-offline { color: var(--warn); }
 #status .run { color: var(--accent); }
 #status .dim { color: var(--muted); }

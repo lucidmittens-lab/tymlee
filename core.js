@@ -217,10 +217,68 @@
     return rows.map((r) => r.map(csvField).join(',')).join('\n') + '\n';
   }
 
+  // ---- sync ----------------------------------------------------------------
+  // Entries are { id, ts, text }. Local changes are recorded as a queue of
+  // operations that are replayed against the server:
+  //   { op: 'put', entry }   create or replace an entry
+  //   { op: 'del', id }      delete an entry
+
+  function uuid() {
+    const c = root.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    const b = new Uint8Array(16);
+    if (c && c.getRandomValues) c.getRandomValues(b);
+    else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+
+  function sortEntries(entries) {
+    return entries.slice().sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  // Apply queued operations on top of a list of entries.
+  function applyOps(entries, queue) {
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    for (const q of queue) {
+      if (q.op === 'put') byId.set(q.entry.id, q.entry);
+      else if (q.op === 'del') byId.delete(q.id);
+    }
+    return sortEntries(Array.from(byId.values()));
+  }
+
+  // Add an operation to the queue, dropping work that no longer matters.
+  // The first `locked` operations may already be on their way to the server
+  // and are left untouched.
+  function enqueue(queue, op, locked) {
+    const head = queue.slice(0, locked || 0);
+    let tail = queue.slice(locked || 0);
+    const id = op.op === 'put' ? op.entry.id : op.id;
+    const hadPut = tail.some((q) => q.op === 'put' && q.entry.id === id);
+    tail = tail.filter((q) => (q.op === 'put' ? q.entry.id : q.id) !== id);
+    // Deleting an entry the server has never seen needs no request at all,
+    // unless an earlier (locked) put for it may already have been sent.
+    const sentBefore = head.some((q) => q.op === 'put' && q.entry.id === id);
+    if (!(op.op === 'del' && hadPut && !sentBefore)) tail.push(op);
+    return head.concat(tail);
+  }
+
+  // The next run of same-kind operations to send in a single request.
+  function nextBatch(queue, max) {
+    if (!queue.length) return null;
+    const kind = queue[0].op;
+    let n = 0;
+    while (n < queue.length && n < (max || 500) && queue[n].op === kind) n++;
+    return { kind, ops: queue.slice(0, n) };
+  }
+
   const api = {
     parseInput, knownCategories, suggest, withSpans, summarize,
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
     parseRange, formatReport, toCSV,
+    uuid, sortEntries, applyOps, enqueue, nextBatch,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tymlee = api;

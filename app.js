@@ -2,7 +2,6 @@
   'use strict';
 
   const T = window.Tymlee;
-  const STORAGE_KEY = 'tymlee.entries.v1';
 
   const $ = (id) => document.getElementById(id);
   const out = $('out');
@@ -12,33 +11,14 @@
   const matchesEl = $('matches');
   const statusEl = $('status');
 
-  let entries = load();
+  const store = window.TymleeStore.createStore({
+    onChange: () => renderStatus(),
+    onNotice: (text, cls) => { print(text, cls); scrollToPrompt(); },
+  });
 
-  // ---- storage -------------------------------------------------------------
-
-  function load() {
-    try {
-      const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      return Array.isArray(data) ? data.filter((e) => e && typeof e.ts === 'number' && typeof e.text === 'string') : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  function save() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch (_) {
-      print('warning: could not save to browser storage; this session is not persisted', 'err');
-    }
-  }
-
-  // Keep multiple open tabs in sync.
+  // Keep multiple open tabs showing the same log.
   window.addEventListener('storage', (e) => {
-    if (e.key === STORAGE_KEY) {
-      entries = load();
-      renderStatus();
-    }
+    if (e.key === store.storageKey()) store.reloadFromStorage();
   });
 
   // ---- output --------------------------------------------------------------
@@ -71,13 +51,12 @@
 
   function add(text) {
     const { category, note } = T.parseInput(text);
-    const now = Math.max(Date.now(), entries.length ? entries[entries.length - 1].ts + 1 : 0);
-    const prev = entries.length ? T.withSpans(entries, now).pop() : null;
-    entries.push({ ts: now, text: note ? `${category} ${note}` : category });
-    save();
-    const parts = [T.hhmm(now)];
+    const before = store.entries;
+    const entry = store.add(note ? `${category} ${note}` : category);
+    const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
+    const parts = [T.hhmm(entry.ts)];
     if (prev) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
-    parts.push(`in #${entries.length} ${describe(T.parseInput(text))}`);
+    parts.push(`in #${store.entries.length} ${describe(T.parseInput(entry.text))}`);
     print(parts.join('  '), 'ok');
   }
 
@@ -113,20 +92,19 @@
       about: 'print the log for a range',
       run(args) {
         const range = rangeFrom(args);
-        if (range) print(T.formatReport(entries, range, Date.now()), 'report');
+        if (range) print(T.formatReport(store.entries, range, Date.now()), 'report');
       },
     },
     undo: {
       usage: '/undo',
       about: 'remove the last entry',
       run() {
-        if (!entries.length) return print('nothing to undo', 'err');
+        if (!store.entries.length) return print('nothing to undo', 'err');
         const now = Date.now();
-        const last = T.withSpans(entries, now).pop();
-        entries.pop();
-        save();
+        const last = T.withSpans(store.entries, now).pop();
+        store.remove(last.id);
         const msg = [`undid #${last.n} ${T.hhmm(last.ts)} ${describe(last)}`];
-        if (entries.length) msg.push(`resumed ${describe(T.withSpans(entries, now).pop())}`);
+        if (store.entries.length) msg.push(`resumed ${describe(T.withSpans(store.entries, now).pop())}`);
         print(msg.join('  '), 'ok');
       },
     },
@@ -135,12 +113,11 @@
       about: 'delete an entry by number (its time goes to the one before)',
       run(args) {
         const n = Number(args[0]);
-        if (!Number.isInteger(n) || n < 1 || n > entries.length) {
-          return print(`usage: /rm <#>   (# between 1 and ${entries.length || 1}, see /log)`, 'err');
+        if (!Number.isInteger(n) || n < 1 || n > store.entries.length) {
+          return print(`usage: /rm <#>   (# between 1 and ${store.entries.length || 1}, see /log)`, 'err');
         }
-        const s = T.withSpans(entries, Date.now())[n - 1];
-        entries.splice(n - 1, 1);
-        save();
+        const s = T.withSpans(store.entries, Date.now())[n - 1];
+        store.remove(s.id);
         print(`removed #${n} ${T.ymd(s.ts)} ${T.hhmm(s.ts)} ${describe(s)}`, 'ok');
       },
     },
@@ -152,9 +129,9 @@
         const range = rangeFrom(args.filter((a) => a.toLowerCase() !== 'csv'));
         if (!range) return;
         const now = Date.now();
-        const count = entries.filter((e) => e.ts >= range.from && e.ts < range.to).length;
+        const count = store.entries.filter((e) => e.ts >= range.from && e.ts < range.to).length;
         if (!count) return print(`no entries (${range.label})`, 'err');
-        const body = csv ? T.toCSV(entries, range, now) : T.formatReport(entries, range, now) + '\n';
+        const body = csv ? T.toCSV(store.entries, range, now) : T.formatReport(store.entries, range, now) + '\n';
         const name = `tymlee-${range.label === 'today' ? T.ymd(now) : range.label}.${csv ? 'csv' : 'txt'}`;
         download(name, body, csv ? 'text/csv' : 'text/plain');
         print(`exported ${count} entr${count === 1 ? 'y' : 'ies'} -> ${name}`, 'ok');
@@ -166,12 +143,77 @@
       run(args) {
         const range = rangeFrom(args);
         if (!range) return;
-        const text = T.formatReport(entries, range, Date.now());
+        const text = T.formatReport(store.entries, range, Date.now());
         if (!navigator.clipboard) return print('clipboard not available here; use /export', 'err');
         navigator.clipboard.writeText(text).then(
           () => print(`copied ${range.label} to clipboard`, 'ok'),
           () => print('could not copy; use /export', 'err'),
         );
+      },
+    },
+    login: {
+      usage: '/login <email>',
+      about: 'sign in to sync across devices (emails you a link and code)',
+      async run(args) {
+        const email = (args[0] || '').trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return print('usage: /login you@example.com', 'err');
+        if (store.user) return print(`already signed in as ${store.user.email}; /logout first`, 'err');
+        await store.login(email);
+        pendingEmail = email;
+        print(`sent a sign-in email to ${email}. Open the link, or type /code <code from the email>`, 'ok');
+      },
+    },
+    code: {
+      usage: '/code <code>',
+      about: 'finish signing in with the code from the email',
+      async run(args) {
+        const code = (args[0] || '').trim();
+        if (!pendingEmail) return print('run /login <email> first', 'err');
+        if (!/^\d{6,10}$/.test(code)) return print('usage: /code 123456', 'err');
+        await store.verify(pendingEmail, code);
+        pendingEmail = '';
+      },
+    },
+    logout: {
+      usage: '/logout',
+      about: 'sign out and remove your synced log from this browser',
+      async run(args) {
+        if (!store.user) return print('not signed in', 'err');
+        if (store.pending && args[0] !== 'force') {
+          return print(`${store.pending} change(s) have not synced yet. Try /sync, or /logout force to discard them.`, 'err');
+        }
+        const email = store.user.email;
+        await store.logout();
+        print(`signed out of ${email}`, 'ok');
+      },
+    },
+    whoami: {
+      usage: '/whoami',
+      about: 'show the account and sync state',
+      run() {
+        if (!store.configured) return print('local only: entries are kept in this browser (sync not configured)', 'dim');
+        if (!store.user) return print('signed out: entries are kept in this browser. /login <email> to sync', 'dim');
+        const state = store.pending ? `${store.pending} change(s) waiting to sync` : 'all changes synced';
+        const err = store.lastError ? `\nlast error: ${store.lastError}` : '';
+        print(`${store.user.email} · ${store.entries.length} entries · ${state}${err}`, 'dim');
+      },
+    },
+    sync: {
+      usage: '/sync',
+      about: 'send and fetch changes now',
+      async run() {
+        if (!store.user) return print('not signed in; /login <email> to sync', 'err');
+        await store.sync();
+        if (store.status === 'synced') print(`synced · ${store.entries.length} entries`, 'ok');
+        else print(`sync failed: ${store.lastError || store.status}`, 'err');
+      },
+    },
+    import: {
+      usage: '/import',
+      about: 'add entries logged while signed out to your account',
+      run() {
+        const n = store.importLocal();
+        print(n ? `imported ${n} entr${n === 1 ? 'y' : 'ies'}` : 'nothing to import', 'ok');
       },
     },
     clear: {
@@ -182,6 +224,7 @@
   };
   const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
   const COMMAND_WORDS = Object.keys(COMMANDS).map((c) => '/' + c);
+  let pendingEmail = '';
 
   function rangeFrom(args) {
     const word = args.join('');
@@ -195,7 +238,14 @@
     const name = ALIASES[word.toLowerCase()] || word.toLowerCase();
     const cmd = COMMANDS[name];
     if (!cmd) return print(`unknown command "/${word}"; type /help`, 'err');
-    cmd.run(args);
+    try {
+      const result = cmd.run(args);
+      if (result && result.then) {
+        result.catch((err) => print(err.message || String(err), 'err')).then(scrollToPrompt);
+      }
+    } catch (err) {
+      print(err.message || String(err), 'err');
+    }
   }
 
   function download(name, body, type) {
@@ -210,7 +260,7 @@
 
   // Candidates for the first word: commands after "/", categories otherwise.
   function candidates(text) {
-    return text.startsWith('/') ? COMMAND_WORDS : T.knownCategories(entries);
+    return text.startsWith('/') ? COMMAND_WORDS : T.knownCategories(store.entries);
   }
 
   // Tab cycling state: the list being cycled and the current position.
@@ -266,7 +316,7 @@
 
   // ---- input: history ------------------------------------------------------
 
-  const history = entries.slice(-100).map((e) => e.text);
+  const history = [];
   let histIdx = history.length;
   let draft = '';
 
@@ -346,33 +396,62 @@
 
   // ---- status bar ----------------------------------------------------------
 
+  const SYNC_LABELS = {
+    'local-only': 'local',
+    'signed-out': 'local · /login to sync',
+    syncing: 'syncing…',
+    synced: 'synced',
+    pending: 'waiting to sync',
+    offline: 'offline',
+    error: 'not synced · /whoami',
+  };
+
+  function syncLabel() {
+    const label = SYNC_LABELS[store.status] || store.status;
+    return store.user && store.pending && store.status !== 'synced' ? `${label} (${store.pending})` : label;
+  }
+
+  function span(cls, text) {
+    const el = document.createElement('span');
+    el.className = cls;
+    el.textContent = text;
+    return el;
+  }
+
   function renderStatus() {
     const now = Date.now();
-    if (!entries.length) {
-      statusEl.textContent = 'not clocked in · type /help';
-      return;
+    const left = span('now', '');
+    if (!store.entries.length) {
+      left.textContent = 'not clocked in · type /help';
+    } else {
+      const spans = T.withSpans(store.entries, now);
+      const cur = spans[spans.length - 1];
+      // Same rule as the report: an entry counts toward the day it started on.
+      const today = T.startOfDay(now);
+      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= today ? s.duration : 0), 0);
+      left.append(
+        span('run', `▶ ${T.formatClock(cur.duration)}`),
+        `  ${describe(cur)}`,
+        span('dim', `   today ${T.formatHM(todayMs)} · since ${T.hhmm(cur.ts)}`),
+      );
     }
-    const spans = T.withSpans(entries, now);
-    const cur = spans[spans.length - 1];
-    // Same rule as the report: an entry counts toward the day it started on.
-    const today = T.startOfDay(now);
-    const todayMs = spans.reduce((sum, s) => sum + (s.ts >= today ? s.duration : 0), 0);
-    const run = document.createElement('span');
-    run.className = 'run';
-    run.textContent = `▶ ${T.formatClock(cur.duration)}`;
-    const dim = document.createElement('span');
-    dim.className = 'dim';
-    dim.textContent = `   today ${T.formatHM(todayMs)} · since ${T.hhmm(cur.ts)}`;
-    statusEl.replaceChildren(run, `  ${describe(cur)}`, dim);
+    const right = span('sync sync-' + store.status, syncLabel());
+    statusEl.replaceChildren(left, right);
   }
 
   // ---- boot ----------------------------------------------------------------
 
   print('tymlee · type what you are starting and press Enter · /help for commands', 'dim');
-  if (entries.length) {
-    print(T.formatReport(entries, T.parseRange('today', Date.now()), Date.now()), 'report');
-  }
   renderStatus();
   renderHints();
   setInterval(renderStatus, 1000);
+  store.init().catch((err) => print(`startup error: ${err.message || err}`, 'err')).then(() => {
+    history.push(...store.entries.slice(-100).map((e) => e.text));
+    histIdx = history.length;
+    if (store.entries.length) {
+      print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now()), 'report');
+    }
+    renderStatus();
+    scrollToPrompt();
+  });
 })();

@@ -35,9 +35,11 @@
     // Encryption for the signed-in account:
     //   'pending'  not checked yet (or the check failed; retried on next sync)
     //   'plain'    the server has no keyring table yet: sync without encryption
+    //   'none'     encryption is available but not turned on (/encrypt)
     //   'locked'   the account is encrypted but this device has no key yet
     //   'ready'    this device holds the key; text is encrypted on upload
     let vault = { mode: 'pending' };
+    let promptedEncrypt = false; // the /encrypt suggestion is shown once per page load
 
     // ---- local persistence -------------------------------------------------
 
@@ -188,6 +190,7 @@
       const rows = [];
       const plain = []; // uploaded before encryption was on; re-sent encrypted
       let unreadable = 0;
+      let sawEncrypted = false;
       const page = 1000;
       for (let from = 0; ; from += page) {
         let query = client.from('entries').select('id,ts,text');
@@ -197,7 +200,10 @@
         const opened = await Promise.all(data.map(async (r) => {
           const e = { id: r.id, ts: Number(r.ts), text: r.text };
           if (V.isEncrypted(r.text)) {
-            if (vault.mode !== 'ready') return null;
+            if (vault.mode !== 'ready') {
+              sawEncrypted = true;
+              return null;
+            }
             try {
               e.text = await V.decryptText(vault.key, r.id, r.text);
             } catch (_) {
@@ -225,6 +231,11 @@
       if (unreadable) onNotice(`${unreadable} entr${unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
       if (plain.length) schedule(flush);
       settle();
+      // Another device has turned encryption on: find out and lock this one.
+      if (sawEncrypted && (vault.mode === 'none' || vault.mode === 'plain')) {
+        vault = { mode: 'pending' };
+        schedule(prepareVault);
+      }
     }
 
     // ---- encryption ----------------------------------------------------------
@@ -284,18 +295,43 @@
         throw error;
       }
       if (data) { lock(); return; }
+      // Encryption is available but this account hasn't turned it on yet.
+      const firstTime = !promptedEncrypt;
+      vault = { mode: 'none' };
+      if (firstTime) {
+        promptedEncrypt = true;
+        onNotice([
+          'Your log is not encrypted yet.',
+          '',
+          'Type /encrypt to turn on end-to-end encryption: your entries are encrypted on your devices before they are uploaded, so nobody else can read them, including whoever runs this site. You will get a recovery key to save.',
+        ].join('\n'), 'key');
+      }
+    }
+
+    // Turn encryption on for this account: create the master key, lock a copy
+    // with a new recovery key, and re-upload every entry encrypted.
+    async function enableEncryption() {
+      requireClient();
+      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (vault.mode === 'pending' || vault.mode === 'plain' || vault.mode === 'none') await schedule(prepareVault);
+      if (vault.mode === 'ready') throw new Error('encryption is already on, and this device has the key');
+      if (vault.mode === 'locked') throw new Error("encryption is already on for this account; this device doesn't have the key yet (/link or /recover)");
+      if (vault.mode === 'plain') throw new Error('encryption is not available: the server needs the latest supabase/schema.sql');
+      const who = owner;
       const raw = V.newMasterKey();
       const code = V.newRecoveryCode();
       const recovery = await V.wrap(raw, code);
       const created = await client.from('keyring').insert({ user_id: who, recovery });
-      if (owner !== who) return;
       if (created.error) {
-        if (created.error.code === '23505') { lock(); return; } // another device got there first
-        if (missingTable(created.error)) { vault = { mode: 'plain' }; return; }
+        if (created.error.code === '23505') { // another device got there first
+          lock();
+          throw new Error('another device turned encryption on first; link this one with /link');
+        }
         throw created.error;
       }
       await unlock(raw);
       onNotice(recoveryMessage(code, true), 'key');
+      await sync({ full: true }); // re-uploads existing entries encrypted
     }
 
     // True when entries can be synced (encrypted, or plain on a server that
@@ -307,13 +343,14 @@
         onChange();
         return false;
       }
-      return vault.mode === 'ready' || vault.mode === 'plain';
+      return vault.mode === 'ready' || vault.mode === 'plain' || vault.mode === 'none';
     }
 
     function requireKey() {
       requireClient();
       if (!user) throw new Error('sign in first: /login you@example.com');
       if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet (run supabase/schema.sql)');
+      if (vault.mode === 'none') throw new Error("encryption isn't turned on for this account yet: /encrypt");
       if (vault.mode !== 'ready') throw new Error("this device doesn't have the key yet: /link <code> or /recover <key>");
     }
 
@@ -344,7 +381,7 @@
       if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet');
       const { data, error } = await fetchKeyring();
       if (error) throw error;
-      if (!data) throw new Error('this account has no encryption key yet');
+      if (!data) throw new Error("encryption isn't turned on for this account yet: /encrypt");
       const blob = kind === 'link' ? data.link : data.recovery;
       if (kind === 'link' && (!blob || blob.expires < Date.now())) {
         throw new Error('no active link code. On a device that is set up, type /link (codes last 10 minutes)');
@@ -369,7 +406,7 @@
         const fullNow = full || now - lastFullPull > FULL_EVERY_MS;
         // Re-check servers without encryption support now and then, so it
         // switches on after supabase/schema.sql has been run.
-        if (fullNow && vault.mode === 'plain') vault = { mode: 'pending' };
+        if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
         await flush();
         if (vault.mode === 'locked') return;
         if (fullNow) {
@@ -508,6 +545,7 @@
       verify,
       logout,
       importLocal,
+      enableEncryption,
       createLink,
       unlockWith,
       newRecoveryKey,

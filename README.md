@@ -49,6 +49,7 @@ Thu 2026-09-24
 | `/sync` | send and fetch changes now (this also happens automatically) |
 | `/import` | add entries logged while signed out to your account |
 | `/logout` | sign out and remove your synced log from this browser |
+| `/encrypt` | turn on end-to-end encryption for your account (you're prompted after signing in) |
 | `/link [code]` | add a device: `/link` on a set-up device shows a code, `/link <code>` on the new one uses it |
 | `/recover <key>` | set up this device with your recovery key |
 | `/recovery` | make a new recovery key (the old one stops working) |
@@ -107,16 +108,18 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 
 When you're signed in, entry text is encrypted in your browser before it's uploaded, so the database only holds ciphertext. That includes whoever runs the Supabase project. Entry times, the number of entries and your email address are not encrypted.
 
-- **One master key per account.** The first device to sign in creates it and shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`). Save that somewhere safe. Nobody can recover it for you.
+- **Turning it on:** after signing in, tymlee says if your log isn't encrypted yet. Type `/encrypt` to turn it on. Until then, syncing works without encryption.
+- **One master key per account.** `/encrypt` creates it, shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`), and re-uploads your existing entries encrypted. Save the recovery key somewhere safe. Nobody can recover it for you.
+- **Other devices that are already signed in** show as locked on their next sync, until you link them.
 - **The server stores the master key only in locked form:** once locked with the recovery key, and for 10 minutes locked with a `/link` code while you add a device. The codes are shown on screen and never sent anywhere.
-- **Adding a device:** sign in on it (it says it's locked), type `/link` on a device that's already set up, then type the code it shows on the new device. You can use `/recover <key>` instead.
+- **Adding a device:** sign in on it first with `/login` and `/code`; linking doesn't sign you in. It says it's locked. Type `/link` on a device that's already set up, then type the code it shows on the new device. You can use `/recover <key>` instead.
 - **Signing out** removes the key from that browser. Signing in again means linking again.
 - **Losing every device and the recovery key** means the log can't be decrypted by anyone.
 - **`/export`, `/log` and `/restore`** work on the decrypted copy in your browser, so exports are plain text.
 
 The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
 
-While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption. Encryption switches on at the next full sync after the script has been run.
+While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption, and `/encrypt` explains that the server needs the script.
 
 ## Deploy
 

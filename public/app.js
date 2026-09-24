@@ -238,6 +238,14 @@
         print(`signed out of ${email}`, 'ok');
       },
     },
+    encrypt: {
+      usage: '/encrypt',
+      about: 'turn on end-to-end encryption for your account',
+      async run() {
+        print('setting up encryption…', 'dim');
+        await store.enableEncryption();
+      },
+    },
     link: {
       usage: '/link [code]',
       about: 'add a device: /link here shows a code; type /link <code> on the new one',
@@ -290,6 +298,7 @@
           ready: 'encrypted: this device has the key',
           locked: "encrypted: this device doesn't have the key yet (/link or /recover)",
           plain: 'not encrypted: the server is not set up for it yet',
+          none: 'not encrypted: type /encrypt to turn it on',
           pending: 'encryption: checking…',
         }[store.encryption] || '';
         print(`${store.user.email} · ${store.entries.length} entries · ${state}\n${crypt}${err}`, 'dim');

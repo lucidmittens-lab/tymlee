@@ -142,8 +142,6 @@
 
   // ---- report --------------------------------------------------------------
 
-  const RULE = '-'.repeat(56);
-
   function summaryLines(spans, catWidth) {
     const totals = summarize(spans);
     const all = totals.reduce((sum, t) => sum + t.ms, 0);
@@ -158,7 +156,10 @@
   // Fixed-width, plain-text readout of the entries that start in [from, to).
   // Entries are grouped by the day they start on; each day gets a per-category
   // summary, and multi-day ranges get an overall summary at the end.
-  function formatReport(entries, range, now) {
+  // `compact` drops the end column (it is the next entry's start) to fit phones.
+  function formatReport(entries, range, now, opts) {
+    const compact = Boolean(opts && opts.compact);
+    const RULE = '-'.repeat(compact ? 36 : 56);
     const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
     if (!spans.length) return `no entries (${range.label})`;
 
@@ -174,11 +175,12 @@
     const out = [];
     for (const day of days) {
       out.push(`${DAY_NAMES[new Date(day.ts).getDay()]} ${day.key}`);
-      out.push(`  ${'#'.padStart(numWidth)}  start  end    ${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
+      const endHead = compact ? '' : 'end    ';
+      out.push(`  ${'#'.padStart(numWidth)}  start  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
-        const end = s.running ? 'now  ' : hhmm(s.end);
+        const end = compact ? '' : `${s.running ? 'now  ' : hhmm(s.end)}  `;
         out.push(
-          `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}  ${formatHM(s.duration).padStart(6)}  ` +
+          `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}${formatHM(s.duration).padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
       }

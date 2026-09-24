@@ -4,6 +4,8 @@
   const T = window.Tymlee;
 
   const $ = (id) => document.getElementById(id);
+  const appEl = $('app');
+  const scrollEl = $('scroll');
   const out = $('out');
   const form = $('prompt');
   const input = $('entry');
@@ -40,10 +42,41 @@
 
   // Like a terminal, jump to the bottom after every command.
   function scrollToPrompt() {
-    window.scrollTo(0, document.documentElement.scrollHeight);
+    scrollEl.scrollTop = scrollEl.scrollHeight;
   }
 
+  function nearBottom() {
+    return scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 40;
+  }
+
+  // Keep the app sized to the visible area. On phones the on-screen keyboard
+  // shrinks that area; resizing (rather than letting the keyboard cover the
+  // page) keeps the prompt and status bar just above it.
+  const viewport = window.visualViewport;
+  function fitToViewport() {
+    const stick = nearBottom();
+    const height = viewport ? viewport.height : window.innerHeight;
+    appEl.style.height = `${height}px`;
+    // iOS may scroll the page to reveal the input; follow the visible area.
+    appEl.style.transform = viewport && viewport.offsetTop ? `translateY(${viewport.offsetTop}px)` : '';
+    document.documentElement.classList.toggle('kb', window.innerHeight - height > 120);
+    if (stick) scrollToPrompt();
+  }
+  if (viewport) {
+    viewport.addEventListener('resize', fitToViewport);
+    viewport.addEventListener('scroll', fitToViewport);
+  }
+  window.addEventListener('resize', fitToViewport);
+  // iOS scrolls the whole page when focusing an input; undo that.
+  window.addEventListener('scroll', () => { if (window.scrollY) window.scrollTo(0, 0); });
+
   // ---- entries -------------------------------------------------------------
+
+  // Narrow screens get the compact report; exports always use the full one.
+  const narrow = window.matchMedia('(max-width: 600px)');
+  function screenFormat() {
+    return { compact: narrow.matches };
+  }
 
   function describe(s) {
     return s.note ? `${s.category} ${s.note}` : s.category;
@@ -92,7 +125,7 @@
       about: 'print the log for a range',
       run(args) {
         const range = rangeFrom(args);
-        if (range) print(T.formatReport(store.entries, range, Date.now()), 'report');
+        if (range) print(T.formatReport(store.entries, range, Date.now(), screenFormat()), 'report');
       },
     },
     undo: {
@@ -389,9 +422,14 @@
     if (line) submit(line);
   });
 
-  // Clicking anywhere in the terminal focuses the prompt, unless selecting text.
-  $('term').addEventListener('click', () => {
-    if (!String(window.getSelection())) input.focus();
+  // Clicking the scrollback focuses the prompt, unless selecting text. Not on
+  // touch screens, where a tap to scroll would pop up the keyboard.
+  const finePointer = window.matchMedia('(pointer: fine)');
+  scrollEl.addEventListener('click', () => {
+    if (finePointer.matches && !String(window.getSelection())) input.focus();
+  });
+  $('dock').addEventListener('click', (e) => {
+    if (e.target !== input && !e.target.closest('#matches span')) input.focus();
   });
 
   // ---- status bar ----------------------------------------------------------
@@ -421,27 +459,27 @@
   function renderStatus() {
     const now = Date.now();
     const left = span('now', '');
+    let today = null;
     if (!store.entries.length) {
       left.textContent = 'not clocked in · type /help';
     } else {
       const spans = T.withSpans(store.entries, now);
       const cur = spans[spans.length - 1];
       // Same rule as the report: an entry counts toward the day it started on.
-      const today = T.startOfDay(now);
-      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= today ? s.duration : 0), 0);
-      left.append(
-        span('run', `▶ ${T.formatClock(cur.duration)}`),
-        `  ${describe(cur)}`,
-        span('dim', `   today ${T.formatHM(todayMs)} · since ${T.hhmm(cur.ts)}`),
-      );
+      const dayStart = T.startOfDay(now);
+      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= dayStart ? s.duration : 0), 0);
+      left.append(span('run', `▶ ${T.formatClock(cur.duration)}`), span('what', `  ${describe(cur)}`));
+      today = span('today', `today ${T.formatHM(todayMs)}`);
+      today.append(span('since', ` · since ${T.hhmm(cur.ts)}`));
     }
     const right = span('sync sync-' + store.status, syncLabel());
-    statusEl.replaceChildren(left, right);
+    statusEl.replaceChildren(...[left, today, right].filter(Boolean));
   }
 
   // ---- boot ----------------------------------------------------------------
 
   print('tymlee · type what you are starting and press Enter · /help for commands', 'dim');
+  fitToViewport();
   renderStatus();
   renderHints();
   setInterval(renderStatus, 1000);
@@ -449,7 +487,7 @@
     history.push(...store.entries.slice(-100).map((e) => e.text));
     histIdx = history.length;
     if (store.entries.length) {
-      print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now()), 'report');
+      print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now(), screenFormat()), 'report');
     }
     renderStatus();
     scrollToPrompt();

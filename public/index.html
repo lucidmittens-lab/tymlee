@@ -2,24 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- interactive-widget: on Android, shrink the page when the keyboard opens
+       (iOS is handled in app.js with the visualViewport API). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141412" media="(prefers-color-scheme: dark)">
   <title>tymlee</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main id="term">
-    <div id="out" role="log" aria-live="polite"></div>
-    <form id="prompt" autocomplete="off">
-      <span class="ps1" aria-hidden="true">&gt;</span>
-      <div class="field">
-        <div id="ghost" aria-hidden="true"></div>
-        <input id="entry" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus
-               aria-label="Entry or command" aria-describedby="matches">
+  <div id="app">
+    <main id="scroll">
+      <div id="out" role="log" aria-live="polite"></div>
+    </main>
+    <div id="dock">
+      <div class="col">
+        <form id="prompt" autocomplete="off">
+          <span class="ps1" aria-hidden="true">&gt;</span>
+          <div class="field">
+            <div id="ghost" aria-hidden="true"></div>
+            <input id="entry" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus
+                   enterkeyhint="send" aria-label="Entry or command" aria-describedby="matches">
+          </div>
+        </form>
+        <div id="matches"></div>
       </div>
-    </form>
-    <div id="matches"></div>
-  </main>
-  <footer id="status"></footer>
+      <footer id="status"></footer>
+    </div>
+  </div>
 
   <script src="config.js"></script>
   <script src="core.js"></script>

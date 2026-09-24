@@ -159,3 +159,17 @@ test('nextBatch takes a run of same-kind operations', () => {
   assert.deepEqual(T.nextBatch(q.slice(2)), { kind: 'del', ops: [del('c')] });
   assert.equal(T.nextBatch([]), null);
 });
+
+test('compact report drops the end column', () => {
+  assert.equal(T.formatReport(LOG, T.parseRange('today', NOW), NOW, { compact: true }), [
+    'Thu 2026-09-24',
+    '  #  start     dur  category  note',
+    '  3  09:00    0:45  dev       fixing login bug',
+    '  4  09:45    0:15  mtg       standup',
+    '  5  10:00    0:12  dev       code review',
+    '  ' + '-'.repeat(36),
+    '  dev         0:57   79%',
+    '  mtg         0:15   21%',
+    '  total       1:12',
+  ].join('\n'));
+});

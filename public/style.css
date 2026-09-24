@@ -23,24 +23,55 @@
 
 * { box-sizing: border-box; }
 
-html, body { margin: 0; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 body {
   background: var(--bg);
   color: var(--fg);
   font: 14px/1.45 var(--font);
-  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* The app fills exactly the visible area. app.js keeps its height equal to
+   the space above the on-screen keyboard, so the prompt is never covered. */
+#app {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 
-#term {
+/* Scrollback. Output hugs the bottom, next to the prompt, like a terminal. */
+#scroll {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+#out {
   width: 100%;
   max-width: 900px;
+  margin: auto auto 0;
+  padding: 16px 16px 0;
+}
+
+#dock { flex-shrink: 0; }
+#dock .col {
+  max-width: 900px;
   margin: 0 auto;
-  padding: 16px 16px 24px;
-  cursor: text;
+  padding: 0 16px 6px;
 }
 
 #out pre {
@@ -99,19 +130,34 @@ body {
 #matches span.sel { color: var(--accent); text-decoration: underline; }
 
 #status {
-  position: sticky;
-  bottom: 0;
   display: flex;
   gap: 2ch;
   justify-content: space-between;
   background: var(--accent-bg);
   color: var(--fg);
-  padding: 4px 16px;
+  padding: 4px max(16px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   white-space: pre;
 }
-#status .now { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* With the keyboard open, the home-indicator gap is not needed. */
+.kb #status { padding-bottom: 4px; }
+#status .now { display: flex; flex: 1; min-width: 0; }
+#status .what { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#status .today { color: var(--muted); flex-shrink: 0; }
 #status .sync { color: var(--muted); flex-shrink: 0; }
 #status .sync-synced { color: var(--accent); }
 #status .sync-error, #status .sync-offline { color: var(--warn); }
 #status .run { color: var(--accent); }
 #status .dim { color: var(--muted); }
+
+/* Touch screens: 16px text in the input stops iOS from zooming in on focus,
+   and completions get larger tap targets. */
+@media (pointer: coarse) {
+  #prompt { font-size: 16px; }
+  #matches { font-size: 15px; }
+  #matches span { display: inline-block; padding: 6px 0; margin-right: 3ch; }
+}
+
+@media (max-width: 600px) {
+  #status { gap: 1.5ch; }
+  #status .since { display: none; }
+}

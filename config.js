@@ -4,6 +4,6 @@
 // The anon key is meant to be public: row-level security in
 // supabase/schema.sql ensures each signed-in user can only reach their own rows.
 window.TYMLEE_CONFIG = {
-  supabaseUrl: '',      // e.g. 'https://abcdefghijkl.supabase.co'
-  supabaseAnonKey: '',  // Project Settings -> API -> anon / public key
+  supabaseUrl: 'https://yhutioohsjsuphumyndv.supabase.co',
+  supabaseAnonKey: 'sb_publishable_LZfEQVD3O4fhDE0BE9tkKw_ZF4aNKTO', // publishable (or legacy anon) key
 };

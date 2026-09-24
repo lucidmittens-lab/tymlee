@@ -211,7 +211,9 @@
       if (!configured) return;
       try {
         if (!window.supabase) await loadScript(SUPABASE_SRC);
-        client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
+        // Accept the project URL with or without the Data API path on the end.
+        const url = config.supabaseUrl.trim().replace(/\/(rest|auth)\/v1\/?$/, '').replace(/\/+$/, '');
+        client = window.supabase.createClient(url, config.supabaseAnonKey.trim(), {
           auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'tymlee.auth' },
         });
       } catch (err) {

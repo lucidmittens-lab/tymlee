@@ -177,6 +177,8 @@ body {
 #status .sync-synced { color: var(--accent); }
 #status .sync-error, #status .sync-offline, #status .sync-locked { color: var(--warn); }
 #status .run { color: var(--accent); }
+#status .money { color: var(--fg); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+#status .money.ot { color: var(--warn); }
 #status .stopped { color: var(--muted); }
 #status .dim { color: var(--muted); }
 

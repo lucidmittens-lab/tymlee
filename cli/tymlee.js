@@ -91,8 +91,13 @@ function statusText() {
   let left;
   let middle = '';
   if (st.state === 'idle') left = st.text;
-  else if (st.state === 'off') { left = `${sgr('90', '■ off')}  since ${st.since}`; middle = st.today; }
-  else { left = `${sgr('32', `▶ ${st.clock}`)}  ${st.what}`; middle = cols >= 70 ? `${st.today} · since ${st.since}` : st.today; }
+  else if (st.state === 'off') { left = `${sgr('90', '■ off')}  since ${st.since}`; middle = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`; }
+  else {
+    const money = st.money ? `  ${st.ot ? sgr('33', `${st.money} OT`) : st.money}` : '';
+    left = `${sgr('32', `▶ ${st.clock}`)}${money}  ${st.what}`;
+    const today = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`;
+    middle = cols >= 70 ? `${today} · since ${st.since}` : today;
+  }
   const syncColor = { synced: '32', error: '31', offline: '31', locked: '31' }[st.sync.status] || '90';
   const right = sgr(syncColor, st.sync.label);
   const tail = `${middle ? `${sgr('90', middle)}   ` : ''}${right}`;

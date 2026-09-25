@@ -522,3 +522,47 @@ test('editEntry applies the card fields with the /edit rules', () => {
   assert.match(T.editEntry(e, { time: '09:00', text: '/log' }, NOW).error, /can't start/);
   assert.match(T.editEntry(e, { time: '09:00', text: 'dev', wo: 'a b' }, NOW).error, /not a valid work order/);
 });
+
+test('earnings: rate, weekly overtime, and settings that change over time', () => {
+  const h = 3600000;
+  const mon = new Date(2026, 8, 21, 9).getTime(); // Monday 09:00
+  const day = (d, hour) => mon + d * 24 * h + (hour - 9) * h;
+  // Mon-Fri 9:00-18:00 (9h a day, 45h in the week), then Monday of next week.
+  const entries = [];
+  for (let d = 0; d < 5; d++) {
+    entries.push({ id: `w${d}`, ts: day(d, 9), text: 'dev work' }, { id: `o${d}`, ts: day(d, 18), text: '/off' });
+  }
+  entries.push({ id: 'next', ts: day(7, 9), text: 'dev new week' }, { id: 'nextOff', ts: day(7, 11), text: '/off' });
+  const now = day(8, 12);
+
+  assert.equal(T.hasPay({}), false);
+  let pay = T.setPay({}, 'rate', 20, day(2, 12)); // set midweek: covers earlier time too
+  assert.equal(T.payValue(pay, 'rate', day(0, 9)), 20);
+  let e = T.earnings(entries, pay, now);
+  assert.equal(e.get('w0').money, 180);
+  assert.equal(e.get('o0'), undefined); // off time earns nothing
+
+  pay = T.setPay(pay, 'otmin', 40, day(2, 12)); // 40h a week, 1.5x by default
+  e = T.earnings(entries, pay, now);
+  assert.equal(e.get('w3').money, 180); // 27h..36h: all regular
+  assert.equal(e.get('w4').money, 4 * 20 + 5 * 20 * 1.5); // 36h..45h: 4 regular, 5 overtime
+  assert.equal(e.get('w4').ot, true);
+  assert.equal(e.get('w3').ot, false);
+  assert.equal(e.get('next').money, 40); // a new week starts regular again
+
+  pay = T.setPay(pay, 'otrate', 2, day(2, 12));
+  assert.equal(T.earnings(entries, pay, now).get('w4').money, 4 * 20 + 5 * 20 * 2);
+
+  pay = T.setPay(pay, 'rate', 30, day(4, 8)); // a raise from Friday morning on
+  e = T.earnings(entries, pay, now);
+  assert.equal(e.get('w3').money, 180); // Thursday keeps the old rate
+  assert.equal(e.get('w4').money, 4 * 30 + 5 * 30 * 2);
+
+  pay = T.setPay(pay, 'rate', null, day(6, 0)); // turned off from Sunday
+  assert.equal(T.earnings(entries, pay, now).get('next').money, null);
+  assert.equal(T.earnings(entries, pay, now).get('w4').money, 4 * 30 + 5 * 30 * 2);
+
+  assert.equal(T.formatMoney(1234.567), '$1,234.57');
+  assert.equal(T.parseAmount('$1,200.50'), 1200.5);
+  assert.equal(T.parseAmount('abc'), null);
+});

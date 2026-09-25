@@ -33,6 +33,8 @@
   'use strict';
 
   const LOGIN_EMAIL_KEY = 'tymlee.loginEmail';
+  // Pay settings (/rate, /otmin, /otrate). Kept on this device for now.
+  const PAY_KEY = 'tymlee.pay';
   const LOGIN_CODE_TTL_MS = 60 * 60 * 1000;
 
   const RESTORE_HELP = [
@@ -84,6 +86,45 @@
     function linkFor(category, ts) {
       const day = T.ymd(ts);
       return store.entries.find((e) => T.isLink(e) && sameCategory(T.linkCategory(e), category) && T.ymd(e.ts) === day) || null;
+    }
+
+    // ---- pay settings ----------------------------------------------------------
+
+    function loadPay() {
+      try {
+        return JSON.parse(io.storage.getItem(PAY_KEY)) || {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function savePay(settings) {
+      try {
+        io.storage.setItem(PAY_KEY, JSON.stringify(settings));
+      } catch (_) {
+        print('could not save the setting on this device', 'err');
+      }
+    }
+
+    // /rate, /otmin, /otrate: show the setting with no argument, set it with
+    // one, turn it off with "off". `check(n)` returns an error message or ''.
+    function paySetting(key, arg, { show, check, unit }) {
+      let pay = loadPay();
+      const now = Date.now();
+      const current = T.payValue(pay, key, now);
+      if (!arg) return print(current == null ? `${key} is not set` : `${key}: ${show(current)}`, current == null ? 'dim' : 'ok');
+      if (/^(off|none|clear)$/i.test(arg)) {
+        if (current == null) return print(`${key} is not set`, 'dim');
+        savePay(T.setPay(pay, key, null, now));
+        return print(`${key} turned off from now on`, 'ok');
+      }
+      const n = T.parseAmount(arg);
+      const problem = n == null ? `"${arg}" is not a number` : check(n);
+      if (problem) return print(problem, 'err');
+      const first = !(pay[key] || []).length;
+      pay = T.setPay(pay, key, n, now);
+      savePay(pay);
+      print(`${key}: ${show(n)}${first ? '' : ' from now on (earlier time keeps the old one)'}${unit ? unit(pay) : ''}`, 'ok');
     }
 
     // Let the user choose an entry (newest first) unless args[0] names one.
@@ -629,6 +670,41 @@
           },
         },
       } : {}),
+      rate: {
+        usage: '/rate [amount|off]',
+        about: 'your hourly pay rate, e.g. /rate 32.50 (shows pay in the status bar)',
+        run(args) {
+          paySetting('rate', args.join(''), {
+            show: (n) => `${T.formatMoney(n)} an hour`,
+            check: (n) => (n > 0 && n < 100000 ? '' : 'the rate should be more than 0'),
+            unit: (pay) => (T.payValue(pay, 'otmin', Date.now()) == null ? ' · /otmin sets when overtime starts' : ''),
+          });
+        },
+      },
+      otmin: {
+        usage: '/otmin [hours|off]',
+        about: 'hours in a week (Monday to Sunday) before overtime, e.g. /otmin 40',
+        run(args) {
+          paySetting('otmin', args.join(''), {
+            show: (n) => `overtime after ${n} hours a week (Monday to Sunday)`,
+            check: (n) => (n > 0 && n <= 168 ? '' : 'that should be between 0 and 168 hours'),
+            unit: (pay) => {
+              const f = T.payValue(pay, 'otrate', Date.now());
+              return f == null ? `, paid at 1.5× (/otrate changes it)` : `, paid at ${f}×`;
+            },
+          });
+        },
+      },
+      otrate: {
+        usage: '/otrate [factor|off]',
+        about: 'what overtime multiplies your rate by, e.g. /otrate 1.5',
+        run(args) {
+          paySetting('otrate', args.join(''), {
+            show: (n) => `overtime paid at ${n}× your rate`,
+            check: (n) => (n >= 1 && n <= 10 ? '' : 'that should be between 1 and 10'),
+          });
+        },
+      },
       clear: {
         usage: '/clear',
         about: 'clear the screen (the log is kept)',
@@ -690,9 +766,32 @@
       // Same rule as the report: an entry counts toward the day it started on.
       const dayStart = T.startOfDay(now);
       const todayMs = spans.reduce((sum, s) => sum + (s.ts >= dayStart && !s.off ? s.duration : 0), 0);
+      // Pay, once there's a rate: this entry's so far, and today's.
+      let money = null;
+      let todayMoney = null;
+      let ot = false;
+      const pay = loadPay();
+      if (T.hasPay(pay)) {
+        const earned = T.earnings(store.entries, pay, now);
+        const mine = earned.get(cur.id);
+        if (!cur.off && mine && mine.money != null) {
+          money = T.formatMoney(mine.money);
+          ot = mine.ot;
+        }
+        let sum = 0;
+        let any = false;
+        for (const s of spans) {
+          const e = s.ts >= dayStart && earned.get(s.id);
+          if (e && e.money != null) { sum += e.money; any = true; }
+        }
+        if (any) todayMoney = T.formatMoney(sum);
+      }
       return {
         state: cur.off ? 'off' : 'running',
         clock: T.formatClock(cur.duration),
+        money,
+        ot,
+        todayMoney,
         what: `${cur.wo ? `${T.woTag(cur.wo)} ` : ''}${describe(cur)}`,
         today: `today ${T.formatHM(todayMs)}`,
         since: T.hhmm(cur.ts),

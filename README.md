@@ -65,6 +65,12 @@ Ranges: `today` (the default), `yesterday`, `week` (the last 7 days), `month` (t
 
 The `.txt` export is exactly what `/log` prints. It groups entries by the day they started, gives each day a per-category summary, and adds an overall summary when the range covers more than one day. An entry counts toward the day it started on. The CSV has one row per entry: `n,start,end,minutes,category,note`, with ISO 8601 UTC timestamps.
 
+## Pay (in development)
+
+`/rate 32.50` sets your hourly rate. The status bar then shows what the running entry has earned next to its clock, and what today has earned next to today's time. `/otmin 40` starts overtime after 40 hours in a week (Monday to Sunday), paid at 1.5× your rate, or at the factor `/otrate` sets (`/otrate 2`). With no argument, each command shows its setting, and `off` turns it off. Changes apply from then on, so earlier time keeps the rate it had; an entry is paid at the rate in effect when it started.
+
+For now the settings are kept on each device (they don't sync).
+
 ## Home Screen
 
 On a phone, use your browser's **Add to Home Screen** to get tymlee as an app: its own icon, opening full screen without browser bars. On iPhone a Home Screen app keeps its own storage, apart from the browser, so set it up like a new device: `/login you@example.com`, then `/code` with the code from the email (the emailed link would open the browser, not the app), and `/link` or `/recover` if you use encryption.

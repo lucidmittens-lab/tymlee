@@ -429,6 +429,75 @@
     return { days, axisFrom: Math.min(axisFrom, axisTo - 60), axisTo, legend };
   }
 
+  // ---- pay -----------------------------------------------------------------
+  // /rate, /otmin and /otrate. Each setting keeps its history, so changing
+  // it later leaves the pay for earlier time as it was:
+  //   { rate: [{ from, value }], otmin: [...], otrate: [...] }
+  // A setting's first value also covers everything before it (from: 0), and
+  // a value of null turns it off from then on.
+
+  const PAY_KEYS = ['rate', 'otmin', 'otrate'];
+  const DEFAULT_OT_FACTOR = 1.5;
+
+  function payValue(settings, key, t) {
+    const list = (settings && settings[key]) || [];
+    let value = null;
+    for (const step of list) if (step.from <= t) value = step.value;
+    return value;
+  }
+
+  function setPay(settings, key, value, now) {
+    const list = ((settings && settings[key]) || []).filter((s) => s.from < now);
+    list.push({ from: list.length ? now : 0, value });
+    return { ...(settings || {}), [key]: list };
+  }
+
+  const hasPay = (settings) => Boolean(settings && (settings.rate || []).some((s) => s.value != null));
+
+  // Monday 00:00 of the week `ts` falls in (overtime counts per week).
+  function weekStart(ts) {
+    const day = startOfDay(ts);
+    return addDays(day, -((new Date(day).getDay() + 6) % 7));
+  }
+
+  // Pay for each worked span: its rate (the one in effect when it started),
+  // with the part past the week's overtime threshold paid at the overtime
+  // factor. Returns Map(id -> { money, ot }), money null without a rate;
+  // `ot` is true once the span has gone into overtime.
+  function earnings(entries, settings, now) {
+    const out = new Map();
+    const worked = new Map(); // week start -> ms worked so far
+    for (const s of withSpans(entries, now)) {
+      if (s.off) continue;
+      const week = weekStart(s.ts);
+      const before = worked.get(week) || 0;
+      const after = before + s.duration;
+      worked.set(week, after);
+      const rate = payValue(settings, 'rate', s.ts);
+      const otmin = payValue(settings, 'otmin', s.ts);
+      const factor = payValue(settings, 'otrate', s.ts) || DEFAULT_OT_FACTOR;
+      const limit = otmin == null ? Infinity : otmin * 3600000;
+      const regular = Math.max(0, Math.min(after, limit) - before);
+      const overtime = s.duration - regular;
+      out.set(s.id, {
+        money: rate == null ? null : (rate * (regular + overtime * factor)) / 3600000,
+        ot: after > limit,
+      });
+    }
+    return out;
+  }
+
+  function formatMoney(amount) {
+    return `$${(Math.round(amount * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  // "$32.50", "32.5", "1,200" -> number, or null.
+  function parseAmount(text) {
+    const t = String(text || '').trim().replace(/^\$/, '').replace(/,/g, '');
+    if (!/^\d+(\.\d+)?$/.test(t)) return null;
+    return Number(t);
+  }
+
   // Text timeline for the terminal: one row per `rowMinutes` (15 by
   // default), a colored bar per entry. `paint(slot, text)` colors a bar;
   // slot is 0-7, -1 for "other", or null for off time.
@@ -908,6 +977,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
+    PAY_KEYS, payValue, setPay, hasPay, weekStart, earnings, formatMoney, parseAmount,
     OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };

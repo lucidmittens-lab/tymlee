@@ -1055,9 +1055,13 @@
     } else if (st.state === 'off') {
       left.append(span('stopped', '■ off'), span('what dim', `  since ${st.since}`));
       today = span('today', st.today);
+      if (st.todayMoney) today.append(span('money', `  ${st.todayMoney}`));
     } else {
-      left.append(span('run', `▶ ${st.clock}`), span('what', `  ${st.what}`));
+      left.append(span('run', `▶ ${st.clock}`));
+      if (st.money) left.append(span(`money${st.ot ? ' ot' : ''}`, `  ${st.money}${st.ot ? ' OT' : ''}`));
+      left.append(span('what', `  ${st.what}`));
       today = span('today', st.today);
+      if (st.todayMoney) today.append(span('money', `  ${st.todayMoney}`));
       today.append(span('since', ` · since ${st.since}`));
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);

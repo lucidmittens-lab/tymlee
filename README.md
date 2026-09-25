@@ -69,7 +69,7 @@ The `.txt` export is exactly what `/log` prints. It groups entries by the day th
 `/note` attaches notes to an entry:
 
 1. It starts on your most recent entry. **Tab** steps back in time and **Shift+Tab** steps forward; Up and Down do the same. On a phone, use the ‹ older / newer › buttons. **Enter** selects, **Esc** cancels.
-2. Type the notes and press Enter. Existing notes are filled in for editing, and clearing the line removes them.
+2. Type the notes and press Enter. **Shift+Enter** starts a new line on the website, and **Option/Alt+Enter** does it in the terminal, shown as `↵`. Existing notes are filled in for editing, and clearing the line removes them.
 
 `/note 12` jumps straight to entry #12, and `/note 12 called the client back` sets the notes in one go (handy for `tymlee /note …` in the terminal).
 

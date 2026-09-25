@@ -227,7 +227,10 @@
   // ---- input: /note's entry picker and notes prompt --------------------------
   // Both take over the prompt line until Enter (or Esc to cancel).
 
-  let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', label, resolve }
+  let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', label, multiline, resolve }
+
+  // Line breaks in notes are shown as ↵ on the one-line prompt.
+  const BREAK = '↵';
 
   function pickEntry(choices) {
     return new Promise((resolve) => {
@@ -239,11 +242,12 @@
     });
   }
 
-  function ask(label, initial) {
+  function ask(label, initial, name) {
     return new Promise((resolve) => {
-      modal = { kind: 'ask', label, resolve };
-      input.value = initial || '';
-      input.placeholder = 'type notes · Enter: save · Esc: cancel';
+      const multiline = name === 'notes';
+      modal = { kind: 'ask', label, multiline, resolve };
+      input.value = (initial || '').split('\n').join(BREAK);
+      input.placeholder = multiline ? 'type notes · Shift+Enter: new line · Enter: save · Esc: cancel' : 'Enter: save · Esc: cancel';
       renderHints();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
@@ -376,6 +380,9 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         endModal(null);
+      } else if (modal.kind === 'ask' && modal.multiline && e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        input.setRangeText(BREAK, input.selectionStart, input.selectionEnd, 'end');
       } else if (modal.kind === 'pick' && (older || newer)) {
         e.preventDefault();
         movePick(older ? 1 : -1);
@@ -437,8 +444,8 @@
         echo(choice.label);
         endModal(choice);
       } else {
-        const value = input.value;
-        echo(value || '(no notes)');
+        const value = input.value.split(BREAK).join('\n');
+        echo(value || '(nothing)');
         endModal(value);
       }
       scrollToPrompt();

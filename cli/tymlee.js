@@ -241,7 +241,10 @@ function readBackupFile(fileArgs) {
 // Both take over the prompt line until Enter (Esc cancels).
 
 const PROMPT = tty ? sgr('32', '> ') : '';
-let modal = null; // { kind: 'pick', name, choices, idx, resolve } or { kind: 'ask', resolve }
+let modal = null; // { kind: 'pick', name, choices, idx, resolve } or { kind: 'ask', multiline, resolve }
+
+// Line breaks in notes are shown as ↵ on the one-line prompt.
+const BREAK = '↵';
 
 function pickPrompt() {
   const { choices, idx } = modal;
@@ -268,12 +271,13 @@ function ask(label, initial, name) {
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
-    modal = { kind: 'ask', resolve };
-    print(`${label} · Enter: save · Esc: cancel`, 'dim');
+    const multiline = name === 'notes';
+    modal = { kind: 'ask', multiline, resolve };
+    print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}Enter: save · Esc: cancel`, 'dim');
     rl.setPrompt(sgr('32', `${name || 'answer'} › `));
     promptShown = true;
     rl.prompt();
-    if (initial) rl.write(initial);
+    if (initial) rl.write(initial.split('\n').join(BREAK));
   });
 }
 
@@ -297,6 +301,12 @@ function modalKey(key) {
     clearInput();
     stdout.write('\n');
     endModal(null);
+    return;
+  }
+  if (modal.kind === 'ask') {
+    // Option/Alt+Enter (and Shift+Enter, where the terminal reports it):
+    // readline ignores these, so add the line break here.
+    if (modal.multiline && key.name === 'return' && (key.meta || key.shift)) rl.write(BREAK);
     return;
   }
   if (modal.kind !== 'pick') return;
@@ -472,7 +482,7 @@ async function interactive() {
       // The choice or notes, not a command; keep it out of the history.
       if (rl.history[0] === raw) rl.history.shift();
       const m = modal;
-      endModal(m.kind === 'pick' ? m.choices[m.idx] : raw);
+      endModal(m.kind === 'pick' ? m.choices[m.idx] : raw.split(BREAK).join('\n'));
       return;
     }
     promptShown = false;

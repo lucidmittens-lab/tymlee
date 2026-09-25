@@ -17,7 +17,8 @@
 //                        /note or /wopunch (name); choices are newest first,
 //                        { span, label }
 //   ask(label, initial, name) -> Promise<string|null>  type notes or a
-//                        work order (name: 'notes' or 'wo')
+//                        work order (name: 'notes' or 'wo'); notes may
+//                        contain line breaks ("\n") both ways
 //   editor               either an inline box that /save and /cancel act on:
 //                          { open({ text, items, mode, label }), isOpen(),
 //                            mode(), value(), items(), close() }
@@ -284,12 +285,10 @@
           if (!chosen) return args.length ? undefined : print('note cancelled', 'dim');
           const current = store.entries.find((e) => e.id === chosen.id);
           if (!current) return print('that entry was removed in the meantime', 'err');
-          const multiLine = Boolean(current.notes && current.notes.includes('\n'));
-          const initial = (current.notes || '').split('\n').join(' / ');
-          if (multiLine && args.length < 2) print('these notes have several lines; saving here joins them. To keep the line breaks, use /edit', 'dim');
+          const initial = current.notes || '';
           const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`notes for ${entryLabel(chosen)}`, initial, 'notes');
           if (typed == null) return print('note cancelled', 'dim');
-          const value = typed.trim();
+          const value = typed.split('\n').map((l) => l.trimEnd()).join('\n').trim();
           if (value === initial.trim()) return print('notes unchanged', 'dim');
           if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
           store.apply([{ op: 'put', entry: T.makeEntry(current, { notes: value }) }]);

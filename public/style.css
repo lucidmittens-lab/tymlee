@@ -463,14 +463,83 @@ body {
   border-bottom: 1px solid var(--line);
 }
 .tl-top .tl-legend { margin-bottom: 0; }
+.tl-top .tl-heads { margin-top: 8px; }
+.tl-top .tl-heads .tl-head { padding-bottom: 0; }
 .gui-presets { display: flex; gap: 6px; }
 .gui-steps { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
 .gui-day { padding: 0 6px; white-space: nowrap; }
 /* One day: the date is in the bar, so the column header is not needed. */
 .tl-one-day .tl-head { display: none; }
-/* Days drawn one under another (phones). */
-.tl-stacked + .tl-stacked { margin-top: 14px; }
-.tl-stacked .tl-head { position: static; padding-top: 2px; font-weight: 600; }
+button.gui-day {
+  font: inherit;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.gui-bar button.gui-day:disabled { opacity: 1; }
+.tl-short { display: none; }
+
+/* Week: the days side by side. */
+.tl-head-total:not(:empty)::before { content: '  '; white-space: pre; }
+.tl-head.tl-today .tl-head-name { color: var(--accent); font-weight: 600; }
+.tl-day.tl-future { background-color: color-mix(in srgb, var(--muted) 5%, transparent); }
+
+/* Month: a calendar, a small timeline per day. */
+.tl-cal-hours { font-size: 11px; margin: 6px 0; }
+.tl-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.tl-cal-wd { text-align: center; color: var(--muted); font-size: 11px; }
+.tl-cell {
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.tl-cell.tl-out { visibility: hidden; }
+.tl-cell.tl-future { opacity: 0.5; }
+.tl-cell.tl-today { border-color: var(--accent); }
+.tl-date {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 4px;
+  width: 100%;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.tl-date:disabled { cursor: default; }
+.tl-cell.tl-today .tl-date-n { color: var(--accent); font-weight: 600; }
+.tl-date-total { font-size: 10px; }
+.tl-mini {
+  position: relative;
+  height: 96px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 6%, transparent);
+}
+.tl-mblock {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 2px;
+  border-radius: 2px;
+  background: var(--c);
+  cursor: pointer;
+}
+.tl-mblock:hover { outline: 2px solid var(--fg); outline-offset: -1px; }
+.tl-mnow { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); pointer-events: none; }
 .gui-bar .gui-step {
   font-size: 14px;
   line-height: 1;
@@ -498,26 +567,47 @@ body {
 
   #app.gui-mode #gui { padding-left: 10px; padding-right: 10px; }
   .tl-top { padding-top: 10px; }
-  .gui-bar { gap: 8px; }
+  .gui-bar { gap: 6px; flex-wrap: nowrap; }
+  .tl-long { display: none; }
+  .tl-short { display: inline; }
+  .tl-top .tl-legend { display: none; } /* room for the timeline; tap a block for what it is */
   .gui-presets {
-    flex: 1 1 100%;
+    flex: none;
     gap: 0;
     padding: 2px;
     border: 1px solid var(--line);
     border-radius: 9px;
   }
   .gui-bar .gui-presets button {
-    flex: 1;
+    width: 34px;
     border: 0;
     border-radius: 7px;
-    padding: 6px 0;
+    padding: 5px 0;
     font-size: 13px;
   }
-  .gui-steps { flex: 1 1 100%; justify-content: space-between; margin: 0; }
-  .gui-day { font-size: 14px; }
+  .gui-steps { flex: 1; min-width: 0; justify-content: space-between; margin: 0; }
+  .gui-day, button.gui-day { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 2px; }
   .gui-bar .gui-step { width: 34px; height: 30px; padding: 0; font-size: 18px; border-radius: 9px; }
-  .gui-range { display: none; } /* the day header shows the date */
-  .tl-top .tl-legend { gap: 2px 12px; }
+  /* Week: seven narrow columns, category names only. */
+  .tl-mode-week { --axis: 1.6em; }
+  .tl-mode-week .tl-grid { column-gap: 2px; }
+  .tl-mode-week .tl-min { display: none; }
+  .tl-mode-week .tl-hour { right: 2px; font-size: 10px; }
+  .tl-mode-week .tl-head { text-align: center; padding: 0 0 4px; font-size: 11px; }
+  .tl-mode-week .tl-head-name, .tl-mode-week .tl-head-total { display: block; overflow: hidden; text-overflow: clip; }
+  .tl-mode-week .tl-head-total { font-size: 10px; }
+  .tl-mode-week .tl-head-total::before { content: none; }
+  .tl-mode-week .tl-block { left: 1px; right: 1px; padding: 1px 2px 1px 3px; border-left-width: 3px; border-radius: 4px; font-size: 10px; }
+  .tl-mode-week .tl-wo, .tl-mode-week .tl-note, .tl-mode-week .tl-dur,
+  .tl-mode-week .tl-times, .tl-mode-week .tl-notes { display: none; }
+  .tl-mode-week .tl-line { text-overflow: clip; }
+  .tl-mode-week .tl-line b { margin: 0; }
+  .tl-mode-week .tl-now span { display: none; }
+  /* Month: smaller days. */
+  .tl-cal-grid { gap: 2px; }
+  .tl-cell { padding: 2px 1px; border-radius: 4px; }
+  .tl-mini { height: 60px; }
+  .tl-mblock { left: 1px; right: 1px; }
   .tl-block { border-radius: 6px; }
 
   #app.gui-mode #divider { height: 22px; }

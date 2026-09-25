@@ -193,38 +193,64 @@
 
   const guiEl = $('gui');
   const VIEW_KEY = 'tymlee.view';
-  const PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month']];
   let view = 'cli';
-  let guiPreset = 'today'; // one of PRESETS, or null for guiRange
+  // What the GUI shows: a day, a (Monday to Sunday) week or a calendar month,
+  // `back` of them before the current one; or, with unit null, `guiRange`
+  // (from /timeline <range>).
+  const UNITS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
+  let guiUnit = 'day';
+  let guiBack = 0;
   let guiRange = null;
   let guiTimeline = null;
-
-  function guiRangeNow() {
-    return guiPreset ? T.parseRange(guiPreset, Date.now()) : guiRange;
-  }
 
   const DAY_MS = 86400000;
   const isOneDay = (r) => r && r.to - r.from <= DAY_MS + 3600000 && r.to - r.from >= DAY_MS - 3600000; // DST days
 
-  // Move a one-day range by `delta` days (not past today).
-  function stepDay(delta) {
-    const range = guiRangeNow();
-    if (!isOneDay(range)) return false;
-    const now = Date.now();
-    const key = T.ymd(T.addDays(range.from, delta));
-    if (key > T.ymd(now)) return false;
-    const preset = key === T.ymd(now) ? 'today' : key === T.ymd(T.addDays(T.startOfDay(now), -1)) ? 'yesterday' : null;
-    guiPreset = preset;
-    guiRange = preset ? null : T.parseRange(key, now);
+  function unitRange(unit, back, now) {
+    const today = T.startOfDay(now);
+    if (unit === 'day') {
+      const from = T.addDays(today, -back);
+      return { from, to: T.addDays(from, 1), label: T.ymd(from) };
+    }
+    if (unit === 'week') {
+      const monday = T.addDays(today, -((new Date(today).getDay() + 6) % 7));
+      const from = T.addDays(monday, -7 * back);
+      return { from, to: T.addDays(from, 7), label: `week of ${T.ymd(from)}` };
+    }
+    const d = new Date(today);
+    const from = new Date(d.getFullYear(), d.getMonth() - back, 1).getTime();
+    const to = new Date(d.getFullYear(), d.getMonth() - back + 1, 1).getTime();
+    return { from, to, label: T.ymd(from).slice(0, 7) };
+  }
+
+  function guiRangeNow() {
+    return guiUnit ? unitRange(guiUnit, guiBack, Date.now()) : guiRange;
+  }
+
+  // Step a day, week or month forward (+1) or back (-1), not past now.
+  function step(delta) {
+    if (!guiUnit || guiBack - delta < 0) return false;
+    guiBack -= delta;
     renderGui(delta > 0 ? 'next' : 'prev');
     scrollToNow();
     return true;
   }
 
+  function showUnit(unit, back = 0) {
+    guiUnit = unit;
+    guiBack = back;
+    renderGui();
+    scrollToNow();
+  }
+
+  // Days between today and `ts` (a day's start).
+  const daysBack = (ts) => Math.round((T.startOfDay(Date.now()) - T.startOfDay(ts)) / DAY_MS);
+
   function guiButton(label, onClick, { pressed, title, cls } = {}) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = label;
+    if (typeof label === 'string') b.textContent = label;
+    else b.append(...label);
     if (cls) b.className = cls;
     if (title) { b.title = title; b.setAttribute('aria-label', title); }
     if (pressed != null) b.setAttribute('aria-pressed', String(pressed));
@@ -233,62 +259,75 @@
     return b;
   }
 
+  function span2(cls, text) {
+    const e = document.createElement('span');
+    e.className = cls;
+    e.textContent = text;
+    return e;
+  }
+
+  function periodLabel(range) {
+    const from = new Date(range.from);
+    if (guiUnit === 'day') return from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    if (guiUnit === 'week') {
+      const last = new Date(T.addDays(range.to, -1));
+      const md = { month: 'short', day: 'numeric' };
+      return from.getMonth() === last.getMonth()
+        ? `${from.toLocaleDateString(undefined, md)}–${last.getDate()}`
+        : `${from.toLocaleDateString(undefined, md)}–${last.toLocaleDateString(undefined, md)}`;
+    }
+    return from.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  }
+
+  // The bar on top of the timeline, one line: Day | Week | Month (D W M on
+  // a phone), then ‹ the period and its total ›. Tapping the period goes
+  // back to the current one.
   function guiBar(range, days) {
     const bar = document.createElement('div');
     bar.className = 'gui-bar';
-    const presets = document.createElement('div');
-    presets.className = 'gui-presets';
-    for (const [key, label] of PRESETS) {
-      presets.append(guiButton(label, () => {
-        guiPreset = key;
-        renderGui();
-        scrollToNow();
-      }, { pressed: guiPreset === key }));
+    const units = document.createElement('div');
+    units.className = 'gui-presets';
+    for (const [key, label] of UNITS) {
+      units.append(guiButton([span2('tl-long', label), span2('tl-short', label[0])], () => showUnit(key), {
+        pressed: guiUnit === key, title: label,
+      }));
     }
-    bar.append(presets);
-    if (isOneDay(range)) {
-      // Step through days (on a phone, swiping the timeline does the same).
-      const steps = document.createElement('div');
-      steps.className = 'gui-steps';
-      const day = document.createElement('span');
-      day.className = 'gui-day';
-      const d = new Date(range.from);
-      day.append(d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }));
-      if (days[0]) {
-        const total = document.createElement('span');
-        total.className = 'tl-muted';
-        total.textContent = `  ${T.formatHM(days[0].totalMs)}`;
-        day.append(total);
-      }
-      const next = guiButton('›', () => stepDay(1), { title: 'Next day', cls: 'gui-step' });
-      next.disabled = guiPreset === 'today';
-      steps.append(guiButton('‹', () => stepDay(-1), { title: 'Previous day', cls: 'gui-step' }), day, next);
-      bar.append(steps);
-    } else if (!guiPreset && range) {
-      const custom = document.createElement('span');
-      custom.className = 'gui-range';
-      custom.textContent = range.label;
-      bar.append(custom);
+    bar.append(units);
+    const total = days.reduce((sum, d) => sum + d.totalMs, 0);
+    const steps = document.createElement('div');
+    steps.className = 'gui-steps';
+    if (guiUnit) {
+      const noun = guiUnit;
+      const label = guiButton([span2('gui-period', periodLabel(range)), span2('tl-muted gui-total', total ? `  ${T.formatHM(total)}` : '')],
+        () => showUnit(guiUnit), { cls: 'gui-day', title: guiBack ? `Back to this ${noun}` : `This ${noun}` });
+      const next = guiButton('›', () => step(1), { title: `Next ${noun}`, cls: 'gui-step' });
+      next.disabled = guiBack === 0;
+      steps.append(guiButton('‹', () => step(-1), { title: `Previous ${noun}`, cls: 'gui-step' }), label, next);
+    } else {
+      steps.append(span2('gui-day gui-range', range.label), span2('tl-muted gui-total', total ? `  ${T.formatHM(total)}` : ''));
     }
+    bar.append(steps);
     return bar;
   }
 
   function renderGui(slide) {
     const range = guiRangeNow();
+    const mode = guiUnit || (isOneDay(range) ? 'day' : range.to - range.from <= 8 * DAY_MS ? 'week' : 'month');
     closeEntryEditor();
     guiTimeline = window.TymleeTimeline.render({
-      store, range, onSelect: openEntryEditor, header: (days) => guiBar(range, days), stack: () => narrow.matches,
+      store,
+      range,
+      mode,
+      onSelect: openEntryEditor,
+      onDay: (key) => showUnit('day', daysBack(T.parseRange(key, Date.now()).from)),
+      header: (days) => guiBar(range, days),
     });
     if (slide) guiTimeline.el.classList.add(`tl-slide-${slide}`);
     guiEl.replaceChildren(guiTimeline.el);
   }
 
-  // Turning a phone (or resizing a window) past the narrow width switches
-  // multi-day timelines between side by side and stacked.
-  narrow.addEventListener('change', () => { if (view === 'gui' && !editCard) renderGui(); });
-
-  // Swipe sideways on a one-day timeline to move between days.
-  (function swipeDays() {
+  // Swipe sideways on the timeline to step through days, weeks or months.
+  (function swipe() {
     let start = null;
     guiEl.addEventListener('touchstart', (e) => {
       start = e.touches.length === 1 && !e.target.closest('.entry-card')
@@ -301,7 +340,7 @@
       const dy = t.clientY - start.y;
       const quick = Date.now() - start.t < 600;
       start = null;
-      if (quick && Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) stepDay(dx < 0 ? 1 : -1);
+      if (quick && Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
     }, { passive: true });
   })();
 
@@ -609,9 +648,17 @@
 
   // /timeline [range]: open the GUI view on that range.
   function showTimeline(range) {
-    const preset = PRESETS.find(([key]) => key === range.label);
-    guiPreset = preset ? preset[0] : null;
-    guiRange = range;
+    guiBack = 0;
+    guiRange = null;
+    if (isOneDay(range)) {
+      guiUnit = 'day';
+      guiBack = Math.max(0, daysBack(range.from));
+    } else if (range.label === 'week' || range.label === 'month') {
+      guiUnit = range.label;
+    } else {
+      guiUnit = null;
+      guiRange = range;
+    }
     setView('gui');
   }
 

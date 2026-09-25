@@ -8,7 +8,6 @@
   const appEl = $('app');
   const scrollEl = $('scroll');
   const out = $('out');
-  const form = $('prompt');
   const input = $('entry');
   const ghost = $('ghost');
   const matchesEl = $('matches');
@@ -401,6 +400,9 @@
     notes.value = entry.notes || '';
     notes.placeholder = 'notes';
     for (const c of [wo, text, notes]) c.setAttribute('autocapitalize', 'off');
+    // Not a login or address form: keep browser autofill bars away.
+    card.setAttribute('autocomplete', 'off');
+    for (const c of [time, wo, text, notes]) c.setAttribute('autocomplete', 'off');
 
     const error = document.createElement('div');
     error.className = 'ec-error';
@@ -742,15 +744,15 @@
       const { choices, idx } = modal;
       matchesEl.replaceChildren(
         hintButton('‹ older', 'btn', () => movePick(1)),
-        hintButton(`${choices[idx].label}  (${idx + 1}/${choices.length})`, 'sel', () => form.requestSubmit()),
+        hintButton(`${choices[idx].label}  (${idx + 1}/${choices.length})`, 'sel', () => submitPrompt()),
         hintButton('newer ›', 'btn', () => movePick(-1)),
-        hintButton('select', 'btn', () => form.requestSubmit()),
+        hintButton('select', 'btn', () => submitPrompt()),
         hintButton('cancel', 'btn', () => endModal(null)),
       );
     } else {
       matchesEl.replaceChildren(
         hintButton(modal.label, 'sel', () => {}),
-        hintButton('save', 'btn', () => form.requestSubmit()),
+        hintButton('save', 'btn', () => submitPrompt()),
         hintButton('cancel', 'btn', () => endModal(null)),
       );
     }
@@ -831,6 +833,11 @@
   input.addEventListener('scroll', () => { ghost.scrollLeft = input.scrollLeft; });
 
   input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && !(modal && modal.kind === 'ask' && modal.multiline && e.shiftKey)) {
+      e.preventDefault();
+      submitPrompt();
+      return;
+    }
     if (modal) {
       const older = (e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowUp';
       const newer = (e.key === 'Tab' && e.shiftKey) || e.key === 'ArrowDown';
@@ -898,8 +905,10 @@
     });
   }
 
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
+  // The prompt is not a <form>, so browsers don't offer to autofill it
+  // (Chrome on iOS shows a passwords bar over the keyboard for form fields).
+  // Enter submits it here instead.
+  function submitPrompt() {
     if (modal) {
       if (modal.kind === 'pick') {
         const choice = modal.choices[modal.idx];
@@ -918,7 +927,7 @@
     cycle = null;
     renderHints();
     if (line) submit(line);
-  });
+  }
 
   // Clicking the scrollback focuses the prompt, unless selecting text. Not on
   // touch screens, where a tap to scroll would pop up the keyboard.

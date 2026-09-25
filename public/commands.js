@@ -300,6 +300,8 @@
             'Ranges: today (default), yesterday, week, month, all, Nd (last N days),',
             '        YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
             ...(io.keys && io.keys.length ? ['', ...io.keys] : []),
+            '',
+            `tymlee v${T.VERSION} · ${T.REPO_URL}`,
           ].join('\n'), 'report dim');
         },
       },

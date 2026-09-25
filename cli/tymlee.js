@@ -19,6 +19,10 @@ const { createShell } = require(path.join(WEB, 'commands.js'));
 const stdin = process.stdin;
 const stdout = process.stdout;
 const args = process.argv.slice(2);
+if (args.length === 1 && /^(-v|--version)$/.test(args[0])) {
+  process.stdout.write(`tymlee ${require('../public/core.js').VERSION}\n`);
+  process.exit(0);
+}
 const oneShot = args.length > 0;
 const tty = Boolean(stdin.isTTY && stdout.isTTY);
 const color = Boolean(stdout.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
@@ -570,7 +574,7 @@ async function runOnce() {
 }
 
 async function interactive() {
-  print('tymlee · type what you are starting and press Enter · /help for commands', 'dim');
+  print(`tymlee v${T.VERSION} · type what you are starting and press Enter · /help for commands`, 'dim');
   await statusStart();
   try {
     await store.init();

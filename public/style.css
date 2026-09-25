@@ -70,7 +70,27 @@ body {
   padding: 16px 16px 0;
 }
 
-#dock { flex-shrink: 0; }
+#dock { flex-shrink: 0; position: relative; }
+
+/* Version and a link to the code: a small island just above the CLI | GUI
+   switch, at the right end of the status bar. */
+#about {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(var(--status-h, 26px) + 6px); /* app.js measures the status bar */
+  z-index: 3;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#about a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+#about a:hover { color: var(--accent); }
+/* Out of the way while typing on a phone. */
+.kb #about { display: none; }
 #dock .col {
   max-width: 900px;
   margin: 0 auto;
@@ -457,6 +477,7 @@ body {
 }
 #divider:hover .grip { opacity: 0.8; }
 #app.gui-mode #out {
+  position: relative; /* for scrolling to a report's top */
   order: 3;
   flex: 0 0 auto;
   width: 100%;

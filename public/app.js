@@ -39,10 +39,10 @@
     if (/\breport\b/.test(cls || '')) appendLines(pre, text);
     else pre.textContent = text;
     out.append(pre);
-    // In the GUI view the console pane is small: bigger output (reports,
-    // help, keys) switches back to the CLI view to show it.
-    // (Not saved: the next visit opens in the view you last picked.)
-    if (view === 'gui' && /\b(report|key)\b/.test(cls || '')) setView('cli', { save: false });
+    // In the GUI view, bigger output (reports, help, keys) opens the console
+    // tray up to show it, instead of taking the timeline's place.
+    pinned = /\b(report|key)\b/.test(cls || '') ? pre : null;
+    if (view === 'gui' && pinned) showInTray();
     if (view === 'gui') scrollToPrompt();
     return pre;
   }
@@ -88,10 +88,24 @@
   }
 
   // Like a terminal, jump to the bottom after every command.
+  // The last report printed, while it is the last thing in the console: the
+  // GUI view's tray shows it from its top (with the command that made it).
+  let pinned = null;
+
+  function pinnedTop() {
+    if (!pinned || out.lastElementChild !== pinned) return null;
+    const before = pinned.previousElementSibling;
+    return before && before.classList.contains('echo') ? before : pinned;
+  }
+
   function scrollToPrompt() {
-    // In the GUI view the console is its own small pane under the timeline.
-    if (view === 'gui') out.scrollTop = out.scrollHeight;
-    else scrollEl.scrollTop = scrollEl.scrollHeight;
+    // In the GUI view the console is its own pane under the timeline.
+    if (view !== 'gui') {
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+      return;
+    }
+    const top = pinnedTop();
+    out.scrollTop = top ? top.offsetTop - 4 : out.scrollHeight;
   }
 
   function nearBottom() {
@@ -377,6 +391,34 @@
     out.scrollTop = out.scrollHeight;
   }
 
+  // Open the tray as far as the report needs, up to about two thirds of
+  // the space; it goes back to its size when you enter something next.
+  let trayGrown = false;
+
+  function showInTray() {
+    const top = pinnedTop();
+    if (!top) return;
+    const need = out.scrollHeight - top.offsetTop + 12;
+    const current = out.getBoundingClientRect().height;
+    const h = Math.min(Math.max(need, current), Math.max(current, scrollEl.clientHeight * 0.66));
+    consoleOpen = true;
+    appEl.classList.remove('console-folded');
+    divider.setAttribute('aria-expanded', 'true');
+    if (h > current + 1) {
+      appEl.classList.add('console-anim');
+      out.style.height = `${Math.round(h)}px`;
+      setTimeout(() => appEl.classList.remove('console-anim'), 250);
+      trayGrown = true;
+    }
+  }
+
+  function shrinkTray() {
+    if (!trayGrown) return;
+    trayGrown = false;
+    if (narrow.matches) consoleOpen = false; // phones go back to the one-line peek
+    applyConsole();
+  }
+
   function toggleConsole(open = !consoleOpen) {
     consoleOpen = open;
     appEl.classList.add('console-anim');
@@ -398,6 +440,7 @@
       if (!drag.moved && Math.abs(dy) < 6) return;
       drag.moved = true;
       consoleOpen = true;
+        trayGrown = false;
       const h = Math.min(Math.max(drag.h + dy, peekHeight()), maxConsole());
       out.style.height = `${h}px`;
       out.scrollTop = out.scrollHeight;
@@ -705,6 +748,8 @@
   // /help, ...) switched to the CLI view to show its output.
   function clearScreen() {
     out.replaceChildren();
+    pinned = null;
+    shrinkTray();
     if (editor) out.append(editor.el); // keep an open editor
     else if (view !== chosenView) setView(chosenView, { save: false });
   }
@@ -1050,6 +1095,7 @@
   });
 
   function submit(line) {
+    shrinkTray();
     echo(line);
     const done = shell.run(line);
     if (history[history.length - 1] !== line) history.push(line);
@@ -1098,6 +1144,19 @@
     if (e.target !== input && e.target !== notesBox && !e.target.closest('#matches span')) focusPrompt();
   });
 
+  // ---- about: version and source, floating above the CLI | GUI switch -----
+
+  (function about() {
+    const el = $('about');
+    const link = document.createElement('a');
+    link.href = T.REPO_URL;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'GitHub';
+    link.title = 'The code for tymlee';
+    el.append(`tymlee v${T.VERSION} · `, link);
+  })();
+
   // ---- status bar ----------------------------------------------------------
 
   function span(cls, text) {
@@ -1106,6 +1165,8 @@
     el.textContent = text;
     return el;
   }
+
+  let lastStatusHeight = '';
 
   function renderStatus() {
     const st = shell.status(Date.now());
@@ -1127,6 +1188,8 @@
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
     statusEl.replaceChildren(...[left, today, right, viewToggle()].filter(Boolean));
+    const h = `${statusEl.offsetHeight}px`;
+    if (h !== lastStatusHeight) $('dock').style.setProperty('--status-h', (lastStatusHeight = h));
   }
 
   // ---- boot ----------------------------------------------------------------

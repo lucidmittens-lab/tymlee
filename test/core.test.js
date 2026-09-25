@@ -577,3 +577,8 @@ test('mergeSettings keeps the pay changes of both copies', () => {
   // The same step changed on both: the first copy (this device's) wins.
   assert.deepEqual(T.mergeSettings({ pay: { rate: [{ from: 0, value: 1 }] } }, { pay: { rate: [{ from: 0, value: 2 }] } }).pay.rate, [{ from: 0, value: 1 }]);
 });
+
+test('the terminal package has the same version as the app', () => {
+  assert.match(T.VERSION, /^\d+\.\d+\.\d+$/);
+  assert.equal(require('../cli/package.json').version, T.VERSION);
+});

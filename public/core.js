@@ -3,6 +3,11 @@
 (function (root) {
   'use strict';
 
+  // The app's version (the website and the terminal app share it; cli/package.json
+  // says the same) and where its code is.
+  const VERSION = '1.0.0';
+  const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
+
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // /off is stored as an entry with this text. Typed entries can never start
@@ -994,6 +999,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
+    VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,

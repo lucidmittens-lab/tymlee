@@ -87,7 +87,7 @@ The website opens in the GUI view: a live timeline, with the console tray under 
 - **Details:** hover over a block to see them.
 - **Editing:** click or tap a block to edit its start time, work order, text and notes in a small card. **Save** applies the changes with the same rules as `/edit`, and problems are shown in the card. **Cancel** or Esc closes it without changes, and **Delete** removes the entry (click it twice). Ctrl/Cmd+Enter in the notes saves.
 - **Colors:** each category keeps its color. The first eight categories you ever used get their own, from a palette checked for color-blind separation in light and dark mode. Later ones are gray, and every block is labeled with its category, so color is never the only way to tell categories apart.
-- **Typing in the GUI view:** the prompt works as usual, and replies show in the console pane. Commands with longer output (`/log`, `/help`, `/edit`, …) switch to the CLI view.
+- **Typing in the GUI view:** the prompt works as usual, and replies show in the console tray. Longer output (`/log`, `/help`, …) opens the tray up to show it, and it goes back to its size when you enter something next. `/edit` and `/restore` switch to the CLI view; `/clear` comes back.
 - **Remembered:** if you switch to the CLI view, it stays that way when you reload.
 
 The terminal app has no clickable controls. There, `/timeline` prints the same timeline as colored text, and `/timeline-p [range]` pins it to the top of the terminal, where it updates live as you log (see below).

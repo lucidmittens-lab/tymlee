@@ -41,7 +41,8 @@
     out.append(pre);
     // In the GUI view the console pane is small: bigger output (reports,
     // help, keys) switches back to the CLI view to show it.
-    if (view === 'gui' && /\b(report|key)\b/.test(cls || '')) setView('cli');
+    // (Not saved: the next visit opens in the view you last picked.)
+    if (view === 'gui' && /\b(report|key)\b/.test(cls || '')) setView('cli', { save: false });
     if (view === 'gui') scrollToPrompt();
     return pre;
   }
@@ -192,7 +193,9 @@
   // /timeline [range]. The prompt works the same in both.
 
   const guiEl = $('gui');
-  const VIEW_KEY = 'tymlee.view';
+  // The view picked with the CLI | GUI switch (Ctrl/Cmd+G). A new key: the
+  // old one also saved switches made by commands, so it starts over at GUI.
+  const VIEW_KEY = 'tymlee.view2';
   let view = 'cli';
   // What the GUI shows: a day, a (Monday to Sunday) week or a calendar month,
   // `back` of them before the current one; or, with unit null, `guiRange`
@@ -456,7 +459,12 @@
   // After the card closes, type on: the prompt gets the focus back, except
   // on touch screens, where that would pop up the keyboard.
   function backToPrompt() {
-    if (!window.matchMedia('(pointer: coarse)').matches) input.focus();
+    if (!window.matchMedia('(pointer: coarse)').matches) focusPrompt();
+  }
+
+  // The prompt, or the notes box while notes are being typed.
+  function focusPrompt() {
+    (modal && modal.multiline ? notesBox : input).focus();
   }
 
   function openEntryEditor(b, blockEl) {
@@ -625,8 +633,11 @@
     if (below > 0) guiEl.scrollTop = below;
   }
 
+  let chosenView = 'gui'; // the view picked with the switch (commands can show the other for a while)
+
   function setView(next, { save = true } = {}) {
     view = next;
+    if (save) chosenView = next;
     guiEl.hidden = view !== 'gui';
     divider.hidden = view !== 'gui';
     appEl.classList.toggle('gui-mode', view === 'gui');
@@ -690,9 +701,12 @@
     return wrap;
   }
 
+  // /clear, Ctrl+L: also back to the chosen view, after a command (/log,
+  // /help, ...) switched to the CLI view to show its output.
   function clearScreen() {
     out.replaceChildren();
     if (editor) out.append(editor.el); // keep an open editor
+    else if (view !== chosenView) setView(chosenView, { save: false });
   }
 
   // ---- editor (/edit) ------------------------------------------------------
@@ -732,7 +746,7 @@
   }
 
   function openTextBox({ text, items, mode, label }) {
-    if (view === 'gui') setView('cli'); // /edit and /restore need the text view
+    if (view === 'gui') setView('cli', { save: false }); // /edit and /restore need the text view
     const el = document.createElement('textarea');
     el.className = 'editor';
     el.value = text;
@@ -785,8 +799,38 @@
 
   let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', label, multiline, resolve }
 
-  // Line breaks in notes are shown as ↵ on the one-line prompt.
-  const BREAK = '↵';
+  // Notes get a real multi-line box in place of the one-line prompt:
+  // Enter saves, Shift+Enter (or the "new line" button) starts a new line.
+  const notesBox = document.createElement('textarea');
+  notesBox.id = 'notes-box';
+  notesBox.rows = 1;
+  notesBox.hidden = true;
+  notesBox.spellcheck = false;
+  notesBox.setAttribute('autocomplete', 'off');
+  notesBox.setAttribute('aria-label', 'Notes');
+  input.after(notesBox);
+
+  function fitNotesBox() {
+    notesBox.style.height = 'auto';
+    notesBox.style.height = `${notesBox.scrollHeight}px`;
+    scrollToPrompt();
+  }
+
+  function newNotesLine() {
+    notesBox.setRangeText('\n', notesBox.selectionStart, notesBox.selectionEnd, 'end');
+    fitNotesBox();
+  }
+
+  notesBox.addEventListener('input', fitNotesBox);
+  notesBox.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      submitPrompt();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      endModal(null);
+    }
+  });
 
   function pickEntry(choices) {
     return new Promise((resolve) => {
@@ -802,8 +846,20 @@
     return new Promise((resolve) => {
       const multiline = name === 'notes';
       modal = { kind: 'ask', label, multiline, resolve };
-      input.value = (initial || '').split('\n').join(BREAK);
-      input.placeholder = multiline ? 'type notes · Shift+Enter: new line · Enter: save · Esc: cancel' : 'Enter: save · Esc: cancel';
+      if (multiline) {
+        input.hidden = true;
+        ghost.hidden = true;
+        notesBox.hidden = false;
+        notesBox.value = initial || '';
+        notesBox.placeholder = 'type notes · Shift+Enter: new line · Enter: save · Esc: cancel';
+        renderHints();
+        fitNotesBox();
+        notesBox.focus();
+        notesBox.setSelectionRange(notesBox.value.length, notesBox.value.length);
+        return;
+      }
+      input.value = initial || '';
+      input.placeholder = 'Enter: save · Esc: cancel';
       renderHints();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
@@ -813,6 +869,13 @@
   function endModal(value) {
     const m = modal;
     modal = null;
+    if (m.multiline) {
+      notesBox.hidden = true;
+      notesBox.value = '';
+      input.hidden = false;
+      ghost.hidden = false;
+      input.focus();
+    }
     input.value = '';
     input.placeholder = '';
     renderHints();
@@ -849,6 +912,7 @@
     } else {
       matchesEl.replaceChildren(
         hintButton(modal.label, 'sel', () => {}),
+        ...(modal.multiline ? [hintButton('new line', 'btn', newNotesLine)] : []),
         hintButton('save', 'btn', () => submitPrompt()),
         hintButton('cancel', 'btn', () => endModal(null)),
       );
@@ -930,7 +994,7 @@
   input.addEventListener('scroll', () => { ghost.scrollLeft = input.scrollLeft; });
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing && !(modal && modal.kind === 'ask' && modal.multiline && e.shiftKey)) {
+    if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
       submitPrompt();
       return;
@@ -941,9 +1005,6 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         endModal(null);
-      } else if (modal.kind === 'ask' && modal.multiline && e.key === 'Enter' && e.shiftKey) {
-        e.preventDefault();
-        input.setRangeText(BREAK, input.selectionStart, input.selectionEnd, 'end');
       } else if (modal.kind === 'pick' && (older || newer)) {
         e.preventDefault();
         movePick(older ? 1 : -1);
@@ -1012,8 +1073,8 @@
         echo(choice.label);
         endModal(choice);
       } else {
-        const value = input.value.split(BREAK).join('\n');
-        echo(value || '(nothing)');
+        const value = modal.multiline ? notesBox.value : input.value;
+        echo(value.trim() || '(nothing)');
         endModal(value);
       }
       scrollToPrompt();
@@ -1031,10 +1092,10 @@
   const finePointer = window.matchMedia('(pointer: fine)');
   scrollEl.addEventListener('click', (e) => {
     if (e.target.closest('.editor, .entry-card')) return;
-    if (finePointer.matches && !String(window.getSelection())) input.focus();
+    if (finePointer.matches && !String(window.getSelection())) focusPrompt();
   });
   $('dock').addEventListener('click', (e) => {
-    if (e.target !== input && !e.target.closest('#matches span')) input.focus();
+    if (e.target !== input && e.target !== notesBox && !e.target.closest('#matches span')) focusPrompt();
   });
 
   // ---- status bar ----------------------------------------------------------
@@ -1086,6 +1147,7 @@
     // Reopen the view used last (after printing today's log into the scrollback).
     let saved = 'gui';
     try { saved = localStorage.getItem(VIEW_KEY) || 'gui'; } catch (_) { /* default view */ }
-    if (saved === 'gui') setView('gui', { save: false });
+    chosenView = saved === 'cli' ? 'cli' : 'gui';
+    if (chosenView === 'gui') setView('gui', { save: false });
   });
 })();

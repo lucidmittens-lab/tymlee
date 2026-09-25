@@ -149,6 +149,25 @@ body {
   pointer-events: none;
 }
 #ghost .typed { color: transparent; }
+#notes-box {
+  display: block;
+  width: 100%;
+  max-height: calc(1.45em * 8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  line-height: 1.45;
+  color: var(--fg);
+  background: transparent;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  caret-color: var(--accent);
+}
+#notes-box[hidden] { display: none; }
 
 #matches {
   min-height: 1.45em;

@@ -34,7 +34,7 @@ Thu 2026-09-24
 |---|---|
 | `/log [range]` | print the formatted readout (alias `/ls`) |
 | `/report [range]` | time per category, largest first, with each category's entries |
-| `/note [#] [notes]` | add or change notes on an entry; see below |
+| `/note [text]` | add a line of notes to the current entry, or pick an entry; see below |
 | `/wolink <category> [YYYY-MM-DD] [wo]` | link a work order to a category for a day; see below |
 | `/wopunch [#] [wo]` | set the work order on one entry (same picker as `/note`) |
 | `/wolist [range]` | time per work order, including linked ones with no time yet |
@@ -94,12 +94,12 @@ The terminal app has no clickable controls. There, `/timeline` prints the same t
 
 ## Notes
 
-`/note` attaches notes to an entry:
+`/note called the client back` adds a line of notes to the current entry. `/note #12 called back` adds it to entry #12 instead (handy for `tymlee /note …` in the terminal).
 
-1. It starts on your most recent entry. **Tab** steps back in time and **Shift+Tab** steps forward; Up and Down do the same. On a phone, use the ‹ older / newer › buttons. **Enter** selects, **Esc** cancels.
-2. Type the notes and press Enter. **Shift+Enter** starts a new line on the website, and **Option/Alt+Enter** does it in the terminal, shown as `↵`. Existing notes are filled in for editing, and clearing the line removes them.
+`/note` on its own lets you pick an entry and write in its notes:
 
-`/note 12` jumps straight to entry #12, and `/note 12 called the client back` sets the notes in one go (handy for `tymlee /note …` in the terminal).
+1. It starts on your most recent entry. **Tab** steps back in time and **Shift+Tab** steps forward; Up and Down do the same. On a phone, use the ‹ older / newer › buttons. **Enter** selects, **Esc** cancels. `/note 12` jumps straight to entry #12.
+2. The notes so far are shown, with the cursor on a new line under them. Type and press Enter to save. **Shift+Enter** starts another line on the website (on a phone, the **new line** button), and **Option/Alt+Enter** does it in the terminal. On the website you can also edit or clear the earlier lines; emptying the box removes the notes.
 
 Notes show under their entry in `/log` and in `.txt` exports as `> …` lines, and in the `notes` column of CSV exports; `/restore` reads them back. In `/edit`, notes are `>` lines under an entry, and several lines make multi-line notes. For encrypted accounts, notes are encrypted together with the entry.
 

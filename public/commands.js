@@ -320,22 +320,44 @@
         },
       },
       note: {
-        usage: '/note [#] [notes]',
-        about: 'add or change notes on an entry (Tab: older, Shift+Tab: newer)',
+        usage: '/note [text]  or  /note #n [text]',
+        about: 'add a line of notes to the current entry, or pick one (Tab: older, Shift+Tab: newer)',
         async run(args) {
           if (busy()) return;
           if (!shown().some((e) => !T.isOff(e))) return print('no entries to add notes to', 'err');
           if (!(await store.supports('notes'))) {
             return print('notes need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
           }
-          const chosen = await chooseEntry(args, '/note [#] [notes]', 'note');
-          if (!chosen) return args.length ? undefined : print('note cancelled', 'dim');
+          // "/note 12" or "/note #12 [text]" names an entry; any other text is
+          // a new line of notes for the current entry.
+          const named = args.length && (/^#\d+$/.test(args[0]) || (args.length === 1 && /^\d+$/.test(args[0])));
+          let chosen;
+          let text = '';
+          if (named) {
+            chosen = await chooseEntry(args.slice(0, 1), '/note #n [text]', 'note');
+            if (!chosen) return undefined;
+            text = args.slice(1).join(' ');
+          } else if (args.length) {
+            const spans = T.withSpans(store.entries, Date.now()).filter((sp) => !sp.off);
+            chosen = spans[spans.length - 1];
+            text = args.join(' ');
+          } else {
+            chosen = await chooseEntry([], '/note [text]', 'note');
+            if (!chosen) return print('note cancelled', 'dim');
+          }
           const current = store.entries.find((e) => e.id === chosen.id);
           if (!current) return print('that entry was removed in the meantime', 'err');
           const initial = current.notes || '';
-          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`notes for ${entryLabel(chosen)}`, initial, 'notes');
-          if (typed == null) return print('note cancelled', 'dim');
-          const value = typed.split('\n').map((l) => l.trimEnd()).join('\n').trim();
+          let value;
+          if (text) {
+            value = initial ? `${initial}\n${text}` : text; // a new line under the notes so far
+          } else {
+            // Start on a new line under the notes so far.
+            const typed = await io.ask(`notes for ${entryLabel(chosen)}`, initial ? `${initial}\n` : '', 'notes');
+            if (typed == null) return print('note cancelled', 'dim');
+            value = typed;
+          }
+          value = value.split('\n').map((l) => l.trimEnd()).join('\n').trim();
           if (value === initial.trim()) return print('notes unchanged', 'dim');
           if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
           store.apply([{ op: 'put', entry: T.makeEntry(current, { notes: value }) }]);

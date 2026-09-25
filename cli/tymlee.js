@@ -257,10 +257,7 @@ function readBackupFile(fileArgs) {
 // Both take over the prompt line until Enter (Esc cancels).
 
 const PROMPT = tty ? sgr('32', '> ') : '';
-let modal = null; // { kind: 'pick', name, choices, idx, resolve } or { kind: 'ask', multiline, resolve }
-
-// Line breaks in notes are shown as ↵ on the one-line prompt.
-const BREAK = '↵';
+let modal = null; // { kind: 'pick', name, choices, idx, resolve } or { kind: 'ask', multiline, lines, resolve }
 
 function pickPrompt() {
   const { choices, idx } = modal;
@@ -269,7 +266,7 @@ function pickPrompt() {
 
 function pickEntry(choices, name) {
   if (!rl || !tty) {
-    print('choosing an entry needs the tymlee shell; use /note <#> [notes]', 'err');
+    print('choosing an entry needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
@@ -283,17 +280,22 @@ function pickEntry(choices, name) {
 
 function ask(label, initial, name) {
   if (!rl || !tty) {
-    print('typing notes needs the tymlee shell; use /note <#> <notes>', 'err');
+    print('typing notes needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
     const multiline = name === 'notes';
-    modal = { kind: 'ask', multiline, resolve };
+    // Notes: lines already written stay on screen above the prompt line,
+    // which edits the last one. Option/Alt+Enter moves on to a new line.
+    const lines = multiline ? (initial || '').split('\n') : [];
+    const current = multiline ? lines.pop() : initial || '';
+    modal = { kind: 'ask', multiline, lines, name: name || 'answer', resolve };
     print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}Enter: save · Esc: cancel`, 'dim');
-    rl.setPrompt(sgr('32', `${name || 'answer'} › `));
+    for (const line of lines) print(`${sgr('90', `${modal.name} ›`)} ${line}`);
+    rl.setPrompt(sgr('32', `${modal.name} › `));
     promptShown = true;
     rl.prompt();
-    if (initial) rl.write(initial.split('\n').join(BREAK));
+    if (current) rl.write(current);
   });
 }
 
@@ -321,8 +323,13 @@ function modalKey(key) {
   }
   if (modal.kind === 'ask') {
     // Option/Alt+Enter (and Shift+Enter, where the terminal reports it):
-    // readline ignores these, so add the line break here.
-    if (modal.multiline && key.name === 'return' && (key.meta || key.shift)) rl.write(BREAK);
+    // readline ignores these, so finish the line here and start a new one.
+    if (modal.multiline && key.name === 'return' && (key.meta || key.shift)) {
+      const line = rl.line;
+      clearInput();
+      modal.lines.push(line);
+      print(`${sgr('90', `${modal.name} ›`)} ${line}`);
+    }
     return;
   }
   if (modal.kind !== 'pick') return;
@@ -627,7 +634,7 @@ async function interactive() {
       // The choice or notes, not a command; keep it out of the history.
       if (rl.history[0] === raw) rl.history.shift();
       const m = modal;
-      endModal(m.kind === 'pick' ? m.choices[m.idx] : raw.split(BREAK).join('\n'));
+      endModal(m.kind === 'pick' ? m.choices[m.idx] : [...(m.lines || []), raw].join('\n'));
       return;
     }
     promptShown = false;

@@ -164,7 +164,13 @@
             const end = b.running ? 'now' : T.hhmm(b.start + b.duration);
             block.append(el('div', 'tl-line tl-muted tl-times', `${T.hhmm(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}`));
           }
-          if (h >= 52 && b.notes) block.append(el('div', 'tl-line tl-notes', b.notes.split('\n')[0]));
+          // Notes: as many lines as the block has room for.
+          if (h >= 52 && b.notes) {
+            const room = Math.floor((h - 34) / 16);
+            const lines = b.notes.split('\n');
+            for (const line of lines.slice(0, room)) block.append(el('div', 'tl-line tl-notes', line || ' '));
+            if (lines.length > room && room > 0) block.lastChild.textContent += ' …';
+          }
           if (b.off) block.setAttribute('aria-label', title);
           else wireBlock(block, b, title);
           col.append(block);

@@ -74,7 +74,7 @@
     // Encryption for the signed-in account:
     //   'pending'  not checked yet (or the check failed; retried on next sync)
     //   'plain'    the server has no keyring table yet: sync without encryption
-    //   'none'     encryption is available but not turned on (/encrypt)
+    //   'none'     no key yet: one is being created (encryption is required); nothing syncs until then
     //   'locked'   the account is encrypted but this device has no key yet
     //   'ready'    this device holds the key; text is encrypted on upload
     let vault = { mode: 'pending' };
@@ -85,7 +85,7 @@
     let settingsDirty = false;
     let serverSettings = null; // null (not checked yet), true, or false (no table: stay on this device)
     let settingsNoticeShown = false;
-    let promptedEncrypt = false; // the /encrypt suggestion is shown once per page load
+    let autoEncrypting = false; // turning encryption on for an account that doesn't have it yet
 
     // ---- local persistence -------------------------------------------------
 
@@ -441,7 +441,7 @@
     // devices' changes. Never fails the entry sync: settings just wait.
     async function syncSettings() {
       if (!user || !client || serverSettings === false) return;
-      if (vault.mode !== 'ready' && vault.mode !== 'plain' && vault.mode !== 'none') return;
+      if (vault.mode !== 'ready' && vault.mode !== 'plain') return;
       const who = owner;
       try {
         const got = await client.from('settings').select('data').maybeSingle();
@@ -517,7 +517,7 @@
 
     function recoveryMessage(code, first) {
       return [
-        first ? 'Encryption is on for this account. Your recovery key:' : 'Your new recovery key (the old one no longer works):',
+        first ? 'Your log is end-to-end encrypted: it is encrypted on your devices before upload, so nobody else can read it, including whoever runs this site. Your recovery key:' : 'Your new recovery key (the old one no longer works):',
         '',
         `  ${code}`,
         '',
@@ -542,21 +542,23 @@
         throw error;
       }
       if (data) { lock(); return; }
-      // Encryption is available but this account hasn't turned it on yet.
-      const firstTime = !promptedEncrypt;
+      // Encryption is required: an account without it gets it now, before
+      // anything is uploaded (vaultOpen holds sync until then).
       vault = { mode: 'none' };
-      if (firstTime) {
-        promptedEncrypt = true;
-        onNotice([
-          'Your log is not encrypted yet.',
-          '',
-          'Type /encrypt to turn on end-to-end encryption: your entries are encrypted on your devices before they are uploaded, so nobody else can read them, including whoever runs this site. You will get a recovery key to save.',
-        ].join('\n'), 'key');
-      }
+      setTimeout(autoEncrypt, 0);
+    }
+
+    function autoEncrypt() {
+      if (autoEncrypting || vault.mode !== 'none') return;
+      autoEncrypting = true;
+      enableEncryption()
+        .catch((err) => { if (vault.mode === 'none') onNotice(`could not turn on encryption yet (${err.message}); retrying on the next sync`, 'err'); })
+        .finally(() => { autoEncrypting = false; });
     }
 
     // Turn encryption on for this account: create the master key, lock a copy
-    // with a new recovery key, and re-upload every entry encrypted.
+    // with a new recovery key, and re-upload every entry encrypted. Runs by
+    // itself for accounts that don't have it (encryption is required).
     async function enableEncryption() {
       requireClient();
       if (!user) throw new Error('sign in first: /login you@example.com');
@@ -581,8 +583,10 @@
       await sync({ full: true }); // re-uploads existing entries encrypted
     }
 
-    // True when entries can be synced (encrypted, or plain on a server that
-    // doesn't support encryption yet).
+    // True when entries can be synced: encrypted, or plain on a server that
+    // doesn't support encryption at all (an old supabase/schema.sql). An
+    // account still getting its key ('none') waits, so nothing is ever
+    // uploaded unencrypted.
     async function vaultOpen() {
       if (vault.mode === 'pending') await prepareVault();
       if (vault.mode === 'locked') {
@@ -590,7 +594,8 @@
         onChange();
         return false;
       }
-      return vault.mode === 'ready' || vault.mode === 'plain' || vault.mode === 'none';
+      if (vault.mode === 'none') setTimeout(autoEncrypt, 0);
+      return vault.mode === 'ready' || vault.mode === 'plain';
     }
 
     function requireKey() {

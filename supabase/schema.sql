@@ -156,3 +156,25 @@ $$;
 drop trigger if exists settings_touch on public.settings;
 create trigger settings_touch before insert or update on public.settings
   for each row execute function public.settings_touch();
+
+-- ---------------------------------------------------------------------------
+-- Required encryption (added later; safe to run on an existing project).
+-- The app turns encryption on by itself for every account; these checks make
+-- the database refuse unencrypted text too, e.g. from an old copy of the app
+-- still open somewhere. NOT VALID: rows already stored aren't checked, only
+-- new and changed ones.
+
+alter table public.entries drop constraint if exists entries_encrypted_check;
+alter table public.entries add constraint entries_encrypted_check check (
+  (deleted and text = '/deleted')
+  or (text like '/e1/%' or text like '/e2/%')
+) not valid;
+
+alter table public.entries drop constraint if exists entries_notes_encrypted_check;
+alter table public.entries add constraint entries_notes_encrypted_check check (notes is null or notes like '/e1/%') not valid;
+
+alter table public.entries drop constraint if exists entries_wo_encrypted_check;
+alter table public.entries add constraint entries_wo_encrypted_check check (wo is null or wo like '/e1/%') not valid;
+
+alter table public.settings drop constraint if exists settings_encrypted_check;
+alter table public.settings add constraint settings_encrypted_check check (data like '/e1/%') not valid;

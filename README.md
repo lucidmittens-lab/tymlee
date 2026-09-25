@@ -173,8 +173,8 @@ When Supabase is configured, each user signs in with `/login` and their log is s
 
 When you're signed in, each entry's text and start time are encrypted together in your browser before upload, so the database only holds ciphertext. That includes whoever runs the Supabase project. The server still sees your email address, how many entries you have, and when your devices upload or change them. For live logging, upload time is roughly when you clock in.
 
-- **Turning it on:** after signing in, tymlee says if your log isn't encrypted yet. Type `/encrypt` to turn it on. Until then, syncing works without encryption.
-- **One master key per account.** `/encrypt` creates it, shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`), and re-uploads your existing entries encrypted. Save the recovery key somewhere safe. Nobody can recover it for you.
+- **Required, and automatic:** the first time an account signs in, tymlee creates its master key, shows a **recovery key** (`XXXXX-XXXXX-XXXXX-XXXXX`), and uploads the log encrypted. Nothing is uploaded before that. Save the recovery key somewhere safe. Nobody can recover it for you. (Accounts from before this re-upload their existing entries encrypted the same way.)
+- **One master key per account.** If a new account signs in on two devices at the same moment, one creates the key and the other is asked to link.
 - **Other devices that are already signed in** show as locked on their next sync, until you link them.
 - **The server stores the master key only in locked form:** once locked with the recovery key, and for 10 minutes locked with a `/link` code while you add a device. The codes are shown on screen and never sent anywhere.
 - **Adding a device:** sign in on it first with `/login` and `/code`; linking doesn't sign you in. It says it's locked. Type `/link` on a device that's already set up, then type the code it shows on the new device. You can use `/recover <key>` instead.
@@ -184,7 +184,9 @@ When you're signed in, each entry's text and start time are encrypted together i
 
 The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. Stored entries start with `/e2/` (time and text sealed together; the `ts` column is 0) or, on older servers, `/e1/` (text only). The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
 
-While the server hasn't been updated with the `keyring` table from `supabase/schema.sql`, the app keeps syncing without encryption, and `/encrypt` explains that the server needs the script.
+The last section of `supabase/schema.sql` makes the database itself refuse unencrypted entries, notes, work orders and settings, e.g. from an old copy of the app still open somewhere. Rows stored before it are left as they are; they are re-encrypted by the next device that syncs them.
+
+A server set up before encryption existed (without the `keyring` table from `supabase/schema.sql`) keeps syncing without encryption until the script is run.
 
 ## Terminal app
 

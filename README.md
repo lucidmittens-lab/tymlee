@@ -67,11 +67,13 @@ The `.txt` export is exactly what `/log` prints. It groups entries by the day th
 
 ## Timeline (GUI view)
 
-The website opens in the GUI view: a live timeline, with a small console pane under it showing the latest output and the prompt below that. The **CLI | GUI** switch in the bottom-right of the status bar swaps to the full command scrollback and back. **Ctrl/Cmd+G** does the same, and `/timeline [range]` opens the GUI view on a range.
+The website opens in the GUI view: a live timeline, with the console tray under it (the latest output and the prompt, on their own surface). The **CLI | GUI** switch in the bottom-right of the status bar swaps to the full command scrollback and back. **Ctrl/Cmd+G** does the same, and `/timeline [range]` opens the GUI view on a range.
 
 - **Layout:** each day is a column on a shared hour axis, and each entry is a block sized by its duration, labeled with its work order, category, note, times and notes (as far as the block's height allows). Off time is a hatched gap.
 - **Today:** a "now" line crosses the column and the running entry grows. Anything you log appears straight away.
-- **Ranges:** the Today / Yesterday / Week / Month buttons switch the range. A week shows days side by side; on a phone, swipe sideways.
+- **Ranges:** the Today / Yesterday / Week / Month buttons switch the range, and ‹ › step through single days. The buttons, the date and the legend stay at the top while the timeline scrolls. A week shows days side by side; on a phone, swipe sideways to see them all.
+- **Console tray:** drag its divider to resize it (the size is remembered), or click the divider to fold it to one line and back.
+- **On a phone:** the console starts folded to a one-line peek; tap the handle to open it. Swipe left or right on a day to move between days. Tapping a block opens the editor as a bottom sheet; tap outside it or swipe it down to close it. The status bar shows sync as a colored dot.
 - **Details:** hover over a block to see them.
 - **Editing:** click or tap a block to edit its start time, work order, text and notes in a small card. **Save** applies the changes with the same rules as `/edit`, and problems are shown in the card. **Cancel** or Esc closes it without changes, and **Delete** removes the entry (click it twice). Ctrl/Cmd+Enter in the notes saves.
 - **Colors:** each category keeps its color. The first eight categories you ever used get their own, from a palette checked for color-blind separation in light and dark mode. Later ones are gray, and every block is labeled with its category, so color is never the only way to tell categories apart.

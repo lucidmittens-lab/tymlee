@@ -6,6 +6,7 @@
   --accent: #2f6f5e;
   --accent-bg: #e3efe9;
   --warn: #b0413e;
+  --panel: #f2f0ea;
   --font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
@@ -18,6 +19,7 @@
     --accent: #7cc4ad;
     --accent-bg: #1d2e28;
     --warn: #e0716d;
+    --panel: #1c1c1a;
   }
 }
 
@@ -360,7 +362,7 @@ body {
   margin: 0 auto;
   padding: 12px 16px 16px;
 }
-#gui .tl { font-size: 12px; line-height: 1.3; position: relative; }
+#gui .tl { font-size: 12px; line-height: 1.3; position: relative; margin-top: 0; }
 .gui-bar {
   display: flex;
   flex-wrap: wrap;
@@ -376,28 +378,151 @@ body {
 }
 .gui-range { color: var(--muted); }
 
-/* GUI view: the timeline scrolls above a small console pane (the same
-   scrollback as the CLI view), with the prompt below as usual. */
+/* GUI view: the timeline scrolls above the console tray (the same
+   scrollback as the CLI view, on its own surface), with the prompt at the
+   bottom of the tray. app.js sets the tray's height. */
 #app.gui-mode #scroll { overflow: hidden; }
 #app.gui-mode #gui {
+  order: 1;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   position: relative;
+  padding-top: 0;
 }
-#app.gui-mode #out {
-  order: 2; /* under the timeline, just above the prompt */
+#divider { display: none; }
+#app.gui-mode #divider {
+  order: 2;
   flex: 0 0 auto;
-  margin: 0 auto;
-  max-width: 1200px;
-  height: calc(1.45em * 6 + 10px);
-  overflow-y: auto;
-  padding: 6px 16px 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 max(16px, calc((100% - 1168px) / 2));
+  background: var(--panel);
   border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 12px -10px rgba(0, 0, 0, 0.25);
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+#divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.divider-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 4px;
+  margin: -2px 0 0 -18px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: 0.45;
+}
+#divider:hover .grip { opacity: 0.8; }
+#app.gui-mode #out {
+  order: 3;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px max(16px, calc((100% - 1168px) / 2)) 4px;
+  background: var(--panel);
+}
+#app.console-anim #out { transition: height 0.2s ease; }
+/* Folded to one line: only the latest output shows. */
+#app.gui-mode.console-folded #out { overflow: hidden; cursor: pointer; }
+#app.gui-mode #dock { background: var(--panel); }
+#app.gui-mode #dock .col { max-width: 1200px; }
+
+/* The range buttons and legend stay in view while the timeline scrolls. */
+.tl-top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--bg);
+  padding: 12px 0 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.tl-top .tl-legend { margin-bottom: 0; }
+.gui-presets { display: flex; gap: 6px; }
+.gui-steps { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
+.gui-day { padding: 0 6px; white-space: nowrap; }
+/* One day: the date is in the bar, so the column header is not needed. */
+.tl-one-day .tl-head { display: none; }
+.gui-bar .gui-step {
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 9px 3px;
+}
+.gui-bar button:disabled { opacity: 0.35; cursor: default; }
+
+/* Moving between days slides the timeline. */
+.tl-slide-next .tl-scroll { animation: tl-from-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.tl-slide-prev .tl-scroll { animation: tl-from-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes tl-from-right { from { transform: translateX(48px); opacity: 0; } }
+@keyframes tl-from-left { from { transform: translateX(-48px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tl-slide-next .tl-scroll, .tl-slide-prev .tl-scroll, .entry-card.sheet, .sheet-backdrop { animation: none !important; }
+  #app.console-anim #out { transition: none; }
+}
+
+/* ---- phones: a timeline-first layout ------------------------------------------ */
 @media (max-width: 600px) {
-  #app.gui-mode #out { height: calc(1.45em * 3 + 8px); }
+  /* Status bar: the entry gets the room. Sync is a colored dot (its label is
+     still read out), and the GUI view shows the day's total itself. */
+  #status .sync { font-size: 0; }
+  #status .sync::before { content: '●'; font-size: 12px; }
+  #app.gui-mode #status .today { display: none; }
+
+  #app.gui-mode #gui { padding-left: 10px; padding-right: 10px; }
+  .tl-top { padding-top: 10px; }
+  .gui-bar { gap: 8px; }
+  .gui-presets {
+    flex: 1 1 100%;
+    gap: 0;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+  }
+  .gui-bar .gui-presets button {
+    flex: 1;
+    border: 0;
+    border-radius: 7px;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+  .gui-steps { flex: 1 1 100%; justify-content: space-between; margin: 0; }
+  .gui-day { font-size: 14px; }
+  .gui-bar .gui-step { width: 34px; height: 30px; padding: 0; font-size: 18px; border-radius: 9px; }
+  .gui-range { display: none; } /* the day header shows the date */
+  /* The legend is one line that scrolls sideways. */
+  .tl-top .tl-legend {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -10px;
+    padding: 0 10px;
+  }
+  .tl-top .tl-legend::-webkit-scrollbar { display: none; }
+  .tl-block { border-radius: 6px; }
+
+  #app.gui-mode #divider { height: 22px; }
+  #app.gui-mode #matches { min-height: 0; } /* completions push in only when there are some */
+  #app.gui-mode #prompt { margin-top: 4px; }
+  .divider-label { display: none; }
+  .grip { width: 44px; height: 5px; margin: -2.5px 0 0 -22px; }
+  #app.gui-mode #out { padding-top: 0; }
+  #app.gui-mode.console-folded #out pre:not(:last-child) { visibility: hidden; }
 }
 
 /* Editing card for a clicked block. */
@@ -454,3 +579,50 @@ body {
   .entry-card input,
   .entry-card textarea { font-size: 16px; } /* no zoom on focus */
 }
+
+/* Phones: editing happens in a bottom sheet. */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.38);
+  animation: sheet-fade 0.2s ease;
+}
+.entry-card.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  max-height: 88%;
+  overflow-y: auto;
+  gap: 12px;
+  padding: 6px 16px calc(16px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  transition: transform 0.15s ease;
+  animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kb .entry-card.sheet { padding-bottom: 12px; }
+.sheet-grip {
+  width: 40px;
+  height: 5px;
+  margin: 4px auto 2px;
+  border-radius: 3px;
+  background: var(--muted);
+  opacity: 0.5;
+}
+.entry-card.sheet .ec-title { font-size: 13px; }
+.entry-card.sheet input,
+.entry-card.sheet textarea { padding: 8px 10px; border-radius: 8px; }
+.entry-card.sheet .ec-buttons { gap: 10px; }
+.entry-card.sheet .ec-buttons button { font-size: 15px; padding: 9px 18px; }
+.entry-card.sheet-out, .sheet-backdrop.sheet-out { animation: sheet-down 0.18s ease forwards; }
+.sheet-backdrop.sheet-out { animation-name: sheet-unfade; }
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes sheet-down { to { transform: translateY(100%); } }
+@keyframes sheet-fade { from { opacity: 0; } }
+@keyframes sheet-unfade { to { opacity: 0; } }
+#gui:has(.entry-card) .tl-tip { display: none; } /* no hover details while editing */

@@ -25,7 +25,10 @@
 
   // Render a timeline for `range`. Returns { el, refresh() }; refresh() redraws
   // from the store's current entries (for the live "now" and running block).
-  function render({ store, range, onSelect }) {
+  // `header(days)` (optional) returns an element that sits with the legend in
+  // a bar that stays at the top while the timeline scrolls. It is called on
+  // every redraw with the days drawn.
+  function render({ store, range, onSelect, header }) {
     const rootEl = el('div', 'tl');
     rootEl.setAttribute('role', 'group');
     const tip = el('div', 'tl-tip');
@@ -36,6 +39,10 @@
       const { days, axisFrom, axisTo, legend } = T.timelineDays(store.entries, range, now);
       rootEl.replaceChildren();
       rootEl.setAttribute('aria-label', `Timeline, ${range.label}. /log or /report shows the same entries as text.`);
+      rootEl.classList.toggle('tl-one-day', days.length === 1 && range.to - range.from <= 90000000);
+      const top = el('div', 'tl-top');
+      if (header) top.append(header(days));
+      rootEl.append(top);
       if (!days.length) {
         rootEl.append(el('div', 'tl-empty', `no entries (${range.label})`));
         return;
@@ -50,7 +57,7 @@
         item.append(sw, el('span', null, t.category), el('span', 'tl-muted', ` ${T.formatHM(t.ms)}`));
         legendEl.append(item);
       }
-      rootEl.append(legendEl);
+      top.append(legendEl);
 
       const height = (axisTo - axisFrom) * MIN_PX;
       const scroll = el('div', 'tl-scroll');

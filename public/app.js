@@ -67,6 +67,7 @@
     // iOS may scroll the page to reveal the input; follow the visible area.
     appEl.style.transform = viewport && viewport.offsetTop ? `translateY(${viewport.offsetTop}px)` : '';
     document.documentElement.classList.toggle('kb', window.innerHeight - height > 120);
+    if (view === 'gui') applyConsole();
     if (stick) scrollToPrompt();
   }
   if (viewport) {
@@ -159,40 +160,200 @@
     return guiPreset ? T.parseRange(guiPreset, Date.now()) : guiRange;
   }
 
-  function renderGui() {
+  const DAY_MS = 86400000;
+  const isOneDay = (r) => r && r.to - r.from <= DAY_MS + 3600000 && r.to - r.from >= DAY_MS - 3600000; // DST days
+
+  // Move a one-day range by `delta` days (not past today).
+  function stepDay(delta) {
+    const range = guiRangeNow();
+    if (!isOneDay(range)) return false;
+    const now = Date.now();
+    const key = T.ymd(T.addDays(range.from, delta));
+    if (key > T.ymd(now)) return false;
+    const preset = key === T.ymd(now) ? 'today' : key === T.ymd(T.addDays(T.startOfDay(now), -1)) ? 'yesterday' : null;
+    guiPreset = preset;
+    guiRange = preset ? null : T.parseRange(key, now);
+    renderGui(delta > 0 ? 'next' : 'prev');
+    scrollToNow();
+    return true;
+  }
+
+  function guiButton(label, onClick, { pressed, title, cls } = {}) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    if (cls) b.className = cls;
+    if (title) { b.title = title; b.setAttribute('aria-label', title); }
+    if (pressed != null) b.setAttribute('aria-pressed', String(pressed));
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function guiBar(range, days) {
     const bar = document.createElement('div');
     bar.className = 'gui-bar';
+    const presets = document.createElement('div');
+    presets.className = 'gui-presets';
     for (const [key, label] of PRESETS) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = label;
-      b.setAttribute('aria-pressed', String(guiPreset === key));
-      b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
-      b.addEventListener('click', () => {
+      presets.append(guiButton(label, () => {
         guiPreset = key;
         renderGui();
         scrollToNow();
-      });
-      bar.append(b);
+      }, { pressed: guiPreset === key }));
     }
-    if (!guiPreset && guiRange) {
+    bar.append(presets);
+    if (isOneDay(range)) {
+      // Step through days (on a phone, swiping the timeline does the same).
+      const steps = document.createElement('div');
+      steps.className = 'gui-steps';
+      const day = document.createElement('span');
+      day.className = 'gui-day';
+      const d = new Date(range.from);
+      day.append(d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }));
+      if (days[0]) {
+        const total = document.createElement('span');
+        total.className = 'tl-muted';
+        total.textContent = `  ${T.formatHM(days[0].totalMs)}`;
+        day.append(total);
+      }
+      const next = guiButton('›', () => stepDay(1), { title: 'Next day', cls: 'gui-step' });
+      next.disabled = guiPreset === 'today';
+      steps.append(guiButton('‹', () => stepDay(-1), { title: 'Previous day', cls: 'gui-step' }), day, next);
+      bar.append(steps);
+    } else if (!guiPreset && range) {
       const custom = document.createElement('span');
       custom.className = 'gui-range';
-      custom.textContent = guiRange.label;
+      custom.textContent = range.label;
       bar.append(custom);
     }
-    closeEntryEditor();
-    guiTimeline = window.TymleeTimeline.render({ store, range: guiRangeNow(), onSelect: openEntryEditor });
-    guiEl.replaceChildren(bar, guiTimeline.el);
+    return bar;
   }
+
+  function renderGui(slide) {
+    const range = guiRangeNow();
+    closeEntryEditor();
+    guiTimeline = window.TymleeTimeline.render({ store, range, onSelect: openEntryEditor, header: (days) => guiBar(range, days) });
+    if (slide) guiTimeline.el.classList.add(`tl-slide-${slide}`);
+    guiEl.replaceChildren(guiTimeline.el);
+  }
+
+  // Swipe sideways on a one-day timeline to move between days.
+  (function swipeDays() {
+    let start = null;
+    guiEl.addEventListener('touchstart', (e) => {
+      start = e.touches.length === 1 && !e.target.closest('.entry-card')
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() } : null;
+    }, { passive: true });
+    guiEl.addEventListener('touchend', (e) => {
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      const quick = Date.now() - start.t < 600;
+      start = null;
+      if (quick && Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) stepDay(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
+
+  // ---- GUI: the console tray ------------------------------------------------
+  // In the GUI view the scrollback is a tray under the timeline, above the
+  // prompt. Drag its divider to resize it, or click/tap the divider to fold
+  // it to a single line and back. Phones start folded (a one-line peek).
+
+  const divider = $('divider');
+  const CONSOLE_KEY = 'tymlee.console';
+  const lineHeight = () => parseFloat(getComputedStyle(out).lineHeight) || 20;
+  const peekHeight = () => Math.ceil(lineHeight() + 10);
+  let consoleHeight = null; // px; null: the default for the screen size
+  try { consoleHeight = JSON.parse(localStorage.getItem(CONSOLE_KEY)); } catch (_) { /* default */ }
+  let consoleOpen = !narrow.matches; // phones start with the peek
+
+  function maxConsole() {
+    return Math.max(peekHeight(), scrollEl.clientHeight - 140);
+  }
+
+  function applyConsole() {
+    if (view !== 'gui') {
+      out.style.height = '';
+      return;
+    }
+    const full = consoleHeight || (narrow.matches ? scrollEl.clientHeight * 0.55 : lineHeight() * 6 + 12);
+    const h = consoleOpen ? Math.min(Math.max(full, peekHeight()), maxConsole()) : peekHeight();
+    out.style.height = `${Math.round(h)}px`;
+    appEl.classList.toggle('console-folded', !consoleOpen);
+    divider.setAttribute('aria-expanded', String(consoleOpen));
+    out.scrollTop = out.scrollHeight;
+  }
+
+  function toggleConsole(open = !consoleOpen) {
+    consoleOpen = open;
+    appEl.classList.add('console-anim');
+    applyConsole();
+    setTimeout(() => appEl.classList.remove('console-anim'), 250);
+  }
+
+  (function dragDivider() {
+    let drag = null;
+    divider.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      divider.setPointerCapture(e.pointerId);
+      drag = { y: e.clientY, h: out.getBoundingClientRect().height, moved: false };
+    });
+    divider.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dy = drag.y - e.clientY;
+      if (!drag.moved && Math.abs(dy) < 6) return;
+      drag.moved = true;
+      consoleOpen = true;
+      const h = Math.min(Math.max(drag.h + dy, peekHeight()), maxConsole());
+      out.style.height = `${h}px`;
+      out.scrollTop = out.scrollHeight;
+    });
+    const end = (e) => {
+      if (!drag) return;
+      const { moved, h: before } = drag;
+      drag = null;
+      if (!moved) return toggleConsole();
+      const h = out.getBoundingClientRect().height;
+      if (h <= peekHeight() + 4) {
+        consoleOpen = false; // dragged all the way down: fold it
+      } else if (narrow.matches && e.type === 'pointerup' && h < before && before - h > 40 && h < scrollEl.clientHeight * 0.3) {
+        consoleOpen = false; // a swipe down on a phone folds it
+      } else {
+        consoleHeight = h;
+        try { localStorage.setItem(CONSOLE_KEY, JSON.stringify(Math.round(h))); } catch (_) { /* convenience */ }
+      }
+      applyConsole();
+    };
+    divider.addEventListener('pointerup', end);
+    divider.addEventListener('pointercancel', end);
+    divider.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleConsole();
+      }
+    });
+    // Tapping the one-line peek opens the console too.
+    out.addEventListener('click', () => {
+      if (view === 'gui' && !consoleOpen && !String(window.getSelection())) toggleConsole(true);
+    });
+  })();
 
   // ---- GUI: editing an entry by clicking its block ----------------------------
 
   let editCard = null; // { el, id }
 
   function closeEntryEditor() {
-    if (editCard) editCard.el.remove();
+    if (!editCard) return;
+    const { el, backdrop } = editCard;
     editCard = null;
+    if (!backdrop) return el.remove();
+    // Phones: slide the sheet away.
+    el.classList.add('sheet-out');
+    backdrop.classList.add('sheet-out');
+    setTimeout(() => { el.remove(); backdrop.remove(); }, 180);
   }
 
   function field(labelText, control) {
@@ -202,6 +363,12 @@
     name.textContent = labelText;
     label.append(name, control);
     return label;
+  }
+
+  // After the card closes, type on: the prompt gets the focus back, except
+  // on touch screens, where that would pop up the keyboard.
+  function backToPrompt() {
+    if (!window.matchMedia('(pointer: coarse)').matches) input.focus();
   }
 
   function openEntryEditor(b, blockEl) {
@@ -277,14 +444,14 @@
         return;
       }
       closeEntryEditor();
-      input.focus();
+      backToPrompt();
       if (!r.changed) return;
       store.apply([{ op: 'put', entry: r.entry }]);
       print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${T.hhmm(r.entry.ts)} ${r.entry.text}`, 'ok');
     });
     cancel.addEventListener('click', () => {
       closeEntryEditor();
-      input.focus();
+      backToPrompt();
     });
     del.addEventListener('click', () => {
       if (del.dataset.armed !== 'yes') {
@@ -293,7 +460,7 @@
         return;
       }
       closeEntryEditor();
-      input.focus();
+      backToPrompt();
       store.remove(b.id);
       print(`removed #${b.n} ${T.hhmm(entry.ts)} ${entry.text}`, 'ok');
     });
@@ -301,12 +468,44 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         closeEntryEditor();
-        input.focus();
+        backToPrompt();
       } else if (e.key === 'Enter' && e.target === notes && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         card.requestSubmit();
       }
     });
+
+    if (narrow.matches) {
+      // Phones: a bottom sheet over a dimmed timeline. Tap outside or swipe it
+      // down to close. The keyboard stays down until a field is tapped.
+      card.classList.add('sheet');
+      const grip = document.createElement('div');
+      grip.className = 'sheet-grip';
+      card.prepend(grip);
+      const backdrop = document.createElement('div');
+      backdrop.className = 'sheet-backdrop';
+      backdrop.addEventListener('click', () => closeEntryEditor());
+      appEl.append(backdrop, card);
+      editCard = { el: card, id: b.id, backdrop };
+      let drag = null;
+      card.addEventListener('touchstart', (e) => {
+        if (e.target.closest('input, textarea, button') || card.scrollTop > 0) return;
+        drag = { y: e.touches[0].clientY, dy: 0 };
+      }, { passive: true });
+      card.addEventListener('touchmove', (e) => {
+        if (!drag) return;
+        drag.dy = Math.max(0, e.touches[0].clientY - drag.y);
+        card.style.transform = `translateY(${drag.dy}px)`;
+      }, { passive: true });
+      card.addEventListener('touchend', () => {
+        if (!drag) return;
+        const { dy } = drag;
+        drag = null;
+        card.style.transform = '';
+        if (dy > 80) closeEntryEditor();
+      });
+      return;
+    }
 
     // Place the card next to the block, inside the scrolling timeline.
     guiEl.append(card);
@@ -338,6 +537,7 @@
   function setView(next, { save = true } = {}) {
     view = next;
     guiEl.hidden = view !== 'gui';
+    divider.hidden = view !== 'gui';
     appEl.classList.toggle('gui-mode', view === 'gui');
     if (save) {
       try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* a per-browser convenience */ }
@@ -350,6 +550,7 @@
       guiTimeline = null;
       guiEl.replaceChildren();
     }
+    applyConsole();
     scrollToPrompt();
     renderStatus();
   }

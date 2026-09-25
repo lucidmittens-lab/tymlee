@@ -13,16 +13,12 @@ const readline = require('node:readline');
 const { spawnSync } = require('node:child_process');
 
 const { T, V, WEB, configDir, ensureDir, loadConfig, fileStorage, nodeEnv } = require('./env.js');
-const { createStore } = require(path.join(WEB, 'store.js'));
-const { createShell } = require(path.join(WEB, 'commands.js'));
+const { createStore } = require('../public/store.js');
+const { createShell } = require('../public/commands.js');
 
 const stdin = process.stdin;
 const stdout = process.stdout;
 const args = process.argv.slice(2);
-if (args.length === 1 && /^(-v|--version)$/.test(args[0])) {
-  process.stdout.write(`tymlee ${require('../public/core.js').VERSION}\n`);
-  process.exit(0);
-}
 const oneShot = args.length > 0;
 const tty = Boolean(stdin.isTTY && stdout.isTTY);
 const color = Boolean(stdout.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
@@ -38,7 +34,7 @@ if (args[0] === '--help' || args[0] === '-h') {
   process.exit(0);
 }
 if (args[0] === '--version' || args[0] === '-v') {
-  stdout.write(`${require('./package.json').version}\n`);
+  stdout.write(`${T.VERSION}\n`);
   process.exit(0);
 }
 
@@ -467,6 +463,102 @@ function hideTimeline() {
 }
 
 
+// ---- /update ----------------------------------------------------------------------
+// Installed from the macOS installer (a single executable): download the
+// latest release's installer and open it. Installed from a git checkout:
+// git pull. At start-up, the installed app checks once a day for a newer
+// release and says so.
+
+const REPO_API = 'https://api.github.com/repos/lucidmittens-lab/tymlee/releases/latest';
+const UPDATE_CHECK_KEY = 'tymlee.updateCheck';
+const REPO_DIR = path.join(__dirname, '..');
+
+function isPackaged() {
+  try { return require('node:sea').isSea(); } catch (_) { return false; }
+}
+
+// -1, 0 or 1, comparing "1.2.3" style versions.
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map(Number);
+  const pb = String(b).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0) ? -1 : 1;
+  }
+  return 0;
+}
+
+async function latestRelease() {
+  const res = await fetch(process.env.TYMLEE_RELEASES_URL || REPO_API, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `tymlee/${T.VERSION}` },
+  });
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+  const release = await res.json();
+  const asset = (release.assets || []).find((a) => a.name === 'tymlee.pkg');
+  return { version: String(release.tag_name || '').replace(/^v/, ''), url: asset && asset.browser_download_url };
+}
+
+function gitUpdate() {
+  const git = (...a) => spawnSync('git', ['-C', REPO_DIR, ...a], { encoding: 'utf8' });
+  const before = git('rev-parse', 'HEAD').stdout.trim();
+  print('updating with git pull…', 'dim');
+  const pull = git('pull', '--ff-only');
+  if (pull.error || pull.status !== 0) {
+    return print(`git pull failed: ${(pull.stderr || (pull.error && pull.error.message) || '').trim()}`, 'err');
+  }
+  const after = git('rev-parse', 'HEAD').stdout.trim();
+  if (before === after) return print(`already up to date (v${T.VERSION})`, 'ok');
+  const changed = git('diff', '--name-only', before, after, '--', 'cli/package.json', 'cli/package-lock.json').stdout.trim();
+  if (changed) {
+    print('installing updated packages…', 'dim');
+    const npm = spawnSync('npm', ['install', '--omit=dev'], { cwd: __dirname, encoding: 'utf8', shell: process.platform === 'win32' });
+    if (npm.status !== 0) print(`npm install failed; run it in ${__dirname}`, 'err');
+  }
+  let version = T.VERSION;
+  try { version = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version; } catch (_) { /* keep */ }
+  print(`updated to v${version}. Restart tymlee to use it (/exit, then tymlee).`, 'ok');
+}
+
+async function pkgUpdate() {
+  print('checking for a newer version…', 'dim');
+  const latest = await latestRelease();
+  if (compareVersions(latest.version, T.VERSION) <= 0) return print(`you have the latest version (v${T.VERSION})`, 'ok');
+  if (process.platform !== 'darwin' || !latest.url) {
+    return print(`tymlee v${latest.version} is out: https://github.com/lucidmittens-lab/tymlee/releases/latest`, 'ok');
+  }
+  print(`downloading tymlee v${latest.version}…`, 'dim');
+  const res = await fetch(latest.url, { headers: { 'User-Agent': `tymlee/${T.VERSION}` } });
+  if (!res.ok) throw new Error(`the download failed (${res.status})`);
+  const file = path.join(os.tmpdir(), `tymlee-${latest.version}.pkg`);
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  const opened = spawnSync('open', [file]);
+  if (opened.status !== 0) return print(`downloaded to ${file}; open it to install`, 'ok');
+  print(`the installer for v${latest.version} is open: follow it, then restart tymlee (/exit, then tymlee)`, 'ok');
+}
+
+async function update() {
+  if (!isPackaged() && fs.existsSync(path.join(REPO_DIR, '.git'))) return gitUpdate();
+  if (!isPackaged()) {
+    return print('this copy of tymlee was not installed from the installer or a git checkout; get the latest from https://github.com/lucidmittens-lab/tymlee/releases/latest', 'dim');
+  }
+  try {
+    await pkgUpdate();
+  } catch (err) {
+    print(`could not update: ${err.message || err}`, 'err');
+  }
+}
+
+// Once a day, quietly: is there a newer release? (Installed app only.)
+async function checkForUpdate() {
+  if (!isPackaged() || process.env.TYMLEE_NO_UPDATE_CHECK) return;
+  try {
+    const last = Number(storage.getItem(UPDATE_CHECK_KEY)) || 0;
+    if (Date.now() - last < 86400000) return;
+    storage.setItem(UPDATE_CHECK_KEY, String(Date.now()));
+    const latest = await latestRelease();
+    if (compareVersions(latest.version, T.VERSION) > 0) print(`tymlee v${latest.version} is available: /update`, 'dim');
+  } catch (_) { /* offline: try another day */ }
+}
+
 // ---- set up ----------------------------------------------------------------------
 
 const dir = configDir();
@@ -514,6 +606,11 @@ const shell = createShell({
     ask,
     editor: { edit: editText, confirm },
     extra: {
+      update: {
+        usage: '/update',
+        about: 'update tymlee to the latest version',
+        run: () => update(),
+      },
       'timeline-p': {
         usage: '/timeline-p [range]',
         about: 'pin a live timeline to the top of the terminal (today by default)',
@@ -586,6 +683,7 @@ async function interactive() {
     print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70 }), 'report');
   }
   drawStatus();
+  checkForUpdate();
   const clock = setInterval(() => { drawPane(); drawStatus(); }, 1000);
   clock.unref();
 

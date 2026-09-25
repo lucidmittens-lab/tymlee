@@ -179,6 +179,7 @@
       ],
       // Opened from the Home Screen, the emailed link would sign in the
       // browser instead of this app, so only the code is offered.
+      helpFooter: ['', `Terminal app for Mac: ${T.REPO_URL}/releases/latest/download/tymlee.pkg`],
       linkSignIn: !(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches),
       showTimeline,
       pickEntry,

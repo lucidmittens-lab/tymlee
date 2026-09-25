@@ -1,0 +1,67 @@
+# Builds the macOS installer for the terminal app (cli/build/pkg.sh) and
+# publishes it as a GitHub release, for tags like v1.2.0. The tag must match
+# the version in public/core.js. /update in the terminal app installs the
+# latest release; the download link is always
+#   https://github.com/lucidmittens-lab/tymlee/releases/latest/download/tymlee.pkg
+name: Release terminal app
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pkg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the version
+        run: |
+          VERSION="$(node -p 'require("./public/core.js").VERSION')"
+          test "$VERSION" = "$(node -p 'require("./cli/package.json").version')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "v$VERSION" = "$GITHUB_REF_NAME"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: TZ=UTC node --test test/*.test.js
+
+      - name: Build the installer
+        working-directory: cli
+        run: |
+          npm ci
+          build/pkg.sh
+
+      - name: Check the installer
+        working-directory: cli
+        run: |
+          pkgutil --payload-files dist/tymlee.pkg | grep -qx './usr/local/bin/tymlee'
+          sudo installer -pkg dist/tymlee.pkg -target /
+          test "$(/usr/local/bin/tymlee --version)" = "$VERSION"
+          TYMLEE_HOME="$RUNNER_TEMP/tymlee" /usr/local/bin/tymlee dev release check | grep -q 'in #1 dev release check'
+          lipo -archs /usr/local/bin/tymlee
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="tymlee $VERSION for the Mac terminal. Download tymlee.pkg and open it.
+
+          If macOS says it can't check the installer for malicious software: System Settings → Privacy & Security → scroll down → Open Anyway (the installer isn't signed with an Apple Developer ID).
+
+          Already installed? Type /update in tymlee."
+          gh release create "$GITHUB_REF_NAME" cli/dist/tymlee.pkg --title "tymlee $VERSION" --notes "$NOTES" \
+            || gh release upload "$GITHUB_REF_NAME" cli/dist/tymlee.pkg --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tymlee-pkg
+          path: cli/dist/tymlee.pkg

@@ -8,9 +8,10 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 
+// Plain relative requires, so the packaged app (cli/build.js) can bundle them.
 const WEB = path.join(__dirname, '..', 'public');
-const T = require(path.join(WEB, 'core.js'));
-const V = require(path.join(WEB, 'vault.js'));
+const T = require('../public/core.js');
+const V = require('../public/vault.js');
 
 // ~/.config/tymlee (or $XDG_CONFIG_HOME/tymlee, %APPDATA%\tymlee on Windows,
 // or $TYMLEE_HOME). Holds the local log, the sign-in session and this
@@ -31,11 +32,16 @@ function ensureDir(dir) {
 // config.json in the config folder or TYMLEE_SUPABASE_URL / _KEY.
 function loadConfig(dir) {
   let config = {};
-  try {
-    const sandbox = { window: {} };
-    vm.runInNewContext(fs.readFileSync(path.join(WEB, 'config.js'), 'utf8'), sandbox);
-    config = { ...sandbox.window.TYMLEE_CONFIG };
-  } catch (_) { /* no website config */ }
+  // eslint-disable-next-line no-undef
+  if (typeof TYMLEE_BUILT_IN_CONFIG !== 'undefined') {
+    config = { ...TYMLEE_BUILT_IN_CONFIG }; // the packaged app carries the website's settings
+  } else {
+    try {
+      const sandbox = { window: {} };
+      vm.runInNewContext(fs.readFileSync(path.join(WEB, 'config.js'), 'utf8'), sandbox);
+      config = { ...sandbox.window.TYMLEE_CONFIG };
+    } catch (_) { /* no website config */ }
+  }
   try {
     Object.assign(config, JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')));
   } catch (_) { /* no override file */ }

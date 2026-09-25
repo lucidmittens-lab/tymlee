@@ -201,7 +201,11 @@ tymlee · type what you are starting and press Enter · /help for commands
 ▶ 0:00:04  dev fixing the login bug        today 3:40 · since 09:45        synced
 ```
 
-**Install.** You need Node.js 20 or newer.
+**Install on a Mac (no GitHub or Node.js needed).** Download [tymlee.pkg](https://github.com/lucidmittens-lab/tymlee/releases/latest/download/tymlee.pkg) and open it. It installs the `tymlee` command (a single program with Node.js built in, for Apple silicon and Intel Macs). The installer isn't signed with an Apple Developer ID, so macOS may refuse to open it at first: go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. Then open Terminal and type `tymlee`.
+
+**Updating:** type `/update` in tymlee. The installed app downloads the latest installer and opens it; it also mentions new versions at start-up (checking once a day). To uninstall: `sudo rm /usr/local/bin/tymlee` (your log stays in `~/.config/tymlee`).
+
+**Install from the repository** (any system with Node.js 20 or newer):
 
 ```
 git clone https://github.com/lucidmittens-lab/tymlee.git
@@ -210,7 +214,9 @@ npm install
 npm install -g .        # adds the `tymlee` command
 ```
 
-To update later, run `git pull` in the repository. The installed command follows the checkout.
+Here `/update` runs `git pull` in the checkout for you.
+
+**Releases:** bump `VERSION` in `public/core.js` and `version` in `cli/package.json`, then push a tag like `v1.1.0`. The *Release terminal app* workflow (`.github/workflows/release-cli.yml`) builds `tymlee.pkg` on a Mac runner (`cli/build/pkg.sh`) and publishes it as a GitHub release.
 
 **Differences from the website:**
 - **Signing in:** `/login you@example.com`, then `/code 123456` from the email. The emailed link only works in a browser.

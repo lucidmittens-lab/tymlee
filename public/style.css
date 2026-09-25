@@ -183,3 +183,205 @@ body {
   #status { gap: 1.5ch; }
   #status .since { display: none; }
 }
+
+/* ---- /timeline ----------------------------------------------------------
+   Category colors: the validated 8-slot categorical palette, stepped
+   separately for light and dark. Slots follow the order categories were
+   first used, so a category keeps its color. */
+:root {
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --s-other: #9a978f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --s-other: #6f6c66;
+  }
+}
+
+#out .tl, #gui .tl {
+  position: relative;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.tl-muted { color: var(--muted); }
+.tl-empty { color: var(--muted); }
+
+.tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-bottom: 8px;
+}
+.tl-key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.tl-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--c);
+}
+
+.tl-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.tl-grid {
+  display: grid;
+  column-gap: 6px;
+  align-items: start;
+}
+.tl-head {
+  padding: 0 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-axis { position: relative; }
+.tl-hour {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Recessive hour lines. */
+.tl-day {
+  position: relative;
+  border-left: 1px solid var(--line);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 calc(var(--hour) - 1px),
+    var(--line) calc(var(--hour) - 1px) var(--hour)
+  );
+  background-position: 0 var(--offset);
+}
+
+.tl-block {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 2px 6px 2px 8px;
+  border-radius: 4px;
+  border-left: 4px solid var(--c);
+  background: color-mix(in srgb, var(--c) 16%, var(--bg));
+  color: var(--fg);
+  cursor: pointer;
+}
+.tl-block:hover { background: color-mix(in srgb, var(--c) 26%, var(--bg)); }
+.tl-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-line b { font-weight: 600; margin-right: 0.5ch; }
+.tl-wo {
+  margin-right: 0.6ch;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tl-notes { color: var(--muted); font-style: italic; }
+
+/* Off time: a quiet hatched gap, not a category. */
+.tl-offblock {
+  cursor: default;
+  border-left-color: transparent;
+  background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--muted) 18%, transparent) 5px 6px);
+}
+.tl-offblock:hover { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--muted) 18%, transparent) 5px 6px); }
+
+/* The running entry: its open end fades out. */
+.tl-running {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 8px), rgba(0, 0, 0, 0.35));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 8px), rgba(0, 0, 0, 0.35));
+}
+.tl-clipped { border-bottom: 2px dashed var(--c); }
+
+.tl-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid var(--accent);
+  pointer-events: none;
+}
+.tl-now span {
+  position: absolute;
+  right: 0;
+  top: -8px;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--bg);
+}
+
+.tl-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+/* ---- views: CLI | GUI toggle, GUI panel, messages above the prompt ---------- */
+.view-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.view-toggle button,
+.gui-bar button {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.view-toggle button[aria-pressed="true"],
+.gui-bar button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+#gui {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 16px 16px;
+}
+#gui .tl { font-size: 12px; line-height: 1.3; position: relative; }
+.gui-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.gui-bar button {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.gui-range { color: var(--muted); }
+
+#flash {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 0;
+}
+#flash:empty { display: none; }
+#flash.ok { color: var(--accent); }
+#flash.err { color: var(--warn); }

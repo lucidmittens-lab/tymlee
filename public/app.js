@@ -15,7 +15,7 @@
   const statusEl = $('status');
 
   const store = window.TymleeStore.createStore({
-    onChange: () => renderStatus(),
+    onChange: () => { renderStatus(); refreshTimelines(); },
     onNotice: (text, cls) => { print(text, cls); scrollToPrompt(); },
   });
 
@@ -31,6 +31,12 @@
     if (cls) pre.className = cls;
     pre.textContent = text;
     out.append(pre);
+    // In the GUI view short messages flash above the prompt; bigger output
+    // (reports, help, keys) switches back to the CLI view to show it.
+    if (view === 'gui' && cls !== 'echo') {
+      if (/\b(report|key)\b/.test(cls || '')) setView('cli');
+      else flash(text, cls);
+    }
     return pre;
   }
 
@@ -112,8 +118,10 @@
         '        Ctrl+Z        undo (on an empty line)',
         '        Ctrl+L        clear the screen',
         '        Ctrl+Enter    save (while editing)',
+        '        Ctrl/Cmd+G    switch between the CLI and GUI (timeline) views',
       ],
       linkSignIn: true,
+      showTimeline,
       pickEntry,
       ask,
       editor: {
@@ -133,6 +141,132 @@
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // ---- views: CLI (the scrollback) and GUI (a live timeline) -----------------
+  // Switched with the CLI | GUI toggle in the status bar, Ctrl/Cmd+G, or
+  // /timeline [range]. The prompt works the same in both.
+
+  const guiEl = $('gui');
+  const flashEl = $('flash');
+  const VIEW_KEY = 'tymlee.view';
+  const PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month']];
+  let view = 'cli';
+  let guiPreset = 'today'; // one of PRESETS, or null for guiRange
+  let guiRange = null;
+  let guiTimeline = null;
+
+  function guiRangeNow() {
+    return guiPreset ? T.parseRange(guiPreset, Date.now()) : guiRange;
+  }
+
+  function renderGui() {
+    const bar = document.createElement('div');
+    bar.className = 'gui-bar';
+    for (const [key, label] of PRESETS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.setAttribute('aria-pressed', String(guiPreset === key));
+      b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
+      b.addEventListener('click', () => {
+        guiPreset = key;
+        renderGui();
+        scrollToNow();
+      });
+      bar.append(b);
+    }
+    if (!guiPreset && guiRange) {
+      const custom = document.createElement('span');
+      custom.className = 'gui-range';
+      custom.textContent = guiRange.label;
+      bar.append(custom);
+    }
+    guiTimeline = window.TymleeTimeline.render({ store, range: guiRangeNow(), onSelect: showDetails });
+    guiEl.replaceChildren(bar, guiTimeline.el);
+  }
+
+  function showDetails(b) {
+    const end = b.running ? 'now' : T.hhmm(b.start + b.duration);
+    const lines = [`#${b.n} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${T.hhmm(b.start)}–${end}  ${T.formatHM(b.duration)}  ${b.category}${b.note ? ` ${b.note}` : ''}`];
+    if (b.notes) lines.push(...b.notes.split('\n').map((l) => `  > ${l}`));
+    print(lines.join('\n'), 'dim');
+  }
+
+  // Show the top of the GUI (range buttons and legend), scrolling down only
+  // as far as needed to bring the "now" line into view.
+  function scrollToNow() {
+    scrollEl.scrollTop = 0;
+    const now = guiEl.querySelector('.tl-now');
+    if (!now) return;
+    const t = now.getBoundingClientRect();
+    const box = scrollEl.getBoundingClientRect();
+    const below = t.bottom - (box.top + box.height * 0.8);
+    if (below > 0) scrollEl.scrollTop = below;
+  }
+
+  function setView(next, { save = true } = {}) {
+    view = next;
+    guiEl.hidden = view !== 'gui';
+    out.hidden = view === 'gui';
+    if (save) {
+      try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* a per-browser convenience */ }
+    }
+    if (view === 'gui') {
+      renderGui();
+      scrollEl.scrollTop = 0;
+      scrollToNow();
+    } else {
+      guiTimeline = null;
+      guiEl.replaceChildren();
+      flash('');
+      scrollToPrompt();
+    }
+    renderStatus();
+  }
+
+  // /timeline [range]: open the GUI view on that range.
+  function showTimeline(range) {
+    const preset = PRESETS.find(([key]) => key === range.label);
+    guiPreset = preset ? preset[0] : null;
+    guiRange = range;
+    setView('gui');
+  }
+
+  let flashTimer = null;
+  function flash(text, cls) {
+    clearTimeout(flashTimer);
+    flashEl.className = cls || '';
+    flashEl.textContent = String(text).split('\n').slice(0, 3).join('\n');
+    if (text) flashTimer = setTimeout(() => { flashEl.textContent = ''; }, 8000);
+  }
+
+  let refreshQueued = false;
+  function refreshTimelines() {
+    if (refreshQueued || !guiTimeline) return;
+    refreshQueued = true;
+    setTimeout(() => {
+      refreshQueued = false;
+      if (guiTimeline && view === 'gui') guiTimeline.refresh();
+    }, 250);
+  }
+  setInterval(refreshTimelines, 30000);
+
+  function viewToggle() {
+    const wrap = span('view-toggle', '');
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'View');
+    for (const v of ['cli', 'gui']) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = v.toUpperCase();
+      b.setAttribute('aria-pressed', String(view === v));
+      b.title = v === 'gui' ? 'Timeline view (Ctrl/Cmd+G)' : 'Command view (Ctrl/Cmd+G)';
+      b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
+      b.addEventListener('click', () => { if (view !== v) setView(v); });
+      wrap.append(b);
+    }
+    return wrap;
   }
 
   function clearScreen() {
@@ -177,6 +311,7 @@
   }
 
   function openTextBox({ text, items, mode, label }) {
+    if (view === 'gui') setView('cli'); // /edit and /restore need the text view
     const el = document.createElement('textarea');
     el.className = 'editor';
     el.value = text;
@@ -419,6 +554,9 @@
     } else if (e.ctrlKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
       clearScreen();
+    } else if (mod && e.key.toLowerCase() === 'g') {
+      e.preventDefault();
+      setView(view === 'gui' ? 'cli' : 'gui');
     }
   });
 
@@ -493,7 +631,7 @@
       today.append(span('since', ` · since ${st.since}`));
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
-    statusEl.replaceChildren(...[left, today, right].filter(Boolean));
+    statusEl.replaceChildren(...[left, today, right, viewToggle()].filter(Boolean));
   }
 
   // ---- boot ----------------------------------------------------------------
@@ -511,5 +649,9 @@
     }
     renderStatus();
     scrollToPrompt();
+    // Reopen the view used last (after printing today's log into the scrollback).
+    let saved = 'cli';
+    try { saved = localStorage.getItem(VIEW_KEY) || 'cli'; } catch (_) { /* default view */ }
+    if (saved === 'gui') setView('gui', { save: false });
   });
 })();

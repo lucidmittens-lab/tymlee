@@ -336,6 +336,101 @@
     return out.join('\n');
   }
 
+  // ---- timeline ------------------------------------------------------------
+
+  // Color slot per category: the first 8 categories ever used get slots 0-7
+  // in the order they first appeared, so a category keeps its color and a new
+  // one never repaints the others. Later categories share slot -1 ("other").
+  const TIMELINE_SLOTS = 8;
+  function categorySlots(entries) {
+    const slots = new Map();
+    for (const e of visible(entries)) {
+      if (isOff(e)) continue;
+      const key = parseInput(e.text).category.toLowerCase();
+      if (!slots.has(key)) slots.set(key, slots.size < TIMELINE_SLOTS ? slots.size : -1);
+    }
+    return slots;
+  }
+
+  // Days in [from, to) as blocks for a vertical timeline. Each block is an
+  // entry (or off time) clipped to its day; `axisFrom`/`axisTo` are whole
+  // hours (ms) spanning the logged time of every day, for a shared axis.
+  function timelineDays(entries, range, now) {
+    const slots = categorySlots(entries);
+    const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
+    const days = [];
+    for (const s of spans) {
+      const key = ymd(s.ts);
+      if (!days.length || days[days.length - 1].key !== key) {
+        days.push({ key, label: `${DAY_NAMES[new Date(s.ts).getDay()]} ${key}`, start: startOfDay(s.ts), blocks: [] });
+      }
+      days[days.length - 1].blocks.push(s);
+    }
+    let axisFrom = Infinity;
+    let axisTo = 0;
+    for (const day of days) {
+      const dayEnd = addDays(day.start, 1);
+      const worked = day.blocks.filter((s) => !s.off);
+      // Off time only shows between entries; trailing off time (evenings,
+      // overnight) is left out.
+      const lastEnd = worked.length ? Math.min(dayEnd, Math.max(...worked.map((s) => s.end))) : day.blocks[0].ts;
+      day.blocks = day.blocks
+        .map((s) => ({
+          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', wo: s.wo || '',
+          off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
+          duration: s.duration, clipped: s.end > dayEnd,
+          slot: s.off ? null : slots.get(s.category.toLowerCase()),
+        }))
+        .filter((b) => b.end > b.start || !b.off);
+      day.totalMs = worked.reduce((sum, s) => sum + s.duration, 0);
+      const first = new Date(day.blocks[0].start);
+      const fromHour = first.getHours();
+      const last = new Date(Math.max(lastEnd, day.blocks[0].start + 60000) - 1);
+      const toHour = Math.min(24, last.getHours() + 1);
+      // Axis in minutes from midnight, so days can share it.
+      axisFrom = Math.min(axisFrom, fromHour * 60);
+      axisTo = Math.max(axisTo, toHour * 60);
+    }
+    const legend = summarize(spans).map((t) => ({ ...t, slot: slots.get(t.category.toLowerCase()) }));
+    return { days, axisFrom: Math.min(axisFrom, axisTo - 60), axisTo, legend };
+  }
+
+  // Text timeline for the terminal: one row per `rowMinutes` (15 by
+  // default), a colored bar per entry. `paint(slot, text)` colors a bar;
+  // slot is 0-7, -1 for "other", or null for off time.
+  function formatTimeline(entries, range, now, opts) {
+    const { rowMinutes = 15, paint = (slot, t) => t, width = 80 } = opts || {};
+    const { days, legend } = timelineDays(entries, range, now);
+    if (!days.length) return `no entries (${range.label})`;
+    const MAX_ROWS = 16; // a long block is drawn this tall at most
+    const out = [];
+    out.push(legend.map((t) => `${paint(t.slot, '■')} ${t.category} ${formatHM(t.ms)}`).join('   '));
+    for (const day of days) {
+      out.push('');
+      out.push(`${day.label}   ${formatHM(day.totalMs)}`);
+      for (const b of day.blocks) {
+        const minutes = (b.end - b.start) / 60000;
+        const want = Math.max(1, Math.round(minutes / rowMinutes));
+        const rows = b.off ? Math.min(want, 2) : Math.min(want, MAX_ROWS);
+        const bar = b.off ? paint(null, '┆ ') : paint(b.slot, '██');
+        const label = b.off ? 'off' : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
+        const dur = b.off ? formatHM(b.end - b.start) : `${formatHM(b.duration)}${b.running ? ' ▶' : ''}`;
+        const room = Math.max(10, width - 8 - 3 - dur.length - 2);
+        const text = label.length > room ? `${label.slice(0, room - 1)}…` : label;
+        out.push(`${hhmm(b.start)}  ${bar} ${text.padEnd(room)}  ${dur}`.trimEnd());
+        const extra = [];
+        if (b.notes) for (const l of b.notes.split('\n')) extra.push(`> ${l}`);
+        for (let i = 1; i < rows || extra.length; i++) {
+          const note = extra.shift();
+          const more = i === rows - 1 && want > rows && !note ? ' ⋮' : '';
+          out.push(`       ${i < rows ? bar : '  '} ${note ? note.slice(0, room) : ''}${more}`.trimEnd());
+          if (i >= rows && !extra.length) break;
+        }
+      }
+    }
+    return out.join('\n');
+  }
+
   function plural(n, one, many) {
     return `${n} ${n === 1 ? one : many}`;
   }
@@ -779,7 +874,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    OFF, isOff, LINK, isLink, linkCategory, visible, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

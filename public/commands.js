@@ -26,6 +26,9 @@
 //                          { edit(text) -> Promise<string|null>,
 //                            confirm(question) -> Promise<boolean> }
 //   extra                more commands, { name: { usage, about, run(args) } }
+//   showTimeline(range)  draw /timeline graphically (website); without it,
+//                        /timeline prints text, colored by paint(slot, text)
+//   paint, width()       for the text timeline (terminal)
 (function (root) {
   'use strict';
 
@@ -293,6 +296,16 @@
           if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
           store.apply([{ op: 'put', entry: T.makeEntry(current, { notes: value }) }]);
           print(value ? `notes saved on #${chosen.n} ${describe(chosen)}` : `notes removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+        },
+      },
+      timeline: {
+        usage: '/timeline [range]',
+        about: 'your time as blocks on a timeline (alias /tl; on the website: the GUI view)',
+        run(args) {
+          const range = rangeFrom(args);
+          if (!range) return;
+          if (io.showTimeline) return io.showTimeline(range);
+          print(T.formatTimeline(store.entries, range, Date.now(), { paint: io.paint, width: io.width ? io.width() : 80 }), 'report');
         },
       },
       wolink: {
@@ -623,7 +636,7 @@
       },
       ...(io.extra || {}),
     };
-    const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo' };
+    const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo', tl: 'timeline' };
     const commandWords = Object.keys(COMMANDS).map((c) => '/' + c);
 
     // ---- running lines ---------------------------------------------------------

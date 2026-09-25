@@ -38,6 +38,7 @@ Thu 2026-09-24
 | `/wolink <category> [YYYY-MM-DD] [wo]` | link a work order to a category for a day; see below |
 | `/wopunch [#] [wo]` | set the work order on one entry (same picker as `/note`) |
 | `/wolist [range]` | time per work order, including linked ones with no time yet |
+| `/timeline [range]` | your time as blocks on a timeline (alias `/tl`); on the website it opens the GUI view |
 | `/undo` | remove the last entry (**Ctrl/Cmd+Z** on an empty line does the same) |
 | `/off` | clock out without starting anything new; off time isn't counted |
 | `/rm <#>` | delete an entry by its number; its time goes to the entry before it |
@@ -63,6 +64,20 @@ Thu 2026-09-24
 Ranges: `today` (the default), `yesterday`, `week` (the last 7 days), `month` (the last 30 days), `all`, `Nd` (the last N days), `YYYY-MM-DD`, or `YYYY-MM-DD..YYYY-MM-DD`.
 
 The `.txt` export is exactly what `/log` prints. It groups entries by the day they started, gives each day a per-category summary, and adds an overall summary when the range covers more than one day. An entry counts toward the day it started on. The CSV has one row per entry: `n,start,end,minutes,category,note`, with ISO 8601 UTC timestamps.
+
+## Timeline (GUI view)
+
+On the website, the **CLI | GUI** switch in the bottom-right of the status bar swaps the command scrollback for a live timeline. **Ctrl/Cmd+G** does the same, and so does `/timeline [range]`.
+
+- **Layout:** each day is a column on a shared hour axis, and each entry is a block sized by its duration, labeled with its work order, category, note, times and notes (as far as the block's height allows). Off time is a hatched gap.
+- **Today:** a "now" line crosses the column and the running entry grows. Anything you log appears straight away.
+- **Ranges:** the Today / Yesterday / Week / Month buttons switch the range. A week shows days side by side; on a phone, swipe sideways.
+- **Details:** hover over a block for them, or click or tap it to show them above the prompt.
+- **Colors:** each category keeps its color. The first eight categories you ever used get their own, from a palette checked for color-blind separation in light and dark mode. Later ones are gray, and every block is labeled with its category, so color is never the only way to tell categories apart.
+- **Typing in the GUI view:** the prompt works as usual. Short messages show above it, and commands with longer output (`/log`, `/help`, `/edit`, …) switch back to the CLI view.
+- **Remembered:** the view you last used comes back when you reload.
+
+The terminal app has no clickable controls, so `/timeline` prints the same timeline as colored text there.
 
 ## Notes
 

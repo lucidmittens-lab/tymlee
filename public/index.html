@@ -14,9 +14,11 @@
   <div id="app">
     <main id="scroll">
       <div id="out" role="log" aria-live="polite"></div>
+      <div id="gui" hidden></div>
     </main>
     <div id="dock">
       <div class="col">
+        <div id="flash" aria-live="polite"></div>
         <form id="prompt" autocomplete="off">
           <span class="ps1" aria-hidden="true">&gt;</span>
           <div class="field">
@@ -36,6 +38,7 @@
   <script src="vault.js"></script>
   <script src="store.js"></script>
   <script src="commands.js"></script>
+  <script src="timeline.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

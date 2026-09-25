@@ -320,6 +320,26 @@ function modalKey(key) {
   }
 }
 
+// ---- /timeline colors ----------------------------------------------------------
+// The same categorical palette as the website (dark-mode steps), in 24-bit
+// color where the terminal supports it and the nearest 256-color otherwise.
+
+const TIMELINE_HEX = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+const truecolor = /truecolor|24bit/i.test(process.env.COLORTERM || '');
+
+function ansiColor(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  if (truecolor) return `38;2;${r};${g};${b}`;
+  const q = (v) => Math.round((v / 255) * 5);
+  return `38;5;${16 + 36 * q(r) + 6 * q(g) + q(b)}`;
+}
+
+function paint(slot, text) {
+  if (!color) return text;
+  if (slot == null) return sgr('90', text); // off time
+  return sgr(slot < 0 ? '37' : ansiColor(TIMELINE_HEX[slot]), text);
+}
+
 function clearScreen() {
   stdout.write('\x1b[2J\x1b[H');
   if (statusOn) {
@@ -369,6 +389,8 @@ const shell = createShell({
       '        Ctrl+D        quit (or /exit)',
     ],
     linkSignIn: false,
+    paint,
+    width: () => stdout.columns || 80,
     pickEntry,
     ask,
     editor: { edit: editText, confirm },

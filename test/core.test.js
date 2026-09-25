@@ -114,9 +114,9 @@ test('empty range', () => {
 test('csv export quotes fields and leaves the running end blank', () => {
   const log = [...LOG, { ts: at('2026-09-24T10:05:00Z'), text: 'mtg sync, "roadmap"' }];
   const lines = T.toCSV(log, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
-  assert.equal(lines[0], 'n,start,end,minutes,category,note,notes');
-  assert.equal(lines[1], '3,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
-  assert.equal(lines[4], '6,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
+  assert.equal(lines[0], 'n,wo,start,end,minutes,category,note,notes');
+  assert.equal(lines[1], '3,,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
+  assert.equal(lines[4], '6,,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
 });
 
 // ---- sync ------------------------------------------------------------------
@@ -433,7 +433,10 @@ test('/report groups entries by category, largest first', () => {
     '',
     'dev                     0:57   79%  2 entries',
     '  1  09:00    0:45  fixing login bug',
+    '     > root cause: expired token',
+    '     > fix in auth.js',
     '  3  10:00    0:12  code review',
+    '     > PR #42',
     '',
     'mtg                     0:15   21%  1 entry',
     '  2  09:45    0:15  standup',
@@ -446,4 +449,58 @@ test('/report groups entries by category, largest first', () => {
   assert.match(week, / {2}1 {2}Wed 09-23 16:00 {4}1:30 {2}wrap up/);
   assert.ok(!/\(off\)/.test(week), 'off time is left out');
   assert.equal(T.formatCategoryReport(NOTED, T.parseRange('2026-01-01', NOW), NOW), 'no entries (2026-01-01)');
+});
+
+// ---- work orders ---------------------------------------------------------------
+
+const WO_LOG = [
+  { id: 'a', ts: at('2026-09-24T09:00:00Z'), text: 'dev fixing login bug', wo: '4471', wl: true },
+  { id: 'b', ts: at('2026-09-24T09:45:00Z'), text: 'mtg standup' },
+  { id: 'c', ts: at('2026-09-24T10:00:00Z'), text: 'dev code review', wo: 'WO-88', notes: 'PR #42' },
+];
+
+test('work orders show in a column before the time', () => {
+  assert.equal(T.formatReport(WO_LOG, T.parseRange('today', NOW), NOW).split('\n').slice(1, 6).join('\n'), [
+    '  #  wo       start  end       dur  category  note',
+    '  1  [4471]   09:00  09:45    0:45  dev       fixing login bug',
+    '  2           09:45  10:00    0:15  mtg       standup',
+    '  3  [WO-88]  10:00  now      0:12  dev       code review',
+    '     > PR #42',
+  ].join('\n'));
+  // No work orders in view: no column.
+  assert.ok(!/ wo /.test(T.formatReport(LOG, T.parseRange('today', NOW), NOW)));
+  assert.match(T.formatCategoryReport(WO_LOG, T.parseRange('today', NOW), NOW), / {2}1 {2}\[4471\] {3}09:00 {4}0:45 {2}fixing login bug\n/);
+});
+
+test('/wolist totals time per work order', () => {
+  assert.equal(T.formatWorkOrders(WO_LOG, T.parseRange('today', NOW), NOW), [
+    'work orders: today (2026-09-24)',
+    '',
+    '[4471]      0:45   63%  1 entry      dev',
+    '[WO-88]     0:12   17%  1 entry      dev',
+    '(none)      0:15   21%  1 entry      mtg',
+    '-'.repeat(48),
+    'total       1:12        3 entries',
+  ].join('\n'));
+});
+
+test('work orders survive backups and /edit', () => {
+  const want = WO_LOG.map(({ ts, text, notes, wo }) => Object.assign({ ts, text }, notes ? { notes } : {}, wo ? { wo } : {}));
+  for (const text of [T.formatReport(WO_LOG, ALL, NOW), T.formatReport(WO_LOG, ALL, NOW, { compact: true }), T.toCSV(WO_LOG, ALL, NOW)]) {
+    const r = T.parseBackup(text);
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.entries, want);
+  }
+  const { text, items } = T.formatEditable(WO_LOG, ALL, NOW);
+  assert.match(text, / {2}1 {2}\[4471\] {2}09:00 {2}dev fixing login bug\n/);
+  assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
+  const r = T.parseEditable(text.replace('  [4471]  09:00', '  [5000]  09:00').replace('[WO-88]  ', '') + '[77] 10:05 email\n', items, NOW);
+  assert.deepEqual(r.errors, []);
+  const byText = Object.fromEntries(r.ops.map((o) => [o.entry.text, o.entry]));
+  assert.deepEqual([byText['dev fixing login bug'].wo, byText['dev fixing login bug'].wl], ['5000', undefined]);
+  assert.equal(byText['dev code review'].wo, undefined);
+  assert.equal(byText['email'].wo, '77');
+  assert.match(T.parseEditable(text.replace('  [4471]  09:00', '  [has space]  09:00'), items, NOW).errors[0], /not a valid work order/);
+  // A work order that looks like a number is never mistaken for an entry number.
+  assert.deepEqual(T.parseBackup('Thu 2026-09-24\n  12  [4471]  09:00  dev x\n').entries, [{ ts: at('2026-09-24T09:00:00Z'), text: 'dev x', wo: '4471' }]);
 });

@@ -103,3 +103,14 @@ create trigger entries_touch before insert or update on public.entries
 alter table public.entries add column if not exists notes text;
 alter table public.entries drop constraint if exists entries_notes_check;
 alter table public.entries add constraint entries_notes_check check (notes is null or char_length(notes) <= 8000);
+
+-- ---------------------------------------------------------------------------
+-- Work orders (added later; safe to run on an existing project).
+-- Encrypted accounts keep work orders inside the encrypted entry; accounts
+-- without encryption use these columns. wo_linked marks work orders set by
+-- /wolink (for a whole category and day) rather than /wopunch.
+
+alter table public.entries add column if not exists wo text;
+alter table public.entries add column if not exists wo_linked boolean not null default false;
+alter table public.entries drop constraint if exists entries_wo_check;
+alter table public.entries add constraint entries_wo_check check (wo is null or char_length(wo) <= 200);

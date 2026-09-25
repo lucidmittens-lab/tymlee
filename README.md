@@ -35,6 +35,9 @@ Thu 2026-09-24
 | `/log [range]` | print the formatted readout (alias `/ls`) |
 | `/report [range]` | time per category, largest first, with each category's entries |
 | `/note [#] [notes]` | add or change notes on an entry; see below |
+| `/wolink <category> [YYYY-MM-DD] [wo]` | link a work order to a category for a day; see below |
+| `/wopunch [#] [wo]` | set the work order on one entry (same picker as `/note`) |
+| `/wolist [range]` | time per work order, including linked ones with no time yet |
 | `/undo` | remove the last entry (**Ctrl/Cmd+Z** on an empty line does the same) |
 | `/off` | clock out without starting anything new; off time isn't counted |
 | `/rm <#>` | delete an entry by its number; its time goes to the entry before it |
@@ -72,6 +75,24 @@ The `.txt` export is exactly what `/log` prints. It groups entries by the day th
 
 Notes show under their entry in `/log` and in `.txt` exports as `> …` lines, and in the `notes` column of CSV exports; `/restore` reads them back. In `/edit`, notes are `>` lines under an entry, and several lines make multi-line notes. For encrypted accounts, notes are encrypted together with the entry.
 
+## Work orders
+
+A work order (WO) is a short code with no spaces or brackets, such as `4471` or `WO-88`. It's shown as `[4471]` in a column before the time in `/log`, `/report`, `/edit` and `.txt` exports, and in the `wo` column of CSV exports. `/restore` reads it back. The column only appears when something in view has a WO.
+
+- **`/wolink dev`** asks for a WO and links it to the `dev` category for today. It works before you've logged anything, so you can go through your schedule in the morning:
+  ```
+  /wolink dev 4471
+  /wolink mtg 5520
+  ```
+  - Every `dev` entry today gets `[4471]`: the ones already logged, and each new one as you log it.
+  - Add a date to link a different day: `/wolink dev 2026-09-26 4471`.
+  - Answer with nothing to unlink.
+  - The link is stored as a hidden entry. It syncs and is encrypted like the rest, but never shows up, takes no time and has no entry number.
+- **`/wopunch`** uses the same picker as `/note` (Tab: older, Shift+Tab: newer, Enter: select) and sets the WO on that one entry. `/wopunch 12 4471` does it in one go. A punched entry keeps its own WO even if you run `/wolink` again for its category.
+- **`/wolist [range]`** totals time per WO, largest first, with the entries, categories and dates. It includes linked WOs with no time logged yet, and a `(none)` line for time without a WO.
+
+For encrypted accounts, work orders are encrypted with the entry.
+
 ## Editing
 
 `/edit` opens the last 24 hours (or any range, such as `/edit yesterday`) as text:
@@ -91,6 +112,7 @@ Thu 2026-09-24
 - Add a line without a number, such as `09:30 email inbox`, to insert an entry. It goes on the day of the header above it.
 - The number at the start of a line links it to its entry, so don't change it.
 - Lines starting with `>` under an entry are its notes. Change them, add some, or delete them.
+- A `[4471]` before the time is the entry's work order. Change it, add one (`[4471] 14:30 dev review`), or delete it.
 
 `/save` applies everything at once. If any line has a problem, such as a bad time, a time in the future, or an unknown number, nothing is saved and the problems are listed so you can fix them and `/save` again. `/cancel` leaves the log untouched.
 

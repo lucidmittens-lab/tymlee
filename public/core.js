@@ -14,6 +14,24 @@
   const MAX_TEXT = 1000;
   const MAX_NOTES = 1000;
 
+  // Work orders: a short code per entry (no spaces or brackets), shown as
+  // "[4471]" in a column before the start time.
+  const MAX_WO = 40;
+  const validWo = (wo) => typeof wo === 'string' && /^[^\s\[\]]{1,40}$/.test(wo);
+  const woTag = (wo) => (wo ? `[${wo}]` : '');
+
+  // An entry with its optional fields set only when they have a value.
+  function makeEntry(base, extra) {
+    const e = { id: base.id, ts: base.ts, text: base.text };
+    const x = { notes: base.notes, wo: base.wo, wl: base.wl, ...(extra || {}) };
+    if (x.notes) e.notes = x.notes;
+    if (x.wo) {
+      e.wo = x.wo;
+      if (x.wl) e.wl = true;
+    }
+    return e;
+  }
+
   // Notes are shown under their entry as lines starting with "> ", in /log,
   // /edit and text backups.
   function notesLines(notes, indent) {
@@ -33,6 +51,15 @@
   }
   const isOff = (e) => Boolean(e) && e.text === OFF;
 
+  // /wolink stores "dev -> WO 4471 for this day" as a hidden entry with the
+  // text "/wo dev", at the start of that day. It syncs like an entry but is
+  // never shown, timed or numbered; new entries of that category that day
+  // pick up its work order.
+  const LINK = '/wo ';
+  const isLink = (e) => Boolean(e) && typeof e.text === 'string' && e.text.startsWith(LINK);
+  const linkCategory = (e) => e.text.slice(LINK.length);
+  const visible = (entries) => entries.filter((e) => !isLink(e));
+
   // "dev fixing login bug" -> { category: "dev", note: "fixing login bug" }
   // The category is everything before the first space.
   function parseInput(text) {
@@ -48,7 +75,7 @@
     const seen = new Map();
     for (let i = entries.length - 1; i >= 0; i--) {
       if (isOff(entries[i])) continue;
-      const cat = parseInput(entries[i].text).category;
+      const cat = isLink(entries[i]) ? linkCategory(entries[i]) : parseInput(entries[i].text).category;
       const key = cat.toLowerCase();
       if (cat && !seen.has(key)) seen.set(key, cat);
     }
@@ -72,7 +99,8 @@
   // Each entry runs until the next one starts; the last one is still running.
   // `n` is the entry's 1-based position in the whole log. Off markers become
   // spans with `off: true`: gaps that are shown but never counted.
-  function withSpans(entries, now) {
+  function withSpans(all, now) {
+    const entries = visible(all);
     return entries.map((e, i) => {
       const next = entries[i + 1];
       const end = next ? next.ts : now;
@@ -198,6 +226,9 @@
 
     const numWidth = Math.max(1, String(spans[spans.length - 1].n).length);
     const catWidth = Math.min(16, Math.max(8, ...spans.map((s) => s.category.length)));
+    // The work order column only appears when something in view has one.
+    const woWidth = spans.some((s) => s.wo) ? Math.max(4, ...spans.map((s) => woTag(s.wo).length)) : 0;
+    const woCell = (s) => (woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '');
     const days = [];
     for (const s of spans) {
       const key = ymd(s.ts);
@@ -209,12 +240,13 @@
     for (const day of days) {
       out.push(`${DAY_NAMES[new Date(day.ts).getDay()]} ${day.key}`);
       const endHead = compact ? '' : 'end    ';
-      out.push(`  ${'#'.padStart(numWidth)}  start  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
+      const woHead = woWidth ? `${'wo'.padEnd(woWidth)}  ` : '';
+      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}start  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
         const end = compact ? '' : `${s.running ? 'now  ' : hhmm(s.end)}  `;
         const dur = s.off ? '-' : formatHM(s.duration);
         out.push(
-          `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}${dur.padStart(6)}  ` +
+          `  ${String(s.n).padStart(numWidth)}  ${woCell(s)}${hhmm(s.ts)}  ${end}${dur.padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
@@ -243,6 +275,7 @@
     const RULE = '-'.repeat(48);
     const first = ymd(spans[0].ts);
     const last = ymd(spans[spans.length - 1].ts);
+    const woWidth = spans.some((s) => s.wo) ? Math.max(4, ...spans.map((s) => woTag(s.wo).length)) : 0;
     const out = [`report: ${range.label} (${first === last ? first : `${first} .. ${last}`})`, ''];
     for (const t of summarize(spans)) {
       const pct = all ? Math.round((t.ms / all) * 100) : 0;
@@ -250,12 +283,56 @@
       out.push(`${t.category.padEnd(20)}  ${formatHM(t.ms).padStart(6)}  ${String(pct).padStart(3)}%  ${plural(mine.length, 'entry', 'entries')}`);
       for (const s of mine) {
         const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${hhmm(s.ts)}` : hhmm(s.ts);
-        out.push(`  ${String(s.n).padStart(numWidth)}  ${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
+        const wo = woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '';
+        out.push(`  ${String(s.n).padStart(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
+        out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
       }
       out.push('');
     }
     out.push(RULE);
     out.push(`${'total'.padEnd(20)}  ${formatHM(all).padStart(6)}        ${plural(spans.length, 'entry', 'entries')}`);
+    return out.join('\n');
+  }
+
+  // Time per work order for a range, largest first; "(none)" collects time
+  // without a work order.
+  function formatWorkOrders(entries, range, now) {
+    const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    const links = entries.filter((e) => isLink(e) && e.wo && e.ts >= range.from && e.ts < range.to);
+    if (!spans.length && !links.length) return `no entries (${range.label})`;
+    const all = spans.reduce((sum, s) => sum + s.duration, 0);
+    const dates = spans.map((s) => s.ts).concat(links.map((e) => e.ts)).sort((a, b) => a - b);
+    const first = ymd(dates[0]);
+    const last = ymd(dates[dates.length - 1]);
+    const groups = new Map();
+    const group = (key) => {
+      if (!groups.has(key)) groups.set(key, { list: [], cats: [], days: [] });
+      return groups.get(key);
+    };
+    for (const s of spans) group(s.wo || '').list.push(s);
+    // Work orders scheduled with /wolink, whether or not time was logged.
+    for (const e of links) {
+      group(e.wo).cats.push(linkCategory(e));
+      group(e.wo).days.push(e.ts);
+    }
+    const rows = Array.from(groups, ([wo, g]) => ({ wo, ...g, ms: g.list.reduce((sum, s) => sum + s.duration, 0) }))
+      .sort((a, b) => (!a.wo) - (!b.wo) || b.ms - a.ms);
+    const width = Math.max(8, ...rows.map((r) => (r.wo ? woTag(r.wo).length : 6)));
+    const out = [`work orders: ${range.label} (${first === last ? first : `${first} .. ${last}`})`, ''];
+    for (const r of rows) {
+      const pct = all ? Math.round((r.ms / all) * 100) : 0;
+      const cats = [];
+      for (const c of r.list.map((s) => s.category).concat(r.cats)) if (!cats.some((x) => x.toLowerCase() === c.toLowerCase())) cats.push(c);
+      const days = r.list.map((s) => s.ts).concat(r.days).sort((a, b) => a - b);
+      const d1 = ymd(days[0]).slice(5);
+      const d2 = ymd(days[days.length - 1]).slice(5);
+      out.push(
+        `${(r.wo ? woTag(r.wo) : '(none)').padEnd(width)}  ${formatHM(r.ms).padStart(6)}  ${String(pct).padStart(3)}%  ` +
+        `${plural(r.list.length, 'entry', 'entries').padEnd(11)}  ${cats.join(', ')}${first === last ? '' : `  ${d1 === d2 ? d1 : `${d1} .. ${d2}`}`}`,
+      );
+    }
+    out.push('-'.repeat(48));
+    out.push(`${'total'.padEnd(width)}  ${formatHM(all).padStart(6)}        ${plural(spans.length, 'entry', 'entries')}`);
     return out.join('\n');
   }
 
@@ -270,11 +347,12 @@
 
   // One row per entry; timestamps are ISO 8601 (UTC), running entries have no end.
   function toCSV(entries, range, now) {
-    const rows = [['n', 'start', 'end', 'minutes', 'category', 'note', 'notes']];
+    const rows = [['n', 'wo', 'start', 'end', 'minutes', 'category', 'note', 'notes']];
     for (const s of withSpans(entries, now)) {
       if (s.off || s.ts < range.from || s.ts >= range.to) continue;
       rows.push([
         s.n,
+        s.wo || '',
         new Date(s.ts).toISOString(),
         s.running ? '' : new Date(s.end).toISOString(),
         (s.duration / 60000).toFixed(1),
@@ -300,13 +378,14 @@
     '# delete a line to remove it',
     '# new line: 14:30 dev review',
     '# notes: "> text" under an entry',
+    '# work order: [4471] before the time',
   ];
 
   // Returns the text to edit and the entries it covers.
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '' }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl) }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
     let day = '';
@@ -316,7 +395,7 @@
         day = d;
         lines.push(`${DAY_NAMES[new Date(it.ts).getDay()]} ${d}`);
       }
-      lines.push(`  ${String(it.n).padStart(numWidth)}  ${hhmm(it.ts)}  ${it.text}`);
+      lines.push(`  ${String(it.n).padStart(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
       lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
     }
     if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
@@ -354,18 +433,23 @@
         return;
       }
 
-      const m = line.match(/^(?:(\d+)\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      const m = line.match(/^(?:(\d+)\s+)?(?:\[([^\]]*)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
       if (!m) {
         errors.push(`${where}: expected "HH:MM text", e.g. "14:30 dev code review"`);
         return;
       }
-      const h = +m[2];
-      const min = +m[3];
-      if (h > 23 || min > 59) {
-        errors.push(`${where}: ${m[2]}:${m[3]} is not a valid time`);
+      const wo = (m[2] || '').trim();
+      if (wo && !validWo(wo)) {
+        errors.push(`${where}: "[${wo}]" is not a valid work order (no spaces or brackets, up to ${MAX_WO} characters)`);
         return;
       }
-      const { category, note } = parseInput(m[4]);
+      const h = +m[3];
+      const min = +m[4];
+      if (h > 23 || min > 59) {
+        errors.push(`${where}: ${m[3]}:${m[4]} is not a valid time`);
+        return;
+      }
+      const { category, note } = parseInput(m[5]);
       const entryText = note ? `${category} ${note}` : category;
       if (entryText.startsWith('/') && entryText !== OFF) {
         errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
@@ -399,7 +483,7 @@
         errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
         return;
       }
-      current = { where, it, ts, text: entryText, notes: [] };
+      current = { where, it, ts, text: entryText, wo, notes: [] };
       records.push(current);
     });
 
@@ -412,12 +496,14 @@
         errors.push(`${r.where}: notes are limited to ${MAX_NOTES} characters`);
         continue;
       }
-      const entry = { id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text };
-      if (notes) entry.notes = notes;
+      // A work order typed here applies to this entry only, unless it is
+      // the one it already had (which keeps any /wolink).
+      const keepsLink = Boolean(r.it && r.it.wl && r.wo === r.it.wo);
+      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text }, { notes, wo: r.wo, wl: keepsLink });
       if (!r.it) {
         ops.push({ op: 'put', entry });
         added++;
-      } else if (r.ts !== r.it.ts || r.text !== r.it.text || notes !== (r.it.notes || '')) {
+      } else if (r.ts !== r.it.ts || r.text !== r.it.text || notes !== (r.it.notes || '') || r.wo !== (r.it.wo || '')) {
         ops.push({ op: 'put', entry });
         changed++;
       }
@@ -459,7 +545,8 @@
     return rows;
   }
 
-  const CSV_HEADERS = ['n,start,end,minutes,category,note,notes', 'n,start,end,minutes,category,note'];
+  // CSV headers written by /export over time (columns are found by name).
+  const isCsvHeader = (line) => /^n,(wo,)?start,end,minutes,category,note(,notes)?$/.test(line.trim());
 
   // The CSV leaves out off time, so an entry whose end is earlier than the
   // next start (or that ended with nothing after it) was followed by /off.
@@ -467,6 +554,8 @@
     const entries = [];
     const errors = [];
     const rows = parseCSV(text);
+    const col = Object.fromEntries(rows[0].map((name, i) => [name.trim(), i]));
+    const get = (r, name) => (col[name] == null ? '' : r[col[name]] || '');
     rows.slice(1).forEach((r, i) => {
       const where = `csv row ${i + 2}`;
       if (r.length === 1 && !r[0].trim()) return;
@@ -474,9 +563,9 @@
         errors.push(`${where}: expected at least 6 columns`);
         return;
       }
-      const ts = Date.parse(r[1]);
-      const end = r[2] ? Date.parse(r[2]) : null;
-      const { category, note } = parseInput(`${r[4]} ${r[5]}`);
+      const ts = Date.parse(get(r, 'start'));
+      const end = get(r, 'end') ? Date.parse(get(r, 'end')) : null;
+      const { category, note } = parseInput(`${get(r, 'category')} ${get(r, 'note')}`);
       if (Number.isNaN(ts) || Number.isNaN(end) || !category) {
         errors.push(`${where}: could not read the start, end or category`);
         return;
@@ -486,21 +575,34 @@
         errors.push(`${where}: entries are limited to ${MAX_TEXT} characters`);
         return;
       }
-      const notes = (r[6] || '').trim();
+      const notes = get(r, 'notes').trim();
       if (notes.length > MAX_NOTES) {
         errors.push(`${where}: notes are limited to ${MAX_NOTES} characters`);
         return;
       }
-      entries.push({ ts, end, text: entryText, notes });
+      const wo = get(r, 'wo').trim();
+      if (wo && !validWo(wo)) {
+        errors.push(`${where}: "${wo}" is not a valid work order (no spaces or brackets, up to ${MAX_WO} characters)`);
+        return;
+      }
+      entries.push({ ts, end, text: entryText, notes, wo });
     });
     entries.sort((a, b) => a.ts - b.ts);
     const out = [];
     entries.forEach((e, i) => {
-      out.push(e.notes ? { ts: e.ts, text: e.text, notes: e.notes } : { ts: e.ts, text: e.text });
+      out.push(stripEntry(e));
       const next = entries[i + 1];
       if (e.end != null && (!next || e.end < next.ts)) out.push({ ts: e.end, text: OFF });
     });
     return { entries: out, errors };
+  }
+
+  // { ts, text } plus notes / wo when set.
+  function stripEntry(e) {
+    const out = { ts: e.ts, text: e.text };
+    if (e.notes) out.notes = e.notes;
+    if (e.wo) out.wo = e.wo;
+    return out;
   }
 
   // Returns { entries: [{ ts, text, notes? }], errors }.
@@ -508,7 +610,7 @@
     const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
     const content = lines.filter((l) => !l.trim().startsWith('#'));
     const start = content.findIndex((l) => l.trim());
-    if (start !== -1 && CSV_HEADERS.includes(content[start].trim())) return backupFromCSV(content.slice(start).join('\n'));
+    if (start !== -1 && isCsvHeader(content[start])) return backupFromCSV(content.slice(start).join('\n'));
 
     const entries = [];
     const errors = [];
@@ -538,20 +640,27 @@
         return;
       }
 
-      // Report row:  3  09:00  09:45    0:45  dev  note   (end column optional)
-      const row = line.match(/^\d+\s+(\d{1,2}):(\d{2})\s+(?:(?:\d{1,2}:\d{2}|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
-      // /edit line:  3  09:00  dev note   or   09:00 dev note
-      const edit = !row && line.match(/^(?:\d+\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      // Report row:  3  [4471]  09:00  09:45    0:45  dev  note
+      // (work order and end columns optional)
+      const row = line.match(/^\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})\s+(?:(?:\d{1,2}:\d{2}|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
+      // /edit line:  3  [4471]  09:00  dev note   or   09:00 dev note
+      const edit = !row && line.match(/^(?:\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
       if (!row && !edit) {
         // Per-category summary lines:  dev   0:57   79%
         if (/^\S+\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
         errors.push(`${where}: not a tymlee log line: "${line.slice(0, 40)}"`);
         return;
       }
-      const [h, min] = [+(row || edit)[1], +(row || edit)[2]];
+      const m = row || edit;
+      const wo = m[1] || '';
+      const [h, min] = [+m[2], +m[3]];
       let entryText;
-      if (row) entryText = row[3] === '(off)' ? OFF : [row[3], row[4]].filter(Boolean).join(' ');
-      else entryText = edit[3];
+      if (row) entryText = row[4] === '(off)' ? OFF : [row[4], row[5]].filter(Boolean).join(' ');
+      else entryText = edit[4];
+      if (wo && !validWo(wo)) {
+        errors.push(`${where}: "${wo}" is not a valid work order`);
+        return;
+      }
       const { category, note } = parseInput(entryText);
       entryText = note ? `${category} ${note}` : category;
       if (h > 23 || min > 59) {
@@ -572,13 +681,13 @@
       }
       const at = new Date(day);
       at.setHours(h, min, 0, 0);
-      last = { ts: at.getTime(), text: entryText, notesLines: [], where };
+      last = { ts: at.getTime(), text: entryText, wo, notesLines: [], where };
       entries.push(last);
     });
-    const out = entries.map(({ ts, text: t, notesLines: nl, where }) => {
+    const out = entries.map(({ ts, text: t, wo, notesLines: nl, where }) => {
       const notes = joinNotes(nl);
       if (notes.length > MAX_NOTES) errors.push(`${where}: notes are limited to ${MAX_NOTES} characters`);
-      return notes ? { ts, text: t, notes } : { ts, text: t };
+      return stripEntry({ ts, text: t, notes, wo });
     });
     return { entries: out, errors };
   }
@@ -593,7 +702,7 @@
       const k = key(e);
       if (seen.has(k)) continue;
       seen.add(k);
-      fresh.push(e.notes ? { id: uuid(), ts: e.ts, text: e.text, notes: e.notes } : { id: uuid(), ts: e.ts, text: e.text });
+      fresh.push(makeEntry({ id: uuid(), ...e }));
     }
     return fresh;
   }
@@ -670,7 +779,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    OFF, isOff, MAX_TEXT, MAX_NOTES, formatCategoryReport,
+    OFF, isOff, LINK, isLink, linkCategory, visible, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

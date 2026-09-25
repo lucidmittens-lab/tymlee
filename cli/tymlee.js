@@ -241,20 +241,20 @@ function readBackupFile(fileArgs) {
 // Both take over the prompt line until Enter (Esc cancels).
 
 const PROMPT = tty ? sgr('32', '> ') : '';
-let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', resolve }
+let modal = null; // { kind: 'pick', name, choices, idx, resolve } or { kind: 'ask', resolve }
 
 function pickPrompt() {
   const { choices, idx } = modal;
-  return `${sgr('32', 'note ›')} ${choices[idx].label} ${sgr('90', `(${idx + 1}/${choices.length})`)} `;
+  return `${sgr('32', `${modal.name} ›`)} ${choices[idx].label} ${sgr('90', `(${idx + 1}/${choices.length})`)} `;
 }
 
-function pickEntry(choices) {
+function pickEntry(choices, name) {
   if (!rl || !tty) {
     print('choosing an entry needs the tymlee shell; use /note <#> [notes]', 'err');
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
-    modal = { kind: 'pick', choices, idx: 0, resolve };
+    modal = { kind: 'pick', name: name || 'pick', choices, idx: 0, resolve };
     print('Tab: older · Shift+Tab: newer · Enter: select · Esc: cancel', 'dim');
     rl.setPrompt(pickPrompt());
     promptShown = true;
@@ -262,7 +262,7 @@ function pickEntry(choices) {
   });
 }
 
-function ask(label, initial) {
+function ask(label, initial, name) {
   if (!rl || !tty) {
     print('typing notes needs the tymlee shell; use /note <#> <notes>', 'err');
     return Promise.resolve(null);
@@ -270,7 +270,7 @@ function ask(label, initial) {
   return new Promise((resolve) => {
     modal = { kind: 'ask', resolve };
     print(`${label} · Enter: save · Esc: cancel`, 'dim');
-    rl.setPrompt(sgr('32', 'notes › '));
+    rl.setPrompt(sgr('32', `${name || 'answer'} › `));
     promptShown = true;
     rl.prompt();
     if (initial) rl.write(initial);

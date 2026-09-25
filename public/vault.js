@@ -138,29 +138,41 @@
   const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
   const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
 
-  // Seal an entry's start time, text and notes together.
+  // Seal an entry's start time, text, notes and work order together.
   function sealEntry(key, id, entry) {
     const payload = { t: entry.ts, x: entry.text };
     if (entry.notes) payload.n = entry.notes;
+    if (entry.wo) {
+      payload.w = entry.wo;
+      if (entry.wl) payload.l = 1;
+    }
     return encryptWith(SEALED, key, id, JSON.stringify(payload));
   }
 
-  // { ts, text } plus notes when the entry has them.
+  // { ts, text } plus notes / wo / wl when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x, n } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n, w, l } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
-    return typeof n === 'string' && n ? { ts: t, text: x, notes: n } : { ts: t, text: x };
+    const entry = { ts: t, text: x };
+    if (typeof n === 'string' && n) entry.notes = n;
+    if (typeof w === 'string' && w) {
+      entry.wo = w;
+      if (l) entry.wl = true;
+    }
+    return entry;
   }
 
-  // Notes kept in their own column (servers without sealed entries) are
-  // encrypted like text, bound to the entry id plus "#notes".
-  const encryptNotes = (key, id, notes) => encryptWith(PREFIX, key, `${id}#notes`, notes);
-  const decryptNotes = (key, id, stored) => decryptWith(PREFIX, key, `${id}#notes`, stored);
+  // Fields kept in their own column (servers without sealed entries) are
+  // encrypted like text, bound to the entry id plus "#<field>".
+  const encryptField = (key, id, field, value) => encryptWith(PREFIX, key, `${id}#${field}`, value);
+  const decryptField = (key, id, field, stored) => decryptWith(PREFIX, key, `${id}#${field}`, stored);
+  const encryptNotes = (key, id, notes) => encryptField(key, id, 'notes', notes);
+  const decryptNotes = (key, id, stored) => decryptField(key, id, 'notes', stored);
 
   const api = {
     PREFIX, newRecoveryCode, newLinkCode, normalizeCode, looksLikeCode,
     newMasterKey, importMasterKey, wrap, unwrap, isEncrypted, encryptText, decryptText,
-    isSealed, sealEntry, openEntry, encryptNotes, decryptNotes,
+    isSealed, sealEntry, openEntry, encryptNotes, decryptNotes, encryptField, decryptField,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TymleeVault = api;

@@ -13,9 +13,11 @@
 //   restoreUsage         usage text for /restore
 //   keys                 help lines about keys
 //   linkSignIn           whether the emailed sign-in link works here
-//   pickEntry(choices) -> Promise<choice|null>  /note: choose an entry;
-//                        choices are newest first, { span, label }
-//   ask(label, initial) -> Promise<string|null>   /note: type the notes
+//   pickEntry(choices, name) -> Promise<choice|null>   choose an entry for
+//                        /note or /wopunch (name); choices are newest first,
+//                        { span, label }
+//   ask(label, initial, name) -> Promise<string|null>  type notes or a
+//                        work order (name: 'notes' or 'wo')
 //   editor               either an inline box that /save and /cancel act on:
 //                          { open({ text, items, mode, label }), isOpen(),
 //                            mode(), value(), items(), close() }
@@ -62,11 +64,40 @@
       return `${n} ${n === 1 ? one : many}`;
     }
 
-    // "#12 10:00 dev code review", with the date when it isn't today.
+    // "#12 [4471] 10:00 dev code review", with the date when it isn't today.
     function entryLabel(s) {
       const today = T.ymd(s.ts) === T.ymd(Date.now());
       const when = today ? T.hhmm(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.hhmm(s.ts)}`;
-      return `#${s.n} ${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
+      return `#${s.n} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
+    }
+
+    // Entries you can see (not /wolink's hidden links).
+    const shown = () => T.visible(store.entries);
+
+    const sameCategory = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+    // The /wolink link for a category on the day of `ts`, if any.
+    function linkFor(category, ts) {
+      const day = T.ymd(ts);
+      return store.entries.find((e) => T.isLink(e) && sameCategory(T.linkCategory(e), category) && T.ymd(e.ts) === day) || null;
+    }
+
+    // Let the user choose an entry (newest first) unless args[0] names one.
+    // Returns the chosen span, or null (after explaining why).
+    async function chooseEntry(args, usage, name) {
+      const spans = T.withSpans(store.entries, Date.now()).filter((s) => !s.off);
+      if (!spans.length) {
+        print('no entries yet', 'err');
+        return null;
+      }
+      if (args.length) {
+        const n = Number(String(args[0]).replace(/^#/, ''));
+        const found = spans.find((s) => s.n === n);
+        if (!found) print(`usage: ${usage}   (an entry number from /log; /off entries don't count)`, 'err');
+        return found || null;
+      }
+      const picked = await io.pickEntry(spans.slice().reverse().map((span) => ({ span, label: entryLabel(span) })), name);
+      return picked ? picked.span : null;
     }
 
     function rangeFrom(args) {
@@ -118,12 +149,14 @@
     function add(text) {
       if (text.length > T.MAX_TEXT) return print(`entries are limited to ${T.MAX_TEXT} characters`, 'err');
       const { category, note } = T.parseInput(text);
-      const before = store.entries;
-      const entry = store.add(note ? `${category} ${note}` : category);
+      const before = shown();
+      // A /wolink for this category today gives the entry its work order.
+      const link = linkFor(category, Date.now());
+      const entry = store.add(note ? `${category} ${note}` : category, link && link.wo ? { wo: link.wo, wl: true } : undefined);
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
       const parts = [T.hhmm(entry.ts)];
       if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
-      parts.push(`in #${store.entries.length} ${describe(T.parseInput(entry.text))}`);
+      parts.push(`in #${shown().length} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
     }
 
@@ -243,42 +276,105 @@
         about: 'add or change notes on an entry (Tab: older, Shift+Tab: newer)',
         async run(args) {
           if (busy()) return;
-          const spans = T.withSpans(store.entries, Date.now()).filter((s) => !s.off);
-          if (!spans.length) return print('no entries to add notes to', 'err');
-          if (!(await store.notesSupported())) {
+          if (!shown().some((e) => !T.isOff(e))) return print('no entries to add notes to', 'err');
+          if (!(await store.supports('notes'))) {
             return print('notes need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
           }
-          let chosen;
-          if (args.length) {
-            const n = Number(String(args[0]).replace(/^#/, ''));
-            chosen = spans.find((s) => s.n === n);
-            if (!chosen) return print('usage: /note [#]   (an entry number from /log; /off entries have no notes)', 'err');
-          } else {
-            const picked = await io.pickEntry(spans.slice().reverse().map((span) => ({ span, label: entryLabel(span) })));
-            if (!picked) return print('note cancelled', 'dim');
-            chosen = picked.span;
-          }
+          const chosen = await chooseEntry(args, '/note [#] [notes]', 'note');
+          if (!chosen) return args.length ? undefined : print('note cancelled', 'dim');
           const current = store.entries.find((e) => e.id === chosen.id);
           if (!current) return print('that entry was removed in the meantime', 'err');
           const multiLine = Boolean(current.notes && current.notes.includes('\n'));
           const initial = (current.notes || '').split('\n').join(' / ');
           if (multiLine && args.length < 2) print('these notes have several lines; saving here joins them. To keep the line breaks, use /edit', 'dim');
-          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`notes for ${entryLabel(chosen)}`, initial);
+          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`notes for ${entryLabel(chosen)}`, initial, 'notes');
           if (typed == null) return print('note cancelled', 'dim');
           const value = typed.trim();
           if (value === initial.trim()) return print('notes unchanged', 'dim');
           if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
-          const entry = { id: current.id, ts: current.ts, text: current.text };
-          if (value) entry.notes = value;
-          store.apply([{ op: 'put', entry }]);
+          store.apply([{ op: 'put', entry: T.makeEntry(current, { notes: value }) }]);
           print(value ? `notes saved on #${chosen.n} ${describe(chosen)}` : `notes removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+        },
+      },
+      wolink: {
+        usage: '/wolink <category> [YYYY-MM-DD] [wo]',
+        about: "link a work order to a category for a day (today by default)",
+        async run(args) {
+          if (busy()) return;
+          const category = args[0] || '';
+          if (!category || category.startsWith('/')) return print('usage: /wolink <category> [YYYY-MM-DD] [work order]', 'err');
+          let rest = args.slice(1);
+          let dayTs = Date.now();
+          if (rest[0] && /^\d{4}-\d{2}-\d{2}$/.test(rest[0])) {
+            const range = T.parseRange(rest[0], Date.now());
+            if (!range) return print(`"${rest[0]}" is not a real date`, 'err');
+            dayTs = range.from;
+            rest = rest.slice(1);
+          }
+          const day = T.ymd(dayTs);
+          if (!(await store.supports('wo'))) {
+            return print('work orders need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
+          }
+          const link = linkFor(category, dayTs);
+          const matching = shown().filter((e) => !T.isOff(e) && T.ymd(e.ts) === day && sameCategory(T.parseInput(e.text).category, category));
+          const typed = rest.length ? rest.join(' ') : await io.ask(`work order for ${category} on ${day}`, (link && link.wo) || '', 'wo');
+          if (typed == null) return print('work order cancelled', 'dim');
+          const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
+          if (wo && !T.validWo(wo)) return print(`"${wo}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`, 'err');
+          const ops = [];
+          if (wo) {
+            // The hidden link, at the start of the day.
+            const linkEntry = link ? T.makeEntry(link, { wo, wl: true }) : T.makeEntry({ id: T.uuid(), ts: T.startOfDay(dayTs), text: `${T.LINK}${category}` }, { wo, wl: true });
+            ops.push({ op: 'put', entry: linkEntry });
+            // Entries punched with /wopunch keep their own work order.
+            for (const e of matching) if (!e.wo || e.wl) ops.push({ op: 'put', entry: T.makeEntry(e, { wo, wl: true }) });
+          } else {
+            if (link) ops.push({ op: 'del', id: link.id });
+            for (const e of matching) if (e.wo && e.wl) ops.push({ op: 'put', entry: T.makeEntry(e, { wo: '', wl: false }) });
+          }
+          store.apply(ops);
+          const updated = ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length;
+          if (!wo) return print(link || updated ? `work order unlinked from ${category} on ${day}` : `no work order was linked to ${category} on ${day}`, 'ok');
+          const today = day === T.ymd(Date.now());
+          print(`${T.woTag(wo)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated` +
+            (today ? `; new ${category} entries today get it too` : ''), 'ok');
+        },
+      },
+      wopunch: {
+        usage: '/wopunch [#] [wo]',
+        about: 'set the work order on one entry (Tab: older, Shift+Tab: newer)',
+        async run(args) {
+          if (busy()) return;
+          if (!shown().some((e) => !T.isOff(e))) return print('no entries yet', 'err');
+          if (!(await store.supports('wo'))) {
+            return print('work orders need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
+          }
+          const chosen = await chooseEntry(args, '/wopunch [#] [work order]', 'wopunch');
+          if (!chosen) return args.length ? undefined : print('work order cancelled', 'dim');
+          const current = store.entries.find((e) => e.id === chosen.id);
+          if (!current) return print('that entry was removed in the meantime', 'err');
+          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`work order for ${entryLabel(chosen)}`, current.wo || '', 'wo');
+          if (typed == null) return print('work order cancelled', 'dim');
+          const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
+          if (wo === (current.wo || '') && !current.wl) return print('work order unchanged', 'dim');
+          if (wo && !T.validWo(wo)) return print(`"${wo}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`, 'err');
+          store.apply([{ op: 'put', entry: T.makeEntry(current, { wo, wl: false }) }]);
+          print(wo ? `${T.woTag(wo)} set on #${chosen.n} ${describe(chosen)}` : `work order removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+        },
+      },
+      wolist: {
+        usage: '/wolist [range]',
+        about: 'time per work order for a range, with linked work orders',
+        run(args) {
+          const range = rangeFrom(args);
+          if (range) print(T.formatWorkOrders(store.entries, range, Date.now()), 'report');
         },
       },
       undo: {
         usage: '/undo',
         about: 'remove the last entry',
         run() {
-          if (!store.entries.length) return print('nothing to undo', 'err');
+          if (!shown().length) return print('nothing to undo', 'err');
           const now = Date.now();
           const last = T.withSpans(store.entries, now).pop();
           store.remove(last.id);
@@ -304,8 +400,8 @@
         about: 'delete an entry by number (its time goes to the one before)',
         run(args) {
           const n = Number(args[0]);
-          if (!Number.isInteger(n) || n < 1 || n > store.entries.length) {
-            return print(`usage: /rm <#>   (# between 1 and ${store.entries.length || 1}, see /log)`, 'err');
+          if (!Number.isInteger(n) || n < 1 || n > shown().length) {
+            return print(`usage: /rm <#>   (# between 1 and ${shown().length || 1}, see /log)`, 'err');
           }
           const s = T.withSpans(store.entries, Date.now())[n - 1];
           store.remove(s.id);
@@ -320,7 +416,7 @@
           const range = rangeFrom(args.filter((a) => a.toLowerCase() !== 'csv'));
           if (!range) return;
           const now = Date.now();
-          const count = store.entries.filter((e) => e.ts >= range.from && e.ts < range.to).length;
+          const count = shown().filter((e) => e.ts >= range.from && e.ts < range.to).length;
           if (!count) return print(`no entries (${range.label})`, 'err');
           const body = csv ? T.toCSV(store.entries, range, now) : T.formatReport(store.entries, range, now) + '\n';
           const name = `tymlee-${range.label === 'today' ? T.ymd(now) : range.label}.${csv ? 'csv' : 'txt'}`;
@@ -445,7 +541,7 @@
             none: 'not encrypted: type /encrypt to turn it on',
             pending: 'encryption: checking…',
           }[store.encryption] || '';
-          print(`${store.user.email} · ${store.entries.length} entries · ${state}\n${crypt}${err}`, 'dim');
+          print(`${store.user.email} · ${shown().length} entries · ${state}\n${crypt}${err}`, 'dim');
         },
       },
       sync: {
@@ -454,7 +550,7 @@
         async run() {
           if (!store.user) return print('not signed in; /login <email> to sync', 'err');
           await store.sync({ full: true });
-          if (store.status === 'synced') print(`synced · ${store.entries.length} entries`, 'ok');
+          if (store.status === 'synced') print(`synced · ${shown().length} entries`, 'ok');
           else print(`sync failed: ${store.lastError || store.status}`, 'err');
         },
       },
@@ -576,7 +672,7 @@
     // What the status line shows. `state` is 'idle', 'off' or 'running'.
     function status(now) {
       const sync = { status: store.status, label: syncLabel() };
-      if (!store.entries.length) return { state: 'idle', text: 'not clocked in · type /help', sync };
+      if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync };
       const spans = T.withSpans(store.entries, now);
       const cur = spans[spans.length - 1];
       // Same rule as the report: an entry counts toward the day it started on.
@@ -585,7 +681,7 @@
       return {
         state: cur.off ? 'off' : 'running',
         clock: T.formatClock(cur.duration),
-        what: describe(cur),
+        what: `${cur.wo ? `${T.woTag(cur.wo)} ` : ''}${describe(cur)}`,
         today: `today ${T.formatHM(todayMs)}`,
         since: T.hhmm(cur.ts),
         sync,
@@ -598,7 +694,7 @@
       completions,
       status,
       commandWords,
-      recentTexts: (n) => store.entries.slice(-n).map((e) => e.text),
+      recentTexts: (n) => shown().slice(-n).map((e) => e.text),
     };
   }
 

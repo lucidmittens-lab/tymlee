@@ -61,3 +61,14 @@ test('notes are sealed with the entry, or encrypted in their own column', async 
   assert.equal(await V.decryptNotes(key, 'id-1', col), 'secret detail');
   await assert.rejects(V.decryptText(key, 'id-1', col)); // not interchangeable with the text
 });
+
+test('work orders are sealed with the entry', async () => {
+  const key = await V.importMasterKey(V.newMasterKey());
+  const entry = { ts: 5, text: 'dev x', wo: '4471', wl: true };
+  const stored = await V.sealEntry(key, 'id-1', entry);
+  assert.ok(!stored.includes('4471'));
+  assert.deepEqual(await V.openEntry(key, 'id-1', stored), entry);
+  const col = await V.encryptField(key, 'id-1', 'wo', '4471');
+  assert.equal(await V.decryptField(key, 'id-1', 'wo', col), '4471');
+  await assert.rejects(V.decryptNotes(key, 'id-1', col));
+});

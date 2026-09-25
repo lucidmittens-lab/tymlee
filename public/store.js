@@ -155,10 +155,12 @@
       apply([op]);
     }
 
-    function add(text) {
-      const last = entries[entries.length - 1];
+    // `extra` can carry notes / wo / wl for the new entry.
+    function add(text, extra) {
+      const shown = T.visible(entries);
+      const last = shown[shown.length - 1];
       const ts = Math.max(Date.now(), last ? last.ts + 1 : 0);
-      const entry = { id: T.uuid(), ts, text };
+      const entry = T.makeEntry({ id: T.uuid(), ts, text }, extra);
       change({ op: 'put', entry });
       return entry;
     }
@@ -196,6 +198,7 @@
 
     let serverVersion = null; // null (not checked yet), 1 or 2
     let serverNotes = false; // has the notes column (latest supabase/schema.sql)
+    let serverWo = false; // has the wo and wo_linked columns
     let changedCursor = null; // latest modified_at seen (ms), v2 only
     const CURSOR_MARGIN_MS = 2 * 60000; // re-read a little overlap, in case of slow writes
     const V2_COLUMNS = 'id,ts,text,modified_at,deleted';
@@ -212,20 +215,23 @@
       if (v2.error && !missingColumn(v2.error)) throw v2.error;
       const notes = await probe('id,notes');
       if (notes.error && !missingColumn(notes.error)) throw notes.error;
+      const wo = await probe('id,wo,wo_linked');
+      if (wo.error && !missingColumn(wo.error)) throw wo.error;
       serverNotes = !notes.error;
+      serverWo = !wo.error;
       serverVersion = v2.error ? 1 : 2;
     }
 
-    // Whether notes can be kept here: always on this device alone, and when
-    // signed in if they travel sealed with the entry or the server has the
-    // notes column.
-    async function notesSupported() {
+    // Whether notes / work orders ('notes' or 'wo') can be kept here: always
+    // on this device alone, and when signed in if they travel sealed with the
+    // entry or the server has the column for them.
+    async function supports(field) {
       if (!user || !client) return true;
       await schedule(async () => {
         await vaultOpen();
         await detectServer();
       });
-      return (vault.mode === 'ready' && serverVersion === 2) || serverNotes;
+      return (vault.mode === 'ready' && serverVersion === 2) || (field === 'wo' ? serverWo : serverNotes);
     }
 
     // Send queued changes, in order, in batches.
@@ -265,13 +271,19 @@
     async function sealRow(entry, who) {
       const row = { id: entry.id, user_id: who, ts: entry.ts, text: entry.text };
       if (serverNotes) row.notes = entry.notes || null;
+      if (serverWo) {
+        row.wo = entry.wo || null;
+        row.wo_linked = Boolean(entry.wo && entry.wl);
+      }
       if (vault.mode === 'ready' && serverVersion === 2) {
         row.ts = 0;
         row.text = await V.sealEntry(vault.key, entry.id, entry);
         if (serverNotes) row.notes = null;
+        if (serverWo) Object.assign(row, { wo: null, wo_linked: false });
       } else if (vault.mode === 'ready') {
         row.text = await V.encryptText(vault.key, entry.id, entry.text);
         if (serverNotes && entry.notes) row.notes = await V.encryptNotes(vault.key, entry.id, entry.notes);
+        if (serverWo && entry.wo) row.wo = await V.encryptField(vault.key, entry.id, 'wo', entry.wo);
       }
       if (serverVersion === 2) row.deleted = false;
       return row;
@@ -285,6 +297,8 @@
       let ts = Number(r.ts);
       let text = r.text;
       let notes = r.notes || '';
+      let wo = r.wo || '';
+      let wl = Boolean(r.wo_linked);
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
       if (encrypted && vault.mode !== 'ready') {
@@ -303,9 +317,14 @@
           const opened = await V.openEntry(vault.key, r.id, text);
           ({ ts, text } = opened);
           notes = opened.notes || notes;
+          if (opened.wo) ({ wo, wl } = { wo: opened.wo, wl: Boolean(opened.wl) });
         }
         if (V.isEncrypted(notes)) {
           notes = await V.decryptNotes(vault.key, r.id, notes);
+          reseal = reseal || serverVersion === 2;
+        }
+        if (V.isEncrypted(wo)) {
+          wo = await V.decryptField(vault.key, r.id, 'wo', wo);
           reseal = reseal || serverVersion === 2;
         }
       } catch (_) {
@@ -313,9 +332,7 @@
         return null;
       }
       if (!encrypted && vault.mode === 'ready') reseal = true;
-      const entry = { id: r.id, ts, text };
-      if (notes) entry.notes = notes;
-      return { entry, reseal };
+      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl }), reseal };
     }
 
     // Download changes and merge them with the local log, then re-apply unsent
@@ -334,7 +351,7 @@
       let newest = changedCursor;
       const page = 1000;
       for (let from = 0; ; from += page) {
-        const cols = (v2 ? V2_COLUMNS : 'id,ts,text') + (serverNotes ? ',notes' : '');
+        const cols = (v2 ? V2_COLUMNS : 'id,ts,text') + (serverNotes ? ',notes' : '') + (serverWo ? ',wo,wo_linked' : '');
         let query = client.from('entries').select(cols);
         if (incremental) query = query.gte('modified_at', new Date(changedCursor - CURSOR_MARGIN_MS).toISOString());
         if (since != null) query = query.gte('ts', since);
@@ -546,7 +563,7 @@
         // Re-check older servers now and then, so new features switch on
         // after supabase/schema.sql has been run.
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
-        if (fullNow && (serverVersion === 1 || !serverNotes)) serverVersion = null;
+        if (fullNow && (serverVersion === 1 || !serverNotes || !serverWo)) serverVersion = null;
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
@@ -676,7 +693,8 @@
       unlockWith,
       newRecoveryKey,
       get encryption() { return vault.mode; },
-      notesSupported,
+      supports,
+      notesSupported: () => supports('notes'),
       get timesSealed() { return vault.mode === 'ready' && serverVersion === 2; },
       get entries() { return entries; },
       get user() { return user; },

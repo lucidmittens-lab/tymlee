@@ -280,7 +280,7 @@ function pickEntry(choices, name) {
 
 function ask(label, initial, name) {
   if (!rl || !tty) {
-    print('typing notes needs the tymlee shell; use /note #n <notes>', 'err');
+    print(name === 'confirm' ? 'confirming needs the tymlee shell; or type /reset-encryption DELETE' : 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {

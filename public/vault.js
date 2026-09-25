@@ -135,6 +135,15 @@
     return dec.decode(data);
   }
 
+  // A short public fingerprint of the master key, stored next to its locked
+  // copies. Devices compare it with their own key to notice when the account
+  // started over with a new key (/reset-encryption). One-way: it reveals
+  // nothing about the key.
+  async function keyId(rawBase64) {
+    const digest = await subtle.digest('SHA-256', enc.encode(`tymlee key id:${rawBase64}`));
+    return toBase64(new Uint8Array(digest)).slice(0, 22);
+  }
+
   const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
   const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
 
@@ -171,7 +180,7 @@
 
   const api = {
     PREFIX, newRecoveryCode, newLinkCode, normalizeCode, looksLikeCode,
-    newMasterKey, importMasterKey, wrap, unwrap, isEncrypted, encryptText, decryptText,
+    newMasterKey, importMasterKey, wrap, unwrap, keyId, isEncrypted, encryptText, decryptText,
     isSealed, sealEntry, openEntry, encryptNotes, decryptNotes, encryptField, decryptField,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

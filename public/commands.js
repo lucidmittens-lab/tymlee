@@ -607,6 +607,28 @@
           print(await store.newRecoveryKey(), 'key');
         },
       },
+      'reset-encryption': {
+        usage: '/reset-encryption',
+        about: 'lost every device with the key and the recovery key? start over (deletes the synced log)',
+        async run(args) {
+          if (!store.user) return print('sign in first: /login you@example.com', 'err');
+          if (store.encryption === 'ready') return print('this device has the key, so there is nothing to reset. /recovery makes a new recovery key', 'err');
+          if (store.encryption !== 'locked') return print("this account's log isn't locked, so there is nothing to reset", 'err');
+          print([
+            'This starts over with a new encryption key, for when no device has the key and the recovery key is lost.',
+            '',
+            "  - Your synced log and settings are deleted. Without the old key nobody can decrypt them, you included.",
+            '  - Entries typed on this device that were never uploaded are kept.',
+            '  - Other devices that still have the old key are asked to link again, and then upload what they have.',
+            '  - You get a new recovery key.',
+          ].join('\n'), 'key');
+          const typed = args[0] === 'DELETE' ? 'DELETE' : await io.ask('type DELETE to start over', '', 'confirm');
+          if (typed == null || typed.trim() !== 'DELETE') return print('reset cancelled; nothing was changed', 'dim');
+          print('deleting the synced log and making a new key…', 'dim');
+          await store.resetEncryption();
+          print('encryption reset: this device has the new key', 'ok');
+        },
+      },
       whoami: {
         usage: '/whoami',
         about: 'show the account and sync state',

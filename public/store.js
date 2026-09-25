@@ -263,6 +263,11 @@
     async function flush() {
       if (!user || !client) return;
       if (!(await vaultOpen())) return;
+      // Never upload with a key the account no longer uses (verifyKey).
+      if (queue.length) {
+        await verifyKey();
+        if (vault.mode !== 'ready' && vault.mode !== 'plain') return;
+      }
       await detectServer();
       const who = owner;
       let batch;
@@ -391,6 +396,12 @@
         if (data.length < page) break;
       }
       if (owner !== who) return;
+      // Rows this key can't read: maybe the account started over with a new
+      // key on another device. Check before touching the local log.
+      if (seen.unreadable && vault.mode === 'ready') {
+        await verifyKey();
+        if (vault.mode === 'locked' || owner !== who) return;
+      }
 
       const found = opened.filter((o) => !o.deleted).map((o) => o.entry);
       let base;
@@ -409,7 +420,9 @@
       for (const o of reseal) queue = T.enqueue(queue, { op: 'put', entry: o.entry }, inFlight);
       entries = T.applyOps(base, queue);
       persist();
-      if (seen.unreadable) onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
+      if (seen.unreadable) {
+        onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
+      }
       if (reseal.length) schedule(flush);
       settle();
       // Another device has turned encryption on: find out and lock this one.
@@ -512,6 +525,8 @@
         '',
         'Or use your recovery key:',
         '  /recover XXXXX-XXXXX-XXXXX-XXXXX',
+        '',
+        "Lost both? /reset-encryption starts over with a new key. The synced log can't be decrypted without the old key, so it is deleted.",
       ].join('\n'), 'key');
     }
 
@@ -569,7 +584,7 @@
       const who = owner;
       const raw = V.newMasterKey();
       const code = V.newRecoveryCode();
-      const recovery = await V.wrap(raw, code);
+      const recovery = { ...(await V.wrap(raw, code)), kid: await V.keyId(raw) };
       const created = await client.from('keyring').insert({ user_id: who, recovery });
       if (created.error) {
         if (created.error.code === '23505') { // another device got there first
@@ -581,6 +596,97 @@
       await unlock(raw);
       onNotice(recoveryMessage(code, true), 'key');
       await sync({ full: true }); // re-uploads existing entries encrypted
+    }
+
+    // Before uploading with this device's key, check it is still the
+    // account's key: after /reset-encryption on another device it isn't, and
+    // anything encrypted with it would be unreadable. Keys from before this
+    // check get their fingerprint added here.
+    async function verifyKey() {
+      if (vault.mode !== 'ready') return;
+      const who = owner;
+      const { data, error } = await fetchKeyring();
+      if (error) {
+        if (missingTable(error)) return;
+        throw error;
+      }
+      if (owner !== who || !data || !data.recovery) return;
+      const mine = await V.keyId(vault.raw);
+      if (!data.recovery.kid) {
+        await client.from('keyring').update({ recovery: { ...data.recovery, kid: mine } }).eq('user_id', who);
+        return;
+      }
+      if (data.recovery.kid !== mine) keyWasReset();
+    }
+
+    // Another device started over with a new key. This device's key is
+    // useless now; lock it until it is linked again, and queue what it has
+    // so its copy of the log is uploaded again under the new key.
+    function keyWasReset() {
+      storage.removeItem(key(owner, 'key'));
+      for (const e of entries) queue = T.enqueue(queue, { op: 'put', entry: e }, inFlight);
+      if (Object.keys(settings).length) settingsDirty = true;
+      persist();
+      persistSettings();
+      onNotice(`Encryption for this account was reset on another device, with a new key. Once this device is linked again, the ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} it has are uploaded again.`, 'err');
+      lock();
+    }
+
+    // /reset-encryption: for a signed-in device that can't get the key (no
+    // other device, no recovery key). Deletes the account's synced entries
+    // and settings (unreadable without the key), then starts over with a new
+    // key. Entries typed on this device and not yet sent are kept.
+    async function resetEncryption() {
+      requireClient();
+      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (vault.mode === 'pending') await schedule(prepareVault);
+      if (vault.mode === 'ready') throw new Error('this device has the key, so there is nothing to reset. /recovery makes a new recovery key');
+      if (vault.mode !== 'locked') throw new Error("this account's log isn't locked, so there is nothing to reset");
+      let failure = null;
+      const code = await schedule(async () => {
+        try {
+          return await startOver();
+        } catch (err) {
+          failure = err;
+          return '';
+        }
+      });
+      if (failure) throw failure;
+      if (!code) return;
+      onNotice(recoveryMessage(code, true), 'key');
+      await sync({ full: true });
+    }
+
+    async function startOver() {
+      const who = owner;
+      const raw = V.newMasterKey();
+      const code = V.newRecoveryCode();
+      const recovery = { ...(await V.wrap(raw, code)), kid: await V.keyId(raw) };
+      // Delete first: if this stops halfway, the account is still locked
+      // and /reset-encryption can run again.
+      const gone = await client.from('entries').delete().eq('user_id', who);
+      if (gone.error) throw gone.error;
+      const newKey = await V.importMasterKey(raw);
+      if (serverSettings !== false) {
+        const data = await V.encryptField(newKey, who, 'settings', '{}');
+        const put = await client.from('settings').upsert({ user_id: who, data });
+        if (put.error && !missingTable(put.error)) throw put.error;
+      }
+      const keyring = await client.from('keyring').update({ recovery, link: null }).eq('user_id', who);
+      if (keyring.error) throw keyring.error;
+      if (owner !== who) return '';
+      // Keep only what this device typed and hasn't sent yet.
+      entries = T.applyOps([], queue.filter((q) => q.op === 'put'));
+      queue = queue.filter((q) => q.op === 'put');
+      settings = {};
+      settingsDirty = false;
+      changedCursor = null;
+      persist();
+      persistSettings();
+      await unlock(raw);
+      status = 'syncing';
+      onChange();
+      return code;
     }
 
     // True when entries can be synced: encrypted, or plain on a server that
@@ -619,7 +725,7 @@
     async function newRecoveryKey() {
       requireKey();
       const code = V.newRecoveryCode();
-      const recovery = await V.wrap(vault.raw, code);
+      const recovery = { ...(await V.wrap(vault.raw, code)), kid: await V.keyId(vault.raw) };
       const { error } = await client.from('keyring').update({ recovery }).eq('user_id', owner);
       if (error) throw error;
       return recoveryMessage(code, false);
@@ -661,6 +767,7 @@
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
         if (fullNow && (serverVersion === 1 || !serverNotes || !serverWo)) serverVersion = null;
         if (fullNow && serverSettings === false) serverSettings = null;
+        if (fullNow && !queue.length) await verifyKey(); // flush checks when it has something to send
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
@@ -792,6 +899,7 @@
       createLink,
       unlockWith,
       newRecoveryKey,
+      resetEncryption,
       get encryption() { return vault.mode; },
       supports,
       notesSupported: () => supports('notes'),

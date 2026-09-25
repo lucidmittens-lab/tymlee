@@ -23,18 +23,60 @@
     if (e.key === store.storageKey()) store.reloadFromStorage();
   });
 
+  // iOS zooms the page in when an input with text under 16px gets the focus.
+  // Turn that off there (people can still pinch to zoom on iOS); other
+  // browsers keep the default so pinch zoom is never blocked.
+  if (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (meta && !/maximum-scale/.test(meta.content)) meta.content += ', maximum-scale=1';
+  }
+
   // ---- output --------------------------------------------------------------
 
   function print(text, cls) {
     const pre = document.createElement('pre');
     if (cls) pre.className = cls;
-    pre.textContent = text;
+    if (/\breport\b/.test(cls || '')) appendLines(pre, text);
+    else pre.textContent = text;
     out.append(pre);
     // In the GUI view the console pane is small: bigger output (reports,
     // help, keys) switches back to the CLI view to show it.
     if (view === 'gui' && /\b(report|key)\b/.test(cls || '')) setView('cli');
     if (view === 'gui') scrollToPrompt();
     return pre;
+  }
+
+  // Reports are columns of text. On a narrow screen their lines wrap rather
+  // than scroll sideways, and a wrapped line continues under its last column
+  // (the entry's text, say) so the columns stay readable.
+  function charsPerLine() {
+    const probe = document.createElement('span');
+    probe.textContent = '0'.repeat(20);
+    probe.style.visibility = 'hidden';
+    out.append(probe);
+    const width = probe.getBoundingClientRect().width / 20;
+    probe.remove();
+    return width ? Math.floor((out.clientWidth - 32) / width) : 80;
+  }
+
+  function appendLines(pre, text) {
+    const maxHang = Math.max(4, Math.floor(charsPerLine() / 2)); // at most halfway across
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      const row = document.createElement('span');
+      row.className = 'ln';
+      // Keep the line breaks in the text, for copying.
+      row.textContent = `${line}${i < lines.length - 1 ? '\n' : ''}` || ' ';
+      const lead = line.length - line.trimStart().length;
+      let hang = lead + 2;
+      const gaps = [...line.matchAll(/\S( {2,})(?=\S)/g)];
+      if (gaps.length) {
+        const last = gaps[gaps.length - 1];
+        hang = last.index + 1 + last[1].length;
+      }
+      row.style.setProperty('--hang', `${Math.min(hang, maxHang)}ch`);
+      pre.append(row);
+    });
   }
 
   function echo(text) {
@@ -234,10 +276,16 @@
   function renderGui(slide) {
     const range = guiRangeNow();
     closeEntryEditor();
-    guiTimeline = window.TymleeTimeline.render({ store, range, onSelect: openEntryEditor, header: (days) => guiBar(range, days) });
+    guiTimeline = window.TymleeTimeline.render({
+      store, range, onSelect: openEntryEditor, header: (days) => guiBar(range, days), stack: () => narrow.matches,
+    });
     if (slide) guiTimeline.el.classList.add(`tl-slide-${slide}`);
     guiEl.replaceChildren(guiTimeline.el);
   }
+
+  // Turning a phone (or resizing a window) past the narrow width switches
+  // multi-day timelines between side by side and stacked.
+  narrow.addEventListener('change', () => { if (view === 'gui' && !editCard) renderGui(); });
 
   // Swipe sideways on a one-day timeline to move between days.
   (function swipeDays() {
@@ -642,7 +690,7 @@
     el.className = 'editor';
     el.value = text;
     el.spellcheck = false;
-    el.wrap = 'off';
+    el.wrap = narrow.matches ? 'soft' : 'off'; // no sideways scrolling on phones
     el.setAttribute('autocapitalize', 'off');
     el.setAttribute('autocorrect', 'off');
     el.setAttribute('aria-label', label);

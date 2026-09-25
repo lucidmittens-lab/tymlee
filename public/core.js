@@ -418,7 +418,10 @@
       const fromHour = first.getHours();
       const last = new Date(Math.max(lastEnd, day.blocks[0].start + 60000) - 1);
       const toHour = Math.min(24, last.getHours() + 1);
-      // Axis in minutes from midnight, so days can share it.
+      // Axis in minutes from midnight, so days can share it (or use their own
+      // when drawn one under another).
+      day.axisTo = toHour * 60;
+      day.axisFrom = Math.min(fromHour * 60, day.axisTo - 60);
       axisFrom = Math.min(axisFrom, fromHour * 60);
       axisTo = Math.max(axisTo, toHour * 60);
     }

@@ -89,7 +89,13 @@ body {
 #out .err { color: var(--warn); }
 #out .dim { color: var(--muted); }
 #out .key { color: var(--fg); border-left: 3px solid var(--accent); padding-left: 1ch; margin: 6px 0; }
-#out .report { margin: 4px 0; white-space: pre; overflow-x: auto; }
+#out .report { margin: 4px 0; }
+/* A report line; if it wraps, it continues under its last column. */
+#out .report .ln {
+  display: block;
+  padding-left: var(--hang, 2ch);
+  text-indent: calc(-1 * var(--hang, 2ch));
+}
 
 /* /edit: a plain-text editor inside the scrollback. */
 #out .editor {
@@ -174,15 +180,17 @@ body {
 #status .stopped { color: var(--muted); }
 #status .dim { color: var(--muted); }
 
-/* Touch screens: 16px text in the input stops iOS from zooming in on focus,
-   and completions get larger tap targets. */
+/* Touch screens: completions get larger tap targets. (iOS would zoom in on
+   inputs under 16px; app.js turns that zoom off there instead.) */
 @media (pointer: coarse) {
-  #prompt, #out .editor { font-size: 16px; }
-  #matches { font-size: 15px; }
+  #prompt, #out .editor { font-size: 14px; }
+  #matches { font-size: 14px; }
   #matches span { display: inline-block; padding: 6px 0; margin-right: 3ch; }
 }
 
 @media (max-width: 600px) {
+  body { font-size: 13px; }
+  #out .editor { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
   #status { gap: 1.5ch; }
   #status .since { display: none; }
 }
@@ -460,6 +468,9 @@ body {
 .gui-day { padding: 0 6px; white-space: nowrap; }
 /* One day: the date is in the bar, so the column header is not needed. */
 .tl-one-day .tl-head { display: none; }
+/* Days drawn one under another (phones). */
+.tl-stacked + .tl-stacked { margin-top: 14px; }
+.tl-stacked .tl-head { position: static; padding-top: 2px; font-weight: 600; }
 .gui-bar .gui-step {
   font-size: 14px;
   line-height: 1;
@@ -506,15 +517,7 @@ body {
   .gui-day { font-size: 14px; }
   .gui-bar .gui-step { width: 34px; height: 30px; padding: 0; font-size: 18px; border-radius: 9px; }
   .gui-range { display: none; } /* the day header shows the date */
-  /* The legend is one line that scrolls sideways. */
-  .tl-top .tl-legend {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    margin: 0 -10px;
-    padding: 0 10px;
-  }
-  .tl-top .tl-legend::-webkit-scrollbar { display: none; }
+  .tl-top .tl-legend { gap: 2px 12px; }
   .tl-block { border-radius: 6px; }
 
   #app.gui-mode #divider { height: 22px; }
@@ -578,7 +581,7 @@ body {
 .ec-buttons .ec-delete { margin-left: auto; color: var(--warn); }
 @media (pointer: coarse) {
   .entry-card input,
-  .entry-card textarea { font-size: 16px; } /* no zoom on focus */
+  .entry-card textarea { font-size: 15px; }
 }
 
 /* Phones: editing happens in a bottom sheet. */

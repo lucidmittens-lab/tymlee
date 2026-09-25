@@ -27,8 +27,10 @@
   // from the store's current entries (for the live "now" and running block).
   // `header(days)` (optional) returns an element that sits with the legend in
   // a bar that stays at the top while the timeline scrolls. It is called on
-  // every redraw with the days drawn.
-  function render({ store, range, onSelect, header }) {
+  // every redraw with the days drawn. With `stack()` true (narrow screens),
+  // several days are drawn one under another, each on its own hours, so
+  // nothing needs scrolling sideways.
+  function render({ store, range, onSelect, header, stack }) {
     const rootEl = el('div', 'tl');
     rootEl.setAttribute('role', 'group');
     const tip = el('div', 'tl-tip');
@@ -59,10 +61,21 @@
       }
       top.append(legendEl);
 
+      if (days.length > 1 && stack && stack()) {
+        for (const day of days) rootEl.append(drawGrid([day], day.axisFrom, day.axisTo, now, true));
+      } else {
+        rootEl.append(drawGrid(days, axisFrom, axisTo, now, false));
+      }
+      rootEl.append(tip);
+    }
+
+    // One grid: an hour axis and a column per day, from axisFrom to axisTo
+    // (minutes from midnight).
+    function drawGrid(days, axisFrom, axisTo, now, stacked) {
       const height = (axisTo - axisFrom) * MIN_PX;
-      const scroll = el('div', 'tl-scroll');
+      const scroll = el('div', `tl-scroll${stacked ? ' tl-stacked' : ''}`);
       const grid = el('div', 'tl-grid');
-      grid.style.gridTemplateColumns = `3.2em repeat(${days.length}, minmax(${days.length > 1 ? '9.5em' : '12em'}, 1fr))`;
+      grid.style.gridTemplateColumns = `3.2em repeat(${days.length}, minmax(${days.length > 1 ? '9.5em' : stacked ? '0' : '12em'}, 1fr))`;
 
       // Header row.
       grid.append(el('div', 'tl-head'));
@@ -138,7 +151,7 @@
         grid.append(col);
       }
       scroll.append(grid);
-      rootEl.append(scroll, tip);
+      return scroll;
     }
 
     function showTip(e, title, notes) {

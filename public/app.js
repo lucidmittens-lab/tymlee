@@ -114,6 +114,8 @@
         '        Ctrl+Enter    save (while editing)',
       ],
       linkSignIn: true,
+      pickEntry,
+      ask,
       editor: {
         open: openTextBox,
         isOpen: () => Boolean(editor),
@@ -222,7 +224,79 @@
   // Tab cycling state: the list being cycled and the current position.
   let cycle = null;
 
+  // ---- input: /note's entry picker and notes prompt --------------------------
+  // Both take over the prompt line until Enter (or Esc to cancel).
+
+  let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', label, resolve }
+
+  function pickEntry(choices) {
+    return new Promise((resolve) => {
+      modal = { kind: 'pick', choices, idx: 0, resolve };
+      input.value = '';
+      input.placeholder = 'Tab: older · Shift+Tab: newer · Enter: select · Esc: cancel';
+      renderHints();
+      input.focus();
+    });
+  }
+
+  function ask(label, initial) {
+    return new Promise((resolve) => {
+      modal = { kind: 'ask', label, resolve };
+      input.value = initial || '';
+      input.placeholder = 'type notes · Enter: save · Esc: cancel';
+      renderHints();
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }
+
+  function endModal(value) {
+    const m = modal;
+    modal = null;
+    input.value = '';
+    input.placeholder = '';
+    renderHints();
+    m.resolve(value);
+  }
+
+  function movePick(step) {
+    modal.idx = Math.min(modal.choices.length - 1, Math.max(0, modal.idx + step));
+    renderHints();
+  }
+
+  function hintButton(text, cls, onPress) {
+    const b = document.createElement('span');
+    b.textContent = text;
+    if (cls) b.className = cls;
+    b.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // keep focus in the input
+      onPress();
+    });
+    return b;
+  }
+
+  function renderModal() {
+    ghost.replaceChildren();
+    if (modal.kind === 'pick') {
+      const { choices, idx } = modal;
+      matchesEl.replaceChildren(
+        hintButton('‹ older', 'btn', () => movePick(1)),
+        hintButton(`${choices[idx].label}  (${idx + 1}/${choices.length})`, 'sel', () => form.requestSubmit()),
+        hintButton('newer ›', 'btn', () => movePick(-1)),
+        hintButton('select', 'btn', () => form.requestSubmit()),
+        hintButton('cancel', 'btn', () => endModal(null)),
+      );
+    } else {
+      matchesEl.replaceChildren(
+        hintButton(modal.label, 'sel', () => {}),
+        hintButton('save', 'btn', () => form.requestSubmit()),
+        hintButton('cancel', 'btn', () => endModal(null)),
+      );
+    }
+  }
+
   function renderHints() {
+    if (modal) return renderModal();
     const typed = input.value;
     ghost.replaceChildren();
     let list = [];
@@ -296,6 +370,22 @@
   input.addEventListener('scroll', () => { ghost.scrollLeft = input.scrollLeft; });
 
   input.addEventListener('keydown', (e) => {
+    if (modal) {
+      const older = (e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowUp';
+      const newer = (e.key === 'Tab' && e.shiftKey) || e.key === 'ArrowDown';
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        endModal(null);
+      } else if (modal.kind === 'pick' && (older || newer)) {
+        e.preventDefault();
+        movePick(older ? 1 : -1);
+      } else if (modal.kind === 'pick' && e.key !== 'Enter') {
+        e.preventDefault(); // choosing, not typing
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+      }
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     const atEnd = input.selectionStart === input.value.length;
     if (e.key === 'Tab' && !e.shiftKey) {
@@ -341,6 +431,19 @@
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (modal) {
+      if (modal.kind === 'pick') {
+        const choice = modal.choices[modal.idx];
+        echo(choice.label);
+        endModal(choice);
+      } else {
+        const value = input.value;
+        echo(value || '(no notes)');
+        endModal(value);
+      }
+      scrollToPrompt();
+      return;
+    }
     const line = shell.route(input.value);
     input.value = '';
     cycle = null;

@@ -114,9 +114,9 @@ test('empty range', () => {
 test('csv export quotes fields and leaves the running end blank', () => {
   const log = [...LOG, { ts: at('2026-09-24T10:05:00Z'), text: 'mtg sync, "roadmap"' }];
   const lines = T.toCSV(log, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
-  assert.equal(lines[0], 'n,start,end,minutes,category,note');
-  assert.equal(lines[1], '3,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug');
-  assert.equal(lines[4], '6,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap"""');
+  assert.equal(lines[0], 'n,start,end,minutes,category,note,notes');
+  assert.equal(lines[1], '3,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
+  assert.equal(lines[4], '6,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
 });
 
 // ---- sync ------------------------------------------------------------------
@@ -380,4 +380,70 @@ test('restore finds the csv header after comments and blank lines', () => {
   const r = T.parseBackup(csv);
   assert.deepEqual(r.errors, []);
   assert.deepEqual(r.entries, strip(BACKUP_LOG));
+});
+
+// ---- notes and /report -------------------------------------------------------
+
+const NOTED = [
+  { id: 'a', ts: at('2026-09-24T09:00:00Z'), text: 'dev fixing login bug', notes: 'root cause: expired token\nfix in auth.js' },
+  { id: 'b', ts: at('2026-09-24T09:45:00Z'), text: 'mtg standup' },
+  { id: 'c', ts: at('2026-09-24T10:00:00Z'), text: 'dev code review', notes: 'PR #42' },
+];
+
+test('notes show under their entry in /log', () => {
+  const report = T.formatReport(NOTED, T.parseRange('today', NOW), NOW);
+  assert.match(report, / {2}1 {2}09:00 {2}09:45 {4}0:45 {2}dev {7}fixing login bug\n {5}> root cause: expired token\n {5}> fix in auth.js\n {2}2 {2}09:45/);
+  assert.match(report, /code review\n {5}> PR #42\n/);
+});
+
+test('notes survive the txt and csv backups', () => {
+  const want = NOTED.map(({ ts, text, notes }) => (notes ? { ts, text, notes } : { ts, text }));
+  for (const text of [T.formatReport(NOTED, ALL, NOW), T.formatReport(NOTED, ALL, NOW, { compact: true }), T.toCSV(NOTED, ALL, NOW)]) {
+    const r = T.parseBackup(text);
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.entries, want);
+  }
+  // Older csv exports without the notes column still restore.
+  const old = 'n,start,end,minutes,category,note\n1,2026-09-24T09:00:00.000Z,,1.0,dev,x\n';
+  assert.deepEqual(T.parseBackup(old).entries, [{ ts: at('2026-09-24T09:00:00Z'), text: 'dev x' }]);
+});
+
+test('/edit shows notes and saves changes to them', () => {
+  const { text, items } = T.formatEditable(NOTED, ALL, NOW);
+  assert.match(text, / {2}1 {2}09:00 {2}dev fixing login bug\n {12}> root cause: expired token\n {12}> fix in auth\.js\n/);
+  assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
+  const edited = text
+    .replace('> PR #42', '> PR #42, approved')
+    .replace('  2  09:45  mtg standup', '  2  09:45  mtg standup\n> ran long')
+    .replace(/ {12}> root cause.*\n.*fix in auth\.js\n/, '');
+  const r = T.parseEditable(edited, items, NOW);
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.changed, 3);
+  const byId = Object.fromEntries(r.ops.map((o) => [o.entry.id, o.entry]));
+  assert.equal(byId.a.notes, undefined);
+  assert.equal(byId.b.notes, 'ran long');
+  assert.equal(byId.c.notes, 'PR #42, approved');
+  const bad = T.parseEditable('> orphan\n' + text, items, NOW);
+  assert.match(bad.errors[0], /must go under an entry/);
+});
+
+test('/report groups entries by category, largest first', () => {
+  assert.equal(T.formatCategoryReport(NOTED, T.parseRange('today', NOW), NOW), [
+    'report: today (2026-09-24)',
+    '',
+    'dev                     0:57   79%  2 entries',
+    '  1  09:00    0:45  fixing login bug',
+    '  3  10:00    0:12  code review',
+    '',
+    'mtg                     0:15   21%  1 entry',
+    '  2  09:45    0:15  standup',
+    '',
+    '-'.repeat(48),
+    'total                   1:12        3 entries',
+  ].join('\n'));
+  const week = T.formatCategoryReport(LOG, T.parseRange('week', NOW), NOW);
+  assert.match(week, /report: week \(2026-09-23 \.\. 2026-09-24\)/);
+  assert.match(week, / {2}1 {2}Wed 09-23 16:00 {4}1:30 {2}wrap up/);
+  assert.ok(!/\(off\)/.test(week), 'off time is left out');
+  assert.equal(T.formatCategoryReport(NOTED, T.parseRange('2026-01-01', NOW), NOW), 'no entries (2026-01-01)');
 });

@@ -13,6 +13,9 @@
 //   restoreUsage         usage text for /restore
 //   keys                 help lines about keys
 //   linkSignIn           whether the emailed sign-in link works here
+//   pickEntry(choices) -> Promise<choice|null>  /note: choose an entry;
+//                        choices are newest first, { span, label }
+//   ask(label, initial) -> Promise<string|null>   /note: type the notes
 //   editor               either an inline box that /save and /cancel act on:
 //                          { open({ text, items, mode, label }), isOpen(),
 //                            mode(), value(), items(), close() }
@@ -57,6 +60,13 @@
 
     function plural(n, one, many) {
       return `${n} ${n === 1 ? one : many}`;
+    }
+
+    // "#12 10:00 dev code review", with the date when it isn't today.
+    function entryLabel(s) {
+      const today = T.ymd(s.ts) === T.ymd(Date.now());
+      const when = today ? T.hhmm(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.hhmm(s.ts)}`;
+      return `#${s.n} ${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
     }
 
     function rangeFrom(args) {
@@ -218,6 +228,50 @@
         run(args) {
           const range = rangeFrom(args);
           if (range) print(T.formatReport(store.entries, range, Date.now(), { compact: io.compact() }), 'report');
+        },
+      },
+      report: {
+        usage: '/report [range]',
+        about: 'time per category for a range, with its entries',
+        run(args) {
+          const range = rangeFrom(args);
+          if (range) print(T.formatCategoryReport(store.entries, range, Date.now()), 'report');
+        },
+      },
+      note: {
+        usage: '/note [#] [notes]',
+        about: 'add or change notes on an entry (Tab: older, Shift+Tab: newer)',
+        async run(args) {
+          if (busy()) return;
+          const spans = T.withSpans(store.entries, Date.now()).filter((s) => !s.off);
+          if (!spans.length) return print('no entries to add notes to', 'err');
+          if (!(await store.notesSupported())) {
+            return print('notes need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
+          }
+          let chosen;
+          if (args.length) {
+            const n = Number(String(args[0]).replace(/^#/, ''));
+            chosen = spans.find((s) => s.n === n);
+            if (!chosen) return print('usage: /note [#]   (an entry number from /log; /off entries have no notes)', 'err');
+          } else {
+            const picked = await io.pickEntry(spans.slice().reverse().map((span) => ({ span, label: entryLabel(span) })));
+            if (!picked) return print('note cancelled', 'dim');
+            chosen = picked.span;
+          }
+          const current = store.entries.find((e) => e.id === chosen.id);
+          if (!current) return print('that entry was removed in the meantime', 'err');
+          const multiLine = Boolean(current.notes && current.notes.includes('\n'));
+          const initial = (current.notes || '').split('\n').join(' / ');
+          if (multiLine && args.length < 2) print('these notes have several lines; saving here joins them. To keep the line breaks, use /edit', 'dim');
+          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`notes for ${entryLabel(chosen)}`, initial);
+          if (typed == null) return print('note cancelled', 'dim');
+          const value = typed.trim();
+          if (value === initial.trim()) return print('notes unchanged', 'dim');
+          if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
+          const entry = { id: current.id, ts: current.ts, text: current.text };
+          if (value) entry.notes = value;
+          store.apply([{ op: 'put', entry }]);
+          print(value ? `notes saved on #${chosen.n} ${describe(chosen)}` : `notes removed from #${chosen.n} ${describe(chosen)}`, 'ok');
         },
       },
       undo: {

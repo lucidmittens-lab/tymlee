@@ -148,6 +148,7 @@ body {
 }
 #matches span { cursor: pointer; margin-right: 2ch; }
 #matches span.sel { color: var(--accent); text-decoration: underline; }
+#matches span.btn { border: 1px solid var(--line); border-radius: 4px; padding: 0 0.6ch; }
 
 #status {
   display: flex;

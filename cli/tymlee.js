@@ -237,6 +237,79 @@ function readBackupFile(fileArgs) {
   }
 }
 
+// ---- /note: choosing an entry, then typing its notes ---------------------------
+// Both take over the prompt line until Enter (Esc cancels).
+
+const PROMPT = tty ? sgr('32', '> ') : '';
+let modal = null; // { kind: 'pick', choices, idx, resolve } or { kind: 'ask', resolve }
+
+function pickPrompt() {
+  const { choices, idx } = modal;
+  return `${sgr('32', 'note ›')} ${choices[idx].label} ${sgr('90', `(${idx + 1}/${choices.length})`)} `;
+}
+
+function pickEntry(choices) {
+  if (!rl || !tty) {
+    print('choosing an entry needs the tymlee shell; use /note <#> [notes]', 'err');
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    modal = { kind: 'pick', choices, idx: 0, resolve };
+    print('Tab: older · Shift+Tab: newer · Enter: select · Esc: cancel', 'dim');
+    rl.setPrompt(pickPrompt());
+    promptShown = true;
+    rl.prompt();
+  });
+}
+
+function ask(label, initial) {
+  if (!rl || !tty) {
+    print('typing notes needs the tymlee shell; use /note <#> <notes>', 'err');
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    modal = { kind: 'ask', resolve };
+    print(`${label} · Enter: save · Esc: cancel`, 'dim');
+    rl.setPrompt(sgr('32', 'notes › '));
+    promptShown = true;
+    rl.prompt();
+    if (initial) rl.write(initial);
+  });
+}
+
+function endModal(value) {
+  const m = modal;
+  modal = null;
+  promptShown = false;
+  rl.setPrompt(PROMPT);
+  m.resolve(value);
+}
+
+function clearInput() {
+  rl.write(null, { ctrl: true, name: 'e' });
+  rl.write(null, { ctrl: true, name: 'u' });
+}
+
+// Keys while /note has the prompt line. Runs after readline's own handling.
+function modalKey(key) {
+  if (!modal || !key) return;
+  if (key.name === 'escape') {
+    clearInput();
+    stdout.write('\n');
+    endModal(null);
+    return;
+  }
+  if (modal.kind !== 'pick') return;
+  const older = (key.name === 'tab' && !key.shift) || key.name === 'up';
+  const newer = (key.name === 'tab' && key.shift) || key.name === 'down';
+  if (older || newer) modal.idx = Math.min(modal.choices.length - 1, Math.max(0, modal.idx + (older ? 1 : -1)));
+  if (key.name !== 'return' && key.name !== 'enter') {
+    if (rl.line) clearInput(); // choosing, not typing
+    rl.setPrompt(pickPrompt());
+    rl.prompt(true);
+  }
+}
+
 function clearScreen() {
   stdout.write('\x1b[2J\x1b[H');
   if (statusOn) {
@@ -286,6 +359,8 @@ const shell = createShell({
       '        Ctrl+D        quit (or /exit)',
     ],
     linkSignIn: false,
+    pickEntry,
+    ask,
     editor: { edit: editText, confirm },
     extra: {
       exit: {
@@ -356,12 +431,12 @@ async function interactive() {
   rl = readline.createInterface({
     input: stdin,
     output: stdout,
-    prompt: tty ? sgr('32', '> ') : '',
+    prompt: PROMPT,
     history: loadHistory(),
     historySize: HISTORY_SIZE,
     removeHistoryDuplicates: true,
     completer(line) {
-      if (/\s/.test(line)) return [[], line];
+      if (modal || /\s/.test(line)) return [[], line];
       const hits = shell.completions(line, { includeExact: true, limit: 50 });
       return [hits.map((h) => `${h} `), line];
     },
@@ -371,7 +446,8 @@ async function interactive() {
   // Redrawing the prompt line can clear the rows below it, status line
   // included, so draw it again right after each key.
   let redraw = false;
-  stdin.on('keypress', () => {
+  stdin.on('keypress', (_, key) => {
+    modalKey(key);
     if (redraw) return;
     redraw = true;
     setImmediate(() => { redraw = false; drawStatus(); });
@@ -379,6 +455,7 @@ async function interactive() {
 
   let lastInterrupt = 0;
   rl.on('SIGINT', () => {
+    if (modal) return modalKey({ name: 'escape' });
     if (rl.line) {
       rl.write(null, { ctrl: true, name: 'u' }); // clear the line
       return;
@@ -391,6 +468,13 @@ async function interactive() {
   // Lines run one at a time, in order, even if typed while one is running.
   let queue = Promise.resolve();
   rl.on('line', (raw) => {
+    if (modal) {
+      // The choice or notes, not a command; keep it out of the history.
+      if (rl.history[0] === raw) rl.history.shift();
+      const m = modal;
+      endModal(m.kind === 'pick' ? m.choices[m.idx] : raw);
+      return;
+    }
     promptShown = false;
     const line = shell.route(raw);
     queue = queue.then(async () => {

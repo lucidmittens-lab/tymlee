@@ -138,21 +138,29 @@
   const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
   const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
 
-  // Seal an entry's start time and text together.
+  // Seal an entry's start time, text and notes together.
   function sealEntry(key, id, entry) {
-    return encryptWith(SEALED, key, id, JSON.stringify({ t: entry.ts, x: entry.text }));
+    const payload = { t: entry.ts, x: entry.text };
+    if (entry.notes) payload.n = entry.notes;
+    return encryptWith(SEALED, key, id, JSON.stringify(payload));
   }
 
+  // { ts, text } plus notes when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
-    return { ts: t, text: x };
+    return typeof n === 'string' && n ? { ts: t, text: x, notes: n } : { ts: t, text: x };
   }
+
+  // Notes kept in their own column (servers without sealed entries) are
+  // encrypted like text, bound to the entry id plus "#notes".
+  const encryptNotes = (key, id, notes) => encryptWith(PREFIX, key, `${id}#notes`, notes);
+  const decryptNotes = (key, id, stored) => decryptWith(PREFIX, key, `${id}#notes`, stored);
 
   const api = {
     PREFIX, newRecoveryCode, newLinkCode, normalizeCode, looksLikeCode,
     newMasterKey, importMasterKey, wrap, unwrap, isEncrypted, encryptText, decryptText,
-    isSealed, sealEntry, openEntry,
+    isSealed, sealEntry, openEntry, encryptNotes, decryptNotes,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TymleeVault = api;

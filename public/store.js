@@ -195,6 +195,7 @@
     // hide their start time too. Older servers ("v1") are still supported.
 
     let serverVersion = null; // null (not checked yet), 1 or 2
+    let serverNotes = false; // has the notes column (latest supabase/schema.sql)
     let changedCursor = null; // latest modified_at seen (ms), v2 only
     const CURSOR_MARGIN_MS = 2 * 60000; // re-read a little overlap, in case of slow writes
     const V2_COLUMNS = 'id,ts,text,modified_at,deleted';
@@ -206,9 +207,25 @@
 
     async function detectServer() {
       if (serverVersion) return;
-      const { error } = await client.from('entries').select(V2_COLUMNS).order('id', { ascending: true }).range(0, 0);
-      if (error && !missingColumn(error)) throw error;
-      serverVersion = error ? 1 : 2;
+      const probe = (cols) => client.from('entries').select(cols).order('id', { ascending: true }).range(0, 0);
+      const v2 = await probe(V2_COLUMNS);
+      if (v2.error && !missingColumn(v2.error)) throw v2.error;
+      const notes = await probe('id,notes');
+      if (notes.error && !missingColumn(notes.error)) throw notes.error;
+      serverNotes = !notes.error;
+      serverVersion = v2.error ? 1 : 2;
+    }
+
+    // Whether notes can be kept here: always on this device alone, and when
+    // signed in if they travel sealed with the entry or the server has the
+    // notes column.
+    async function notesSupported() {
+      if (!user || !client) return true;
+      await schedule(async () => {
+        await vaultOpen();
+        await detectServer();
+      });
+      return (vault.mode === 'ready' && serverVersion === 2) || serverNotes;
     }
 
     // Send queued changes, in order, in batches.
@@ -243,15 +260,18 @@
       settle();
     }
 
-    // The row to upload for an entry. With the account's key, the text (and
-    // on v2 servers the start time too) is encrypted.
+    // The row to upload for an entry. With the account's key, the text and
+    // notes (and on v2 servers the start time too) are encrypted.
     async function sealRow(entry, who) {
       const row = { id: entry.id, user_id: who, ts: entry.ts, text: entry.text };
+      if (serverNotes) row.notes = entry.notes || null;
       if (vault.mode === 'ready' && serverVersion === 2) {
         row.ts = 0;
         row.text = await V.sealEntry(vault.key, entry.id, entry);
+        if (serverNotes) row.notes = null;
       } else if (vault.mode === 'ready') {
         row.text = await V.encryptText(vault.key, entry.id, entry.text);
+        if (serverNotes && entry.notes) row.notes = await V.encryptNotes(vault.key, entry.id, entry.notes);
       }
       if (serverVersion === 2) row.deleted = false;
       return row;
@@ -264,6 +284,7 @@
       if (r.deleted) return { id: r.id, deleted: true };
       let ts = Number(r.ts);
       let text = r.text;
+      let notes = r.notes || '';
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
       if (encrypted && vault.mode !== 'ready') {
@@ -279,14 +300,22 @@
         // older version: unwrap it, and fix the stored copy.
         if (V.isSealed(text)) {
           if (text !== r.text) reseal = true;
-          ({ ts, text } = await V.openEntry(vault.key, r.id, text));
+          const opened = await V.openEntry(vault.key, r.id, text);
+          ({ ts, text } = opened);
+          notes = opened.notes || notes;
+        }
+        if (V.isEncrypted(notes)) {
+          notes = await V.decryptNotes(vault.key, r.id, notes);
+          reseal = reseal || serverVersion === 2;
         }
       } catch (_) {
         seen.unreadable++;
         return null;
       }
       if (!encrypted && vault.mode === 'ready') reseal = true;
-      return { entry: { id: r.id, ts, text }, reseal };
+      const entry = { id: r.id, ts, text };
+      if (notes) entry.notes = notes;
+      return { entry, reseal };
     }
 
     // Download changes and merge them with the local log, then re-apply unsent
@@ -305,7 +334,8 @@
       let newest = changedCursor;
       const page = 1000;
       for (let from = 0; ; from += page) {
-        let query = client.from('entries').select(v2 ? V2_COLUMNS : 'id,ts,text');
+        const cols = (v2 ? V2_COLUMNS : 'id,ts,text') + (serverNotes ? ',notes' : '');
+        let query = client.from('entries').select(cols);
         if (incremental) query = query.gte('modified_at', new Date(changedCursor - CURSOR_MARGIN_MS).toISOString());
         if (since != null) query = query.gte('ts', since);
         const order = incremental ? 'modified_at' : v2 ? 'id' : 'ts';
@@ -516,7 +546,7 @@
         // Re-check older servers now and then, so new features switch on
         // after supabase/schema.sql has been run.
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
-        if (fullNow && serverVersion === 1) serverVersion = null;
+        if (fullNow && (serverVersion === 1 || !serverNotes)) serverVersion = null;
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
@@ -646,6 +676,7 @@
       unlockWith,
       newRecoveryKey,
       get encryption() { return vault.mode; },
+      notesSupported,
       get timesSealed() { return vault.mode === 'ready' && serverVersion === 2; },
       get entries() { return entries; },
       get user() { return user; },

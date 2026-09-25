@@ -49,3 +49,15 @@ test('sealed entries hide the time as well as the text', async () => {
   await assert.rejects(V.openEntry(key, 'id-2', stored));
   assert.ok(!V.isSealed('/e1/abc') && !V.isSealed('/off'));
 });
+
+test('notes are sealed with the entry, or encrypted in their own column', async () => {
+  const key = await V.importMasterKey(V.newMasterKey());
+  const entry = { ts: 5, text: 'dev x', notes: 'secret detail' };
+  const stored = await V.sealEntry(key, 'id-1', entry);
+  assert.ok(!stored.includes('secret'));
+  assert.deepEqual(await V.openEntry(key, 'id-1', stored), entry);
+  assert.deepEqual(await V.openEntry(key, 'id-1', await V.sealEntry(key, 'id-1', { ts: 5, text: 'dev x' })), { ts: 5, text: 'dev x' });
+  const col = await V.encryptNotes(key, 'id-1', 'secret detail');
+  assert.equal(await V.decryptNotes(key, 'id-1', col), 'secret detail');
+  await assert.rejects(V.decryptText(key, 'id-1', col)); // not interchangeable with the text
+});

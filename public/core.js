@@ -9,8 +9,28 @@
   // with "/" (that is a command), so it cannot clash with a real entry. Time
   // from an off marker to the next entry is not tracked.
   const OFF = '/off';
-  // Longest entry text accepted (the server allows room for encryption).
+  // Longest entry text and notes accepted (the server allows room for
+  // encryption).
   const MAX_TEXT = 1000;
+  const MAX_NOTES = 1000;
+
+  // Notes are shown under their entry as lines starting with "> ", in /log,
+  // /edit and text backups.
+  function notesLines(notes, indent) {
+    if (!notes) return [];
+    return String(notes).split('\n').map((l) => `${indent}> ${l}`.trimEnd());
+  }
+
+  // "> some text" -> "some text" (null if the line isn't a notes line).
+  function notesLine(trimmed) {
+    if (!trimmed.startsWith('>')) return null;
+    return trimmed.slice(1).replace(/^ /, '');
+  }
+
+  // Joined notes, or '' when there are none.
+  function joinNotes(lines) {
+    return lines.join('\n').replace(/\s+$/, '').replace(/^\s*\n/, '');
+  }
   const isOff = (e) => Boolean(e) && e.text === OFF;
 
   // "dev fixing login bug" -> { category: "dev", note: "fixing login bug" }
@@ -197,6 +217,7 @@
           `  ${String(s.n).padStart(numWidth)}  ${hhmm(s.ts)}  ${end}${dur.padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
+        out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
       }
       out.push(`  ${RULE}`);
       out.push(...summaryLines(day.spans, catWidth));
@@ -211,6 +232,37 @@
     return out.join('\n').trimEnd();
   }
 
+  // Readout grouped by category instead of by time: categories largest
+  // first, each with its total, share and entries (oldest first).
+  function formatCategoryReport(entries, range, now) {
+    const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    if (!spans.length) return `no entries (${range.label})`;
+    const multiDay = ymd(spans[0].ts) !== ymd(spans[spans.length - 1].ts);
+    const numWidth = Math.max(1, String(spans[spans.length - 1].n).length);
+    const all = spans.reduce((sum, s) => sum + s.duration, 0);
+    const RULE = '-'.repeat(48);
+    const first = ymd(spans[0].ts);
+    const last = ymd(spans[spans.length - 1].ts);
+    const out = [`report: ${range.label} (${first === last ? first : `${first} .. ${last}`})`, ''];
+    for (const t of summarize(spans)) {
+      const pct = all ? Math.round((t.ms / all) * 100) : 0;
+      const mine = spans.filter((s) => s.category.toLowerCase() === t.category.toLowerCase());
+      out.push(`${t.category.padEnd(20)}  ${formatHM(t.ms).padStart(6)}  ${String(pct).padStart(3)}%  ${plural(mine.length, 'entry', 'entries')}`);
+      for (const s of mine) {
+        const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${hhmm(s.ts)}` : hhmm(s.ts);
+        out.push(`  ${String(s.n).padStart(numWidth)}  ${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
+      }
+      out.push('');
+    }
+    out.push(RULE);
+    out.push(`${'total'.padEnd(20)}  ${formatHM(all).padStart(6)}        ${plural(spans.length, 'entry', 'entries')}`);
+    return out.join('\n');
+  }
+
+  function plural(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
+  }
+
   function csvField(v) {
     const s = String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -218,7 +270,7 @@
 
   // One row per entry; timestamps are ISO 8601 (UTC), running entries have no end.
   function toCSV(entries, range, now) {
-    const rows = [['n', 'start', 'end', 'minutes', 'category', 'note']];
+    const rows = [['n', 'start', 'end', 'minutes', 'category', 'note', 'notes']];
     for (const s of withSpans(entries, now)) {
       if (s.off || s.ts < range.from || s.ts >= range.to) continue;
       rows.push([
@@ -228,6 +280,7 @@
         (s.duration / 60000).toFixed(1),
         s.category,
         s.note,
+        s.notes || '',
       ]);
     }
     return rows.map((r) => r.map(csvField).join(',')).join('\n') + '\n';
@@ -246,13 +299,14 @@
     '# change a time or text',
     '# delete a line to remove it',
     '# new line: 14:30 dev review',
+    '# notes: "> text" under an entry',
   ];
 
   // Returns the text to edit and the entries it covers.
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '' }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
     let day = '';
@@ -263,6 +317,7 @@
         lines.push(`${DAY_NAMES[new Date(it.ts).getDay()]} ${d}`);
       }
       lines.push(`  ${String(it.n).padStart(numWidth)}  ${hhmm(it.ts)}  ${it.text}`);
+      lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
     }
     if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
     return { text: lines.join('\n') + '\n', items };
@@ -274,15 +329,22 @@
     const byN = new Map(items.map((it) => [it.n, it]));
     const seen = new Set();
     const errors = [];
-    const ops = [];
-    let changed = 0;
-    let added = 0;
+    const records = []; // one per entry line, with the notes lines under it
+    let current = null;
     let day = startOfDay(now);
 
     String(text).split('\n').forEach((raw, i) => {
       const line = raw.trim();
       const where = `line ${i + 1}`;
       if (!line || line.startsWith('#')) return;
+
+      const notes = notesLine(line);
+      if (notes != null) {
+        if (current) current.notes.push(notes);
+        else errors.push(`${where}: notes (">") must go under an entry`);
+        return;
+      }
+      current = null;
 
       const header = line.match(/^(?:[A-Za-z]{3}\s+)?(\d{4})-(\d{2})-(\d{2})$/);
       if (header) {
@@ -317,9 +379,10 @@
       at.setHours(h, min, 0, 0);
       let ts = at.getTime();
 
+      let it = null;
       if (m[1] != null) {
         const n = +m[1];
-        const it = byN.get(n);
+        it = byN.get(n);
         if (!it) {
           errors.push(`${where}: there is no entry #${n} in this list (remove the number to add a new entry)`);
           return;
@@ -331,23 +394,34 @@
         seen.add(n);
         // An unchanged time keeps its original seconds.
         if (ymd(it.ts) === ymd(ts) && hhmm(it.ts) === hhmm(ts)) ts = it.ts;
-        if (ts > now) {
-          errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
-          return;
-        }
-        if (ts !== it.ts || entryText !== it.text) {
-          ops.push({ op: 'put', entry: { id: it.id, ts, text: entryText } });
-          changed++;
-        }
-      } else {
-        if (ts > now) {
-          errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
-          return;
-        }
-        ops.push({ op: 'put', entry: { id: uuid(), ts, text: entryText } });
-        added++;
       }
+      if (ts > now) {
+        errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
+        return;
+      }
+      current = { where, it, ts, text: entryText, notes: [] };
+      records.push(current);
     });
+
+    const ops = [];
+    let changed = 0;
+    let added = 0;
+    for (const r of records) {
+      const notes = joinNotes(r.notes);
+      if (notes.length > MAX_NOTES) {
+        errors.push(`${r.where}: notes are limited to ${MAX_NOTES} characters`);
+        continue;
+      }
+      const entry = { id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text };
+      if (notes) entry.notes = notes;
+      if (!r.it) {
+        ops.push({ op: 'put', entry });
+        added++;
+      } else if (r.ts !== r.it.ts || r.text !== r.it.text || notes !== (r.it.notes || '')) {
+        ops.push({ op: 'put', entry });
+        changed++;
+      }
+    }
 
     let removed = 0;
     for (const it of items) {
@@ -385,7 +459,7 @@
     return rows;
   }
 
-  const CSV_HEADER = 'n,start,end,minutes,category,note';
+  const CSV_HEADERS = ['n,start,end,minutes,category,note,notes', 'n,start,end,minutes,category,note'];
 
   // The CSV leaves out off time, so an entry whose end is earlier than the
   // next start (or that ended with nothing after it) was followed by /off.
@@ -397,7 +471,7 @@
       const where = `csv row ${i + 2}`;
       if (r.length === 1 && !r[0].trim()) return;
       if (r.length < 6) {
-        errors.push(`${where}: expected ${CSV_HEADER.split(',').length} columns`);
+        errors.push(`${where}: expected at least 6 columns`);
         return;
       }
       const ts = Date.parse(r[1]);
@@ -412,34 +486,48 @@
         errors.push(`${where}: entries are limited to ${MAX_TEXT} characters`);
         return;
       }
-      entries.push({ ts, end, text: entryText });
+      const notes = (r[6] || '').trim();
+      if (notes.length > MAX_NOTES) {
+        errors.push(`${where}: notes are limited to ${MAX_NOTES} characters`);
+        return;
+      }
+      entries.push({ ts, end, text: entryText, notes });
     });
     entries.sort((a, b) => a.ts - b.ts);
     const out = [];
     entries.forEach((e, i) => {
-      out.push({ ts: e.ts, text: e.text });
+      out.push(e.notes ? { ts: e.ts, text: e.text, notes: e.notes } : { ts: e.ts, text: e.text });
       const next = entries[i + 1];
       if (e.end != null && (!next || e.end < next.ts)) out.push({ ts: e.end, text: OFF });
     });
     return { entries: out, errors };
   }
 
-  // Returns { entries: [{ ts, text }], errors }.
+  // Returns { entries: [{ ts, text, notes? }], errors }.
   function parseBackup(text) {
     const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
     const content = lines.filter((l) => !l.trim().startsWith('#'));
     const start = content.findIndex((l) => l.trim());
-    if (start !== -1 && content[start].trim() === CSV_HEADER) return backupFromCSV(content.slice(start).join('\n'));
+    if (start !== -1 && CSV_HEADERS.includes(content[start].trim())) return backupFromCSV(content.slice(start).join('\n'));
 
     const entries = [];
     const errors = [];
     let day = null;
+    let last = null; // the entry that "> notes" lines belong to
     lines.forEach((raw, i) => {
       const line = raw.trim();
       const where = `line ${i + 1}`;
-      // Blank lines, comments and the report's column headings, rules,
-      // "no entries" notes and multi-day summaries carry no entries.
-      if (!line || line.startsWith('#') || /^-+$/.test(line) || /^no entries \(/.test(line)) return;
+      // Blank lines, comments and the report's column headings carry nothing.
+      if (!line || line.startsWith('#')) return;
+      const notes = notesLine(line);
+      if (notes != null) {
+        if (last) last.notesLines.push(notes);
+        else errors.push(`${where}: notes (">") must go under an entry`);
+        return;
+      }
+      last = null;
+      // Rules, "no entries" notes and multi-day summaries carry no entries.
+      if (/^-+$/.test(line) || /^no entries \(/.test(line)) return;
       if (/^\S+: \d{4}-\d{2}-\d{2} \.\. \d{4}-\d{2}-\d{2}, \d+ days?$/.test(line)) return;
 
       const header = line.match(/^(?:[A-Za-z]{3}\s+)?(\d{4})-(\d{2})-(\d{2})$/);
@@ -484,9 +572,15 @@
       }
       const at = new Date(day);
       at.setHours(h, min, 0, 0);
-      entries.push({ ts: at.getTime(), text: entryText });
+      last = { ts: at.getTime(), text: entryText, notesLines: [], where };
+      entries.push(last);
     });
-    return { entries, errors };
+    const out = entries.map(({ ts, text: t, notesLines: nl, where }) => {
+      const notes = joinNotes(nl);
+      if (notes.length > MAX_NOTES) errors.push(`${where}: notes are limited to ${MAX_NOTES} characters`);
+      return notes ? { ts, text: t, notes } : { ts, text: t };
+    });
+    return { entries: out, errors };
   }
 
   // Backup entries that are not already in the log, as new entries. Matching
@@ -499,7 +593,7 @@
       const k = key(e);
       if (seen.has(k)) continue;
       seen.add(k);
-      fresh.push({ id: uuid(), ts: e.ts, text: e.text });
+      fresh.push(e.notes ? { id: uuid(), ts: e.ts, text: e.text, notes: e.notes } : { id: uuid(), ts: e.ts, text: e.text });
     }
     return fresh;
   }
@@ -576,7 +670,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    OFF, isOff, MAX_TEXT,
+    OFF, isOff, MAX_TEXT, MAX_NOTES, formatCategoryReport,
     parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

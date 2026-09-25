@@ -39,7 +39,7 @@ grant select, insert, update, delete on public.entries to authenticated;
 -- Entry text is now stored encrypted, which is longer than the plain text.
 
 alter table public.entries drop constraint if exists entries_text_check;
-alter table public.entries add constraint entries_text_check check (char_length(text) between 1 and 8000);
+alter table public.entries add constraint entries_text_check check (char_length(text) between 1 and 16000);
 
 -- One row per user holding the account's master key, but only in locked form:
 -- `recovery` is locked with the recovery key, `link` briefly with a /link
@@ -93,3 +93,13 @@ $$;
 drop trigger if exists entries_touch on public.entries;
 create trigger entries_touch before insert or update on public.entries
   for each row execute function public.entries_touch();
+
+-- ---------------------------------------------------------------------------
+-- Notes on entries (added later; safe to run on an existing project).
+-- Encrypted accounts keep notes inside the encrypted entry text, which is why
+-- the text limit above allows 16000; accounts without encryption use this
+-- column.
+
+alter table public.entries add column if not exists notes text;
+alter table public.entries drop constraint if exists entries_notes_check;
+alter table public.entries add constraint entries_notes_check check (notes is null or char_length(notes) <= 8000);

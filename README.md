@@ -216,7 +216,7 @@ npm install -g .        # adds the `tymlee` command
 
 Here `/update` runs `git pull` in the checkout for you.
 
-**Releases:** bump `VERSION` in `public/core.js` and `version` in `cli/package.json`, then push a tag like `v1.1.0`. The *Release terminal app* workflow (`.github/workflows/release-cli.yml`) builds `tymlee.pkg` on a Mac runner (`cli/build/pkg.sh`) and publishes it as a GitHub release.
+**Releases:** bump `VERSION` in `public/core.js` and `version` in `cli/package.json`, then run the *Release terminal app* workflow from the Actions tab on GitHub (or push a tag like `v1.1.0`). It (`.github/workflows/release-cli.yml`) builds `tymlee.pkg` on a Mac runner (`cli/build/pkg.sh`) and publishes it as a GitHub release.
 
 **Differences from the website:**
 - **Signing in:** `/login you@example.com`, then `/code 123456` from the email. The emailed link only works in a browser.

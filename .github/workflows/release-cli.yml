@@ -1,6 +1,7 @@
 # Builds the macOS installer for the terminal app (cli/build/pkg.sh) and
-# publishes it as a GitHub release, for tags like v1.2.0. The tag must match
-# the version in public/core.js. /update in the terminal app installs the
+# publishes it as a GitHub release: for tags like v1.2.0 (which must match the
+# version in public/core.js), or when run by hand from the Actions tab ("Run
+# workflow"), which creates the tag v<version> for the commit it runs on. /update in the terminal app installs the
 # latest release; the download link is always
 #   https://github.com/lucidmittens-lab/tymlee/releases/latest/download/tymlee.pkg
 name: Release terminal app
@@ -49,7 +50,6 @@ jobs:
           lipo -archs /usr/local/bin/tymlee
 
       - name: Publish the release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -58,8 +58,12 @@ jobs:
           If macOS says it can't check the installer for malicious software: System Settings → Privacy & Security → scroll down → Open Anyway (the installer isn't signed with an Apple Developer ID).
 
           Already installed? Type /update in tymlee."
-          gh release create "$GITHUB_REF_NAME" cli/dist/tymlee.pkg --title "tymlee $VERSION" --notes "$NOTES" \
-            || gh release upload "$GITHUB_REF_NAME" cli/dist/tymlee.pkg --clobber
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" cli/dist/tymlee.pkg --clobber
+          else
+            gh release create "$TAG" cli/dist/tymlee.pkg --target "$GITHUB_SHA" --title "tymlee $VERSION" --notes "$NOTES"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

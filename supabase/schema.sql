@@ -114,3 +114,45 @@ alter table public.entries add column if not exists wo text;
 alter table public.entries add column if not exists wo_linked boolean not null default false;
 alter table public.entries drop constraint if exists entries_wo_check;
 alter table public.entries add constraint entries_wo_check check (wo is null or char_length(wo) <= 200);
+
+-- ---------------------------------------------------------------------------
+-- Account settings (added later; safe to run on an existing project).
+-- One row per user with settings such as pay rates (/rate, /otmin, /otrate),
+-- as JSON, or encrypted like entries once the account has encryption on.
+
+create table if not exists public.settings (
+  user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  data        text not null check (char_length(data) <= 16000),
+  modified_at timestamptz not null default now()
+);
+
+alter table public.settings enable row level security;
+
+drop policy if exists "settings: read own" on public.settings;
+create policy "settings: read own" on public.settings
+  for select to authenticated using (user_id = (select auth.uid()));
+
+drop policy if exists "settings: insert own" on public.settings;
+create policy "settings: insert own" on public.settings
+  for insert to authenticated with check (user_id = (select auth.uid()));
+
+drop policy if exists "settings: update own" on public.settings;
+create policy "settings: update own" on public.settings
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+revoke all on public.settings from anon;
+grant select, insert, update on public.settings to authenticated;
+
+create or replace function public.settings_touch() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.modified_at := clock_timestamp();
+  return new;
+end;
+$$;
+
+drop trigger if exists settings_touch on public.settings;
+create trigger settings_touch before insert or update on public.settings
+  for each row execute function public.settings_touch();

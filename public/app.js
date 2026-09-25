@@ -20,7 +20,7 @@
 
   // Keep multiple open tabs showing the same log.
   window.addEventListener('storage', (e) => {
-    if (e.key === store.storageKey()) store.reloadFromStorage();
+    if (e.key === store.storageKey() || e.key === store.settingsKey()) store.reloadFromStorage();
   });
 
   // iOS zooms the page in when an input with text under 16px gets the focus.

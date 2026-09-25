@@ -566,3 +566,14 @@ test('earnings: rate, weekly overtime, and settings that change over time', () =
   assert.equal(T.parseAmount('$1,200.50'), 1200.5);
   assert.equal(T.parseAmount('abc'), null);
 });
+
+test('mergeSettings keeps the pay changes of both copies', () => {
+  const a = { pay: { rate: [{ from: 0, value: 30 }], otrate: [{ from: 0, value: 2 }] } };
+  const b = { pay: { rate: [{ from: 0, value: 30 }, { from: 500, value: 35 }], otmin: [{ from: 0, value: 40 }] } };
+  const m = T.mergeSettings(a, b);
+  assert.deepEqual(m.pay.rate, [{ from: 0, value: 30 }, { from: 500, value: 35 }]);
+  assert.deepEqual(m.pay.otmin, [{ from: 0, value: 40 }]);
+  assert.deepEqual(m.pay.otrate, [{ from: 0, value: 2 }]);
+  // The same step changed on both: the first copy (this device's) wins.
+  assert.deepEqual(T.mergeSettings({ pay: { rate: [{ from: 0, value: 1 }] } }, { pay: { rate: [{ from: 0, value: 2 }] } }).pay.rate, [{ from: 0, value: 1 }]);
+});

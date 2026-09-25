@@ -33,8 +33,8 @@
   'use strict';
 
   const LOGIN_EMAIL_KEY = 'tymlee.loginEmail';
-  // Pay settings (/rate, /otmin, /otrate). Kept on this device for now.
-  const PAY_KEY = 'tymlee.pay';
+  // Where the first test version kept pay settings (on the device only).
+  const OLD_PAY_KEY = 'tymlee.pay';
   const LOGIN_CODE_TTL_MS = 60 * 60 * 1000;
 
   const RESTORE_HELP = [
@@ -90,20 +90,23 @@
 
     // ---- pay settings ----------------------------------------------------------
 
+    // Pay settings live with the account's settings (store.js), which sync
+    // across devices, encrypted like entries.
     function loadPay() {
-      try {
-        return JSON.parse(io.storage.getItem(PAY_KEY)) || {};
-      } catch (_) {
-        return {};
-      }
+      moveOldPay();
+      return store.settings.pay || {};
     }
 
-    function savePay(settings) {
-      try {
-        io.storage.setItem(PAY_KEY, JSON.stringify(settings));
-      } catch (_) {
-        print('could not save the setting on this device', 'err');
-      }
+    function savePay(pay) {
+      store.setSettings({ ...store.settings, pay });
+    }
+
+    function moveOldPay() {
+      let old = null;
+      try { old = JSON.parse(io.storage.getItem(OLD_PAY_KEY)); } catch (_) { /* none */ }
+      if (!old) return;
+      io.storage.removeItem(OLD_PAY_KEY);
+      if (!store.settings.pay) store.setSettings({ ...store.settings, pay: old });
     }
 
     // /rate, /otmin, /otrate: show the setting with no argument, set it with

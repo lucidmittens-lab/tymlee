@@ -452,6 +452,23 @@
     return { ...(settings || {}), [key]: list };
   }
 
+  // Merge two copies of the account settings (two devices changed them
+  // before syncing): each pay setting keeps the steps of both.
+  function mergeSettings(a, b) {
+    const out = { ...b, ...a };
+    const pa = (a && a.pay) || {};
+    const pb = (b && b.pay) || {};
+    if (a.pay || b.pay) {
+      out.pay = {};
+      for (const k of new Set([...Object.keys(pa), ...Object.keys(pb)])) {
+        const steps = new Map();
+        for (const step of [...(pb[k] || []), ...(pa[k] || [])]) steps.set(step.from, step);
+        out.pay[k] = [...steps.values()].sort((x, y) => x.from - y.from);
+      }
+    }
+    return out;
+  }
+
   const hasPay = (settings) => Boolean(settings && (settings.rate || []).some((s) => s.value != null));
 
   // Monday 00:00 of the week `ts` falls in (overtime counts per week).
@@ -977,7 +994,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    PAY_KEYS, payValue, setPay, hasPay, weekStart, earnings, formatMoney, parseAmount,
+    PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };

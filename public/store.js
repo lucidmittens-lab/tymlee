@@ -78,6 +78,13 @@
     //   'locked'   the account is encrypted but this device has no key yet
     //   'ready'    this device holds the key; text is encrypted on upload
     let vault = { mode: 'pending' };
+    // Account settings (pay rates so far): one small row per account in the
+    // `settings` table, encrypted like entries once the account has a key.
+    // Kept locally too; `settingsDirty` marks local changes not yet sent.
+    let settings = {};
+    let settingsDirty = false;
+    let serverSettings = null; // null (not checked yet), true, or false (no table: stay on this device)
+    let settingsNoticeShown = false;
     let promptedEncrypt = false; // the /encrypt suggestion is shown once per page load
 
     // ---- local persistence -------------------------------------------------
@@ -109,6 +116,22 @@
       owner = who;
       entries = T.sortEntries(read(key(who, 'entries'), []).filter(valid));
       queue = read(key(who, 'queue'), []);
+      settings = readObject(key(who, 'settings'));
+      settingsDirty = readObject(key(who, 'settingsDirty')).dirty === true;
+    }
+
+    function readObject(k) {
+      try {
+        const v = JSON.parse(storage.getItem(k));
+        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function persistSettings() {
+      write(key(owner, 'settings'), settings);
+      write(key(owner, 'settingsDirty'), { dirty: settingsDirty });
     }
 
     function persist() {
@@ -120,6 +143,8 @@
       storage.removeItem(key(who, 'entries'));
       storage.removeItem(key(who, 'queue'));
       storage.removeItem(key(who, 'key'));
+      storage.removeItem(key(who, 'settings'));
+      storage.removeItem(key(who, 'settingsDirty'));
     }
 
     // This device's copy of the account's master key.
@@ -394,6 +419,72 @@
       }
     }
 
+    // ---- settings sync ---------------------------------------------------------
+
+    function setSettings(next) {
+      settings = next;
+      settingsDirty = owner !== LOCAL;
+      persistSettings();
+      onChange();
+      if (!user) return;
+      if (serverSettings === false) settingsLocalNotice();
+      schedule(syncSettings);
+    }
+
+    function settingsLocalNotice() {
+      if (settingsNoticeShown) return;
+      settingsNoticeShown = true;
+      onNotice(`settings are kept on ${env.place} until the server has the latest supabase/schema.sql`, 'dim');
+    }
+
+    // Send local changes (merged with the server's copy) and fetch other
+    // devices' changes. Never fails the entry sync: settings just wait.
+    async function syncSettings() {
+      if (!user || !client || serverSettings === false) return;
+      if (vault.mode !== 'ready' && vault.mode !== 'plain' && vault.mode !== 'none') return;
+      const who = owner;
+      try {
+        const got = await client.from('settings').select('data').maybeSingle();
+        if (got.error) {
+          if (missingTable(got.error)) {
+            serverSettings = false;
+            if (settingsDirty) settingsLocalNotice();
+            return;
+          }
+          throw got.error;
+        }
+        serverSettings = true;
+        let remote = null;
+        let resend = false;
+        if (got.data && got.data.data) {
+          const stored = got.data.data;
+          if (V.isEncrypted(stored)) {
+            if (vault.mode !== 'ready') return; // locked out of it here
+            remote = JSON.parse(await V.decryptField(vault.key, who, 'settings', stored));
+          } else {
+            remote = JSON.parse(stored);
+            resend = vault.mode === 'ready'; // stored before encryption was on
+          }
+        }
+        if (owner !== who) return;
+        const merged = settingsDirty ? T.mergeSettings(settings, remote || {}) : remote || settings;
+        const changed = JSON.stringify(merged) !== JSON.stringify(settings);
+        settings = merged;
+        if (settingsDirty || resend || (!remote && Object.keys(settings).length)) {
+          const json = JSON.stringify(settings);
+          const data = vault.mode === 'ready' ? await V.encryptField(vault.key, who, 'settings', json) : json;
+          const put = await client.from('settings').upsert({ user_id: who, data });
+          if (put.error) throw put.error;
+          if (owner !== who) return;
+          settingsDirty = false;
+        }
+        persistSettings();
+        if (changed) onChange();
+      } catch (_) {
+        // Try again on the next sync.
+      }
+    }
+
     // ---- encryption ----------------------------------------------------------
 
     function missingTable(error) {
@@ -564,10 +655,12 @@
         // after supabase/schema.sql has been run.
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
         if (fullNow && (serverVersion === 1 || !serverNotes || !serverWo)) serverVersion = null;
+        if (fullNow && serverSettings === false) serverSettings = null;
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
         if (fullNow) lastFullPull = now;
+        await syncSettings();
       });
     }
 
@@ -583,6 +676,8 @@
       vault = { mode: 'pending' };
       lastFullPull = 0;
       changedCursor = null;
+      serverSettings = null;
+      settingsNoticeShown = false;
       loadOwner(user ? user.id : LOCAL);
       status = user ? 'syncing' : 'signed-out';
       onChange();
@@ -697,12 +792,15 @@
       notesSupported: () => supports('notes'),
       get timesSealed() { return vault.mode === 'ready' && serverVersion === 2; },
       get entries() { return entries; },
+      get settings() { return settings; },
+      setSettings,
       get user() { return user; },
       get pending() { return queue.length; },
       get status() { return status; },
       get lastError() { return lastError; },
       get configured() { return configured; },
       reloadFromStorage() { loadOwner(owner); onChange(); },
+      settingsKey() { return key(owner, 'settings'); },
       // Resolves once queued network work (sending changes, syncing) is done.
       whenIdle() { return chain; },
       get client() { return client; },

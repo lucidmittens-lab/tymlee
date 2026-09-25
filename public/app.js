@@ -120,7 +120,9 @@
         '        Ctrl+Enter    save (while editing)',
         '        Ctrl/Cmd+G    switch between the CLI and GUI (timeline) views',
       ],
-      linkSignIn: true,
+      // Opened from the Home Screen, the emailed link would sign in the
+      // browser instead of this app, so only the code is offered.
+      linkSignIn: !(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches),
       showTimeline,
       pickEntry,
       ask,

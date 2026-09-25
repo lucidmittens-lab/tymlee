@@ -45,6 +45,7 @@ body {
 #app {
   position: fixed;
   top: 0;
+  padding-top: env(safe-area-inset-top); /* opened from the Home Screen */
   left: 0;
   right: 0;
   height: 100vh;

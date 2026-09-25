@@ -65,6 +65,10 @@ Ranges: `today` (the default), `yesterday`, `week` (the last 7 days), `month` (t
 
 The `.txt` export is exactly what `/log` prints. It groups entries by the day they started, gives each day a per-category summary, and adds an overall summary when the range covers more than one day. An entry counts toward the day it started on. The CSV has one row per entry: `n,start,end,minutes,category,note`, with ISO 8601 UTC timestamps.
 
+## Home Screen
+
+On a phone, use your browser's **Add to Home Screen** to get tymlee as an app: its own icon, opening full screen without browser bars. On iPhone a Home Screen app keeps its own storage, apart from the browser, so set it up like a new device: `/login you@example.com`, then `/code` with the code from the email (the emailed link would open the browser, not the app), and `/link` or `/recover` if you use encryption.
+
 ## Timeline (GUI view)
 
 The website opens in the GUI view: a live timeline, with the console tray under it (the latest output and the prompt, on their own surface). The **CLI | GUI** switch in the bottom-right of the status bar swaps to the full command scrollback and back. **Ctrl/Cmd+G** does the same, and `/timeline [range]` opens the GUI view on a range.

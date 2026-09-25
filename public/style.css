@@ -376,12 +376,81 @@ body {
 }
 .gui-range { color: var(--muted); }
 
-#flash {
-  white-space: pre-wrap;
-  font-size: 12px;
-  color: var(--muted);
+/* GUI view: the timeline scrolls above a small console pane (the same
+   scrollback as the CLI view), with the prompt below as usual. */
+#app.gui-mode #scroll { overflow: hidden; }
+#app.gui-mode #gui {
+  flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: relative;
 }
-#flash:empty { display: none; }
-#flash.ok { color: var(--accent); }
-#flash.err { color: var(--warn); }
+#app.gui-mode #out {
+  order: 2; /* under the timeline, just above the prompt */
+  flex: 0 0 auto;
+  margin: 0 auto;
+  max-width: 1200px;
+  height: calc(1.45em * 6 + 10px);
+  overflow-y: auto;
+  padding: 6px 16px 0;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 600px) {
+  #app.gui-mode #out { height: calc(1.45em * 3 + 8px); }
+}
+
+/* Editing card for a clicked block. */
+.entry-card {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+}
+.ec-title { color: var(--muted); }
+.ec-row { display: flex; gap: 10px; }
+.ec-row .ec-field { flex: 1; min-width: 0; }
+.ec-field { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
+.entry-card input,
+.entry-card textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.entry-card textarea { resize: vertical; min-height: 3.6em; }
+.entry-card input:focus,
+.entry-card textarea:focus { outline: none; border-color: var(--accent); }
+.entry-card input:disabled,
+.entry-card textarea:disabled { opacity: 0.6; }
+.ec-error { color: var(--warn); min-height: 0; }
+.ec-error:empty { display: none; }
+.ec-buttons { display: flex; gap: 8px; }
+.ec-buttons button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.ec-buttons button[type="submit"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.ec-buttons .ec-delete { margin-left: auto; color: var(--warn); }
+@media (pointer: coarse) {
+  .entry-card input,
+  .entry-card textarea { font-size: 16px; } /* no zoom on focus */
+}

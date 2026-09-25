@@ -504,3 +504,21 @@ test('work orders survive backups and /edit', () => {
   // A work order that looks like a number is never mistaken for an entry number.
   assert.deepEqual(T.parseBackup('Thu 2026-09-24\n  12  [4471]  09:00  dev x\n').entries, [{ ts: at('2026-09-24T09:00:00Z'), text: 'dev x', wo: '4471' }]);
 });
+
+// ---- editing an entry from the GUI -----------------------------------------------
+
+test('editEntry applies the card fields with the /edit rules', () => {
+  const e = { id: 'x', ts: at('2026-09-24T09:00:30Z'), text: 'dev fixing login bug', wo: '4471', wl: true, notes: 'a' };
+  const same = T.editEntry(e, { time: '09:00', wo: '4471', text: 'dev fixing login bug', notes: 'a' }, NOW);
+  assert.equal(same.changed, false);
+  assert.equal(same.entry.ts, e.ts, 'an unchanged time keeps its seconds');
+  const r = T.editEntry(e, { time: '8:45', wo: '[5000]', text: '  dev   fixing the bug ', notes: 'line 1  \nline 2\n' }, NOW);
+  assert.deepEqual(r.entry, { id: 'x', ts: at('2026-09-24T08:45:00Z'), text: 'dev fixing the bug', notes: 'line 1\nline 2', wo: '5000' });
+  assert.equal(r.changed, true);
+  assert.equal(T.editEntry(e, { time: '09:00', wo: '', text: 'dev x', notes: '' }, NOW).entry.wo, undefined);
+  assert.match(T.editEntry(e, { time: '25:00', text: 'dev' }, NOW).error, /14:30/);
+  assert.match(T.editEntry(e, { time: '11:00', text: 'dev' }, NOW).error, /future/);
+  assert.match(T.editEntry(e, { time: '09:00', text: '' }, NOW).error, /needs some text/);
+  assert.match(T.editEntry(e, { time: '09:00', text: '/log' }, NOW).error, /can't start/);
+  assert.match(T.editEntry(e, { time: '09:00', text: 'dev', wo: 'a b' }, NOW).error, /not a valid work order/);
+});

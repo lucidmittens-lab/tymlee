@@ -108,7 +108,10 @@
           }
           if (h >= 52 && b.notes) block.append(el('div', 'tl-line tl-notes', b.notes.split('\n')[0]));
           if (!b.off) {
-            block.addEventListener('click', () => onSelect && onSelect(b));
+            block.addEventListener('click', () => {
+              hideTip();
+              if (onSelect) onSelect(b, block);
+            });
             block.addEventListener('pointerenter', (e) => showTip(e, title, b.notes));
             block.addEventListener('pointermove', moveTip);
             block.addEventListener('pointerleave', hideTip);
@@ -132,7 +135,7 @@
     }
 
     function showTip(e, title, notes) {
-      if (e.pointerType === 'touch') return; // taps print the details instead
+      if (e.pointerType === 'touch') return; // a tap opens the edit card instead
       tip.replaceChildren(el('div', null, title), ...(notes ? notes.split('\n').map((l) => el('div', 'tl-muted', `> ${l}`)) : []));
       tip.hidden = false;
       moveTip(e);

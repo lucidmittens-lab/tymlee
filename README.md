@@ -67,17 +67,18 @@ The `.txt` export is exactly what `/log` prints. It groups entries by the day th
 
 ## Timeline (GUI view)
 
-On the website, the **CLI | GUI** switch in the bottom-right of the status bar swaps the command scrollback for a live timeline. **Ctrl/Cmd+G** does the same, and so does `/timeline [range]`.
+The website opens in the GUI view: a live timeline, with a small console pane under it showing the latest output and the prompt below that. The **CLI | GUI** switch in the bottom-right of the status bar swaps to the full command scrollback and back. **Ctrl/Cmd+G** does the same, and `/timeline [range]` opens the GUI view on a range.
 
 - **Layout:** each day is a column on a shared hour axis, and each entry is a block sized by its duration, labeled with its work order, category, note, times and notes (as far as the block's height allows). Off time is a hatched gap.
 - **Today:** a "now" line crosses the column and the running entry grows. Anything you log appears straight away.
 - **Ranges:** the Today / Yesterday / Week / Month buttons switch the range. A week shows days side by side; on a phone, swipe sideways.
-- **Details:** hover over a block for them, or click or tap it to show them above the prompt.
+- **Details:** hover over a block to see them.
+- **Editing:** click or tap a block to edit its start time, work order, text and notes in a small card. **Save** applies the changes with the same rules as `/edit`, and problems are shown in the card. **Cancel** or Esc closes it without changes, and **Delete** removes the entry (click it twice). Ctrl/Cmd+Enter in the notes saves.
 - **Colors:** each category keeps its color. The first eight categories you ever used get their own, from a palette checked for color-blind separation in light and dark mode. Later ones are gray, and every block is labeled with its category, so color is never the only way to tell categories apart.
-- **Typing in the GUI view:** the prompt works as usual. Short messages show above it, and commands with longer output (`/log`, `/help`, `/edit`, …) switch back to the CLI view.
-- **Remembered:** the view you last used comes back when you reload.
+- **Typing in the GUI view:** the prompt works as usual, and replies show in the console pane. Commands with longer output (`/log`, `/help`, `/edit`, …) switch to the CLI view.
+- **Remembered:** if you switch to the CLI view, it stays that way when you reload.
 
-The terminal app has no clickable controls, so `/timeline` prints the same timeline as colored text there.
+The terminal app has no clickable controls. There, `/timeline` prints the same timeline as colored text, and `/timeline-p [range]` pins it to the top of the terminal, where it updates live as you log (see below).
 
 ## Notes
 
@@ -202,7 +203,8 @@ To update later, run `git pull` in the repository. The installed command follows
 - **Encryption:** set the terminal up like any other device, with `/link` on a device that's already set up and then `/link <code>` in the terminal, or with `/recover <key>`.
 - **`/edit` and `/restore`** open your `$VISUAL` / `$EDITOR`. Save and close to apply; empty the file to cancel. If a line has a problem, you're offered the editor again.
 - **`/restore <file>`** reads a backup file. `/export` saves into the current folder, and `/copy` uses `pbcopy`, `clip`, `wl-copy` or `xclip`.
-- **Keys:** Tab completes a category or command (press it twice to list the options), Up and Down recall earlier inputs, Ctrl+L clears the screen, and Ctrl+D or `/exit` quits.
+- **Pinned timeline:** `/timeline-p [range]` (today by default) keeps the timeline at the top of the terminal while you work. It updates as entries change and as the clock runs, grows up to about half the screen, and shows the latest blocks when a day is longer than that. `/timeline-h` hides it. These two commands only exist in the terminal.
+- **Keys:** Tab completes a category or command (press it twice to list the options), Up and Down recall earlier inputs, Ctrl+L clears the screen (the prompt stays on the bottom row), and Ctrl+D or `/exit` quits.
 - **One line at a time:** `tymlee <entry or /command>` runs one line and exits, for example `tymlee /log week` or `tymlee dev code review`.
 - **Your data:** the log, sign-in and this computer's key are kept in `~/.config/tymlee` (`%APPDATA%\tymlee` on Windows), readable only by you. `/logout` removes them.
 

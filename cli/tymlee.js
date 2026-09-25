@@ -76,6 +76,11 @@ function print(text, cls) {
 let statusOn = false;
 let rows = 0;
 
+// The rows that scroll: below the pinned timeline (if any), above the status line.
+function setRegion() {
+  stdout.write(`\x1b7\x1b[${pane ? pane.height + 1 : 1};${rows - 1}r\x1b8`);
+}
+
 function visibleLength(text) {
   return text.replace(/\x1b\[[0-9;]*m/g, '').length;
 }
@@ -137,7 +142,11 @@ async function statusStart() {
   rows = stdout.rows;
   const row = (await cursorRow()) || rows;
   if (row >= rows) stdout.write('\n\x1b[1A'); // make room for the status row
-  stdout.write(`\x1b7\x1b[1;${rows - 1}r\x1b8`);
+  setRegion();
+  // Keep the prompt on the bottom row, like a shell with a full screen:
+  // move what is on screen down to meet it.
+  const gap = rows - 1 - Math.min(row, rows - 1);
+  if (gap > 0) stdout.write(`\x1b[${gap}T\x1b[${rows - 1};1H`);
   statusOn = true;
   drawStatus();
 }
@@ -147,8 +156,9 @@ async function statusStart() {
 function statusRestore() {
   if (!tty || process.env.TYMLEE_NO_STATUS || (stdout.rows || 0) < 6) return;
   rows = stdout.rows;
-  stdout.write(`\x1b7\x1b[1;${rows - 1}r\x1b8`);
+  setRegion();
   statusOn = true;
+  drawPane(true);
   drawStatus();
 }
 
@@ -162,7 +172,8 @@ function statusResize() {
   if (!statusOn) return;
   stdout.write(`\x1b7\x1b[${rows};1H\x1b[2K\x1b8`);
   rows = stdout.rows;
-  stdout.write(`\x1b7\x1b[1;${rows - 1}r\x1b8`);
+  if (pane) return pinTimeline(pane.args, { quiet: true }); // re-fit the pane
+  setRegion();
   drawStatus();
 }
 
@@ -340,13 +351,105 @@ function paint(slot, text) {
   return sgr(slot < 0 ? '37' : ansiColor(TIMELINE_HEX[slot]), text);
 }
 
+// Clear the screen, leaving the prompt on the bottom row.
 function clearScreen() {
-  stdout.write('\x1b[2J\x1b[H');
+  stdout.write('\x1b[2J');
   if (statusOn) {
-    stdout.write(`\x1b7\x1b[1;${rows - 1}r\x1b8`);
+    setRegion();
+    stdout.write(`\x1b[${rows - 1};1H`);
+    drawPane(true);
     drawStatus();
+  } else {
+    stdout.write(`\x1b[${stdout.rows || 1};1H`);
   }
 }
+
+// ---- /timeline-p: a pinned, live timeline ------------------------------------------
+// The timeline drawn in the top rows of the terminal, above the rows that
+// scroll, and redrawn as entries change (and as the clock moves).
+// /timeline-h hides it again. Terminal only.
+
+let pane = null; // { args, max, height, last }
+
+function fitLine(line, cols) {
+  // Cut a painted line to `cols` visible characters, keeping its colors.
+  let seen = 0;
+  let outText = '';
+  for (const part of line.split(/(\x1b\[[0-9;]*m)/)) {
+    if (part.startsWith('\x1b[')) { outText += part; continue; }
+    const room = cols - seen;
+    if (room <= 0) continue;
+    outText += part.length > room ? `${part.slice(0, room - 1)}…` : part;
+    seen += Math.min(part.length, room);
+  }
+  return `${outText}${color && line.includes('\x1b[') ? '\x1b[0m' : ''}`;
+}
+
+function paneLines() {
+  const now = Date.now();
+  const cols = stdout.columns || 80;
+  const range = T.parseRange(pane.args.join(''), now);
+  const body = T.formatTimeline(store.entries, range, now, { paint, width: cols }).split('\n');
+  const room = pane.max - 1; // the last row is the divider
+  // The legend stays on top; long days show their latest blocks.
+  const shown = body.length <= room ? body : [body[0], ...body.slice(body.length - (room - 1))];
+  const label = ` timeline · ${range.label} · /timeline-h hides `;
+  const divider = `${'─'.repeat(2)}${label}${'─'.repeat(Math.max(0, cols - 2 - label.length))}`;
+  return [...shown.map((l) => fitLine(l, cols)), sgr('90', divider.slice(0, cols))];
+}
+
+// The pane is as tall as the timeline, up to about half the screen. The
+// prompt stays on the bottom row, so growing only covers old output.
+function drawPane(force) {
+  if (!pane || !statusOn) return;
+  const lines = paneLines();
+  const key = lines.join('\n');
+  if (!force && key === pane.last) return;
+  pane.last = key;
+  let seq = '\x1b7';
+  for (let i = lines.length + 1; i <= pane.height; i++) seq += `\x1b[${i};1H\x1b[2K`; // it shrank
+  lines.forEach((l, i) => { seq += `\x1b[${i + 1};1H\x1b[2K${l}`; });
+  stdout.write(`${seq}\x1b8`);
+  if (lines.length !== pane.height) {
+    pane.height = lines.length;
+    setRegion();
+  }
+}
+
+function pinTimeline(rangeArgs, { quiet: silent } = {}) {
+  if (!statusOn) {
+    print('/timeline-p needs an interactive terminal at least 16 rows tall', 'err');
+    return;
+  }
+  if (!T.parseRange(rangeArgs.join(''), Date.now())) {
+    print(`unknown range "${rangeArgs.join('')}"; try today, yesterday, week, month, all, 3d or 2026-01-31`, 'err');
+    return;
+  }
+  const max = Math.min(30, Math.floor((rows - 1) * 0.55));
+  if (max < 6 || rows - 1 - max < 6) {
+    pane = null;
+    setRegion();
+    print('the terminal is too short to pin the timeline (it needs about 16 rows)', 'err');
+    return;
+  }
+  pane = { args: rangeArgs, max, height: 0, last: null };
+  // Start from a clean screen: the timeline on top, the prompt at the bottom.
+  clearScreen();
+  if (!silent) print('timeline pinned; it updates as you go (/timeline-h hides it)', 'dim');
+  else if (rl && promptShown) rl.prompt(true);
+}
+
+function hideTimeline() {
+  if (!pane) return print('the timeline is not pinned; /timeline-p pins it', 'err');
+  const height = pane.height;
+  pane = null;
+  let seq = '\x1b7';
+  for (let i = 1; i <= height; i++) seq += `\x1b[${i};1H\x1b[2K`;
+  stdout.write(`${seq}\x1b8`);
+  setRegion();
+  print('timeline hidden', 'ok');
+}
+
 
 // ---- set up ----------------------------------------------------------------------
 
@@ -360,7 +463,7 @@ const storage = fileStorage(path.join(dir, 'data.json'), () => {
 
 store = createStore({
   env: nodeEnv({ config, storage }),
-  onChange: () => drawStatus(),
+  onChange: () => { drawPane(); drawStatus(); },
   onNotice: (text, cls) => { if (!quiet) print(text, cls); },
 });
 
@@ -395,6 +498,16 @@ const shell = createShell({
     ask,
     editor: { edit: editText, confirm },
     extra: {
+      'timeline-p': {
+        usage: '/timeline-p [range]',
+        about: 'pin a live timeline to the top of the terminal (today by default)',
+        run(rangeArgs) { pinTimeline(rangeArgs); },
+      },
+      'timeline-h': {
+        usage: '/timeline-h',
+        about: 'hide the pinned timeline',
+        run() { hideTimeline(); },
+      },
       exit: {
         usage: '/exit',
         about: 'leave tymlee (Ctrl+D)',
@@ -457,7 +570,7 @@ async function interactive() {
     print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70 }), 'report');
   }
   drawStatus();
-  const clock = setInterval(drawStatus, 1000);
+  const clock = setInterval(() => { drawPane(); drawStatus(); }, 1000);
   clock.unref();
 
   rl = readline.createInterface({
@@ -480,6 +593,11 @@ async function interactive() {
   let redraw = false;
   stdin.on('keypress', (_, key) => {
     modalKey(key);
+    if (key && key.ctrl && key.name === 'l') {
+      // readline cleared the screen from the top; keep the prompt at the bottom.
+      setImmediate(() => { clearScreen(); rl.prompt(true); });
+      return;
+    }
     if (redraw) return;
     redraw = true;
     setImmediate(() => { redraw = false; drawStatus(); });

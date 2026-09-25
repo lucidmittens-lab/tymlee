@@ -31,12 +31,10 @@
     if (cls) pre.className = cls;
     pre.textContent = text;
     out.append(pre);
-    // In the GUI view short messages flash above the prompt; bigger output
-    // (reports, help, keys) switches back to the CLI view to show it.
-    if (view === 'gui' && cls !== 'echo') {
-      if (/\b(report|key)\b/.test(cls || '')) setView('cli');
-      else flash(text, cls);
-    }
+    // In the GUI view the console pane is small: bigger output (reports,
+    // help, keys) switches back to the CLI view to show it.
+    if (view === 'gui' && /\b(report|key)\b/.test(cls || '')) setView('cli');
+    if (view === 'gui') scrollToPrompt();
     return pre;
   }
 
@@ -49,7 +47,9 @@
 
   // Like a terminal, jump to the bottom after every command.
   function scrollToPrompt() {
-    scrollEl.scrollTop = scrollEl.scrollHeight;
+    // In the GUI view the console is its own small pane under the timeline.
+    if (view === 'gui') out.scrollTop = out.scrollHeight;
+    else scrollEl.scrollTop = scrollEl.scrollHeight;
   }
 
   function nearBottom() {
@@ -148,7 +148,6 @@
   // /timeline [range]. The prompt works the same in both.
 
   const guiEl = $('gui');
-  const flashEl = $('flash');
   const VIEW_KEY = 'tymlee.view';
   const PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month']];
   let view = 'cli';
@@ -182,46 +181,176 @@
       custom.textContent = guiRange.label;
       bar.append(custom);
     }
-    guiTimeline = window.TymleeTimeline.render({ store, range: guiRangeNow(), onSelect: showDetails });
+    closeEntryEditor();
+    guiTimeline = window.TymleeTimeline.render({ store, range: guiRangeNow(), onSelect: openEntryEditor });
     guiEl.replaceChildren(bar, guiTimeline.el);
   }
 
-  function showDetails(b) {
-    const end = b.running ? 'now' : T.hhmm(b.start + b.duration);
-    const lines = [`#${b.n} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${T.hhmm(b.start)}–${end}  ${T.formatHM(b.duration)}  ${b.category}${b.note ? ` ${b.note}` : ''}`];
-    if (b.notes) lines.push(...b.notes.split('\n').map((l) => `  > ${l}`));
-    print(lines.join('\n'), 'dim');
+  // ---- GUI: editing an entry by clicking its block ----------------------------
+
+  let editCard = null; // { el, id }
+
+  function closeEntryEditor() {
+    if (editCard) editCard.el.remove();
+    editCard = null;
+  }
+
+  function field(labelText, control) {
+    const label = document.createElement('label');
+    label.className = 'ec-field';
+    const name = document.createElement('span');
+    name.textContent = labelText;
+    label.append(name, control);
+    return label;
+  }
+
+  function openEntryEditor(b, blockEl) {
+    closeEntryEditor();
+    const entry = store.entries.find((e) => e.id === b.id);
+    if (!entry) return;
+    const card = document.createElement('form');
+    card.className = 'entry-card';
+    card.setAttribute('aria-label', `Edit entry #${b.n}`);
+
+    const title = document.createElement('div');
+    title.className = 'ec-title';
+    title.textContent = `#${b.n} · ${T.ymd(entry.ts)} · ${T.formatHM(b.duration)}${b.running ? ' so far' : ''}`;
+
+    const time = document.createElement('input');
+    time.type = 'time';
+    time.step = 60;
+    time.value = T.hhmm(entry.ts);
+    const wo = document.createElement('input');
+    wo.type = 'text';
+    wo.value = entry.wo || '';
+    wo.placeholder = 'none';
+    wo.spellcheck = false;
+    const text = document.createElement('input');
+    text.type = 'text';
+    text.value = entry.text;
+    text.spellcheck = false;
+    const notes = document.createElement('textarea');
+    notes.rows = 3;
+    notes.value = entry.notes || '';
+    notes.placeholder = 'notes';
+    for (const c of [wo, text, notes]) c.setAttribute('autocapitalize', 'off');
+
+    const error = document.createElement('div');
+    error.className = 'ec-error';
+    error.setAttribute('role', 'alert');
+
+    const buttons = document.createElement('div');
+    buttons.className = 'ec-buttons';
+    const save = document.createElement('button');
+    save.type = 'submit';
+    save.textContent = 'Save';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'ec-delete';
+    del.textContent = 'Delete';
+    buttons.append(save, cancel, del);
+
+    const row = document.createElement('div');
+    row.className = 'ec-row';
+    row.append(field('Start', time), field('Work order', wo));
+    card.append(title, row, field('Entry', text), field('Notes', notes), error, buttons);
+
+    // Notes and work orders need server support when signed in.
+    for (const [name, control] of [['notes', notes], ['wo', wo]]) {
+      store.supports(name).then((ok) => {
+        if (ok) return;
+        control.disabled = true;
+        control.placeholder = 'needs the latest supabase/schema.sql';
+      });
+    }
+
+    card.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const current = store.entries.find((x) => x.id === b.id);
+      if (!current) return closeEntryEditor();
+      const r = T.editEntry(current, { time: time.value, wo: wo.value, text: text.value, notes: notes.value }, Date.now());
+      if (r.error) {
+        error.textContent = r.error;
+        return;
+      }
+      closeEntryEditor();
+      input.focus();
+      if (!r.changed) return;
+      store.apply([{ op: 'put', entry: r.entry }]);
+      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${T.hhmm(r.entry.ts)} ${r.entry.text}`, 'ok');
+    });
+    cancel.addEventListener('click', () => {
+      closeEntryEditor();
+      input.focus();
+    });
+    del.addEventListener('click', () => {
+      if (del.dataset.armed !== 'yes') {
+        del.dataset.armed = 'yes';
+        del.textContent = 'Delete? Click again';
+        return;
+      }
+      closeEntryEditor();
+      input.focus();
+      store.remove(b.id);
+      print(`removed #${b.n} ${T.hhmm(entry.ts)} ${entry.text}`, 'ok');
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeEntryEditor();
+        input.focus();
+      } else if (e.key === 'Enter' && e.target === notes && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        card.requestSubmit();
+      }
+    });
+
+    // Place the card next to the block, inside the scrolling timeline.
+    guiEl.append(card);
+    const g = guiEl.getBoundingClientRect();
+    const r = blockEl.getBoundingClientRect();
+    const width = Math.min(380, g.width - 24);
+    card.style.width = `${width}px`;
+    const left = Math.min(Math.max(12, r.left - g.left + 24), g.width - width - 12);
+    card.style.left = `${left}px`;
+    card.style.top = `${r.top - g.top + guiEl.scrollTop + Math.min(24, r.height)}px`;
+    editCard = { el: card, id: b.id };
+    card.scrollIntoView({ block: 'nearest' });
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
   }
 
   // Show the top of the GUI (range buttons and legend), scrolling down only
   // as far as needed to bring the "now" line into view.
   function scrollToNow() {
-    scrollEl.scrollTop = 0;
+    guiEl.scrollTop = 0;
     const now = guiEl.querySelector('.tl-now');
     if (!now) return;
     const t = now.getBoundingClientRect();
-    const box = scrollEl.getBoundingClientRect();
+    const box = guiEl.getBoundingClientRect();
     const below = t.bottom - (box.top + box.height * 0.8);
-    if (below > 0) scrollEl.scrollTop = below;
+    if (below > 0) guiEl.scrollTop = below;
   }
 
   function setView(next, { save = true } = {}) {
     view = next;
     guiEl.hidden = view !== 'gui';
-    out.hidden = view === 'gui';
+    appEl.classList.toggle('gui-mode', view === 'gui');
     if (save) {
       try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* a per-browser convenience */ }
     }
     if (view === 'gui') {
       renderGui();
-      scrollEl.scrollTop = 0;
       scrollToNow();
     } else {
+      closeEntryEditor();
       guiTimeline = null;
       guiEl.replaceChildren();
-      flash('');
-      scrollToPrompt();
     }
+    scrollToPrompt();
     renderStatus();
   }
 
@@ -231,14 +360,6 @@
     guiPreset = preset ? preset[0] : null;
     guiRange = range;
     setView('gui');
-  }
-
-  let flashTimer = null;
-  function flash(text, cls) {
-    clearTimeout(flashTimer);
-    flashEl.className = cls || '';
-    flashEl.textContent = String(text).split('\n').slice(0, 3).join('\n');
-    if (text) flashTimer = setTimeout(() => { flashEl.textContent = ''; }, 8000);
   }
 
   let refreshQueued = false;
@@ -544,6 +665,8 @@
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       recall(1);
+    } else if (e.key === 'Escape' && editCard && !input.value) {
+      closeEntryEditor();
     } else if (e.key === 'Escape') {
       input.value = '';
       cycle = null;
@@ -600,7 +723,7 @@
   // touch screens, where a tap to scroll would pop up the keyboard.
   const finePointer = window.matchMedia('(pointer: fine)');
   scrollEl.addEventListener('click', (e) => {
-    if (e.target.closest('.editor')) return;
+    if (e.target.closest('.editor, .entry-card')) return;
     if (finePointer.matches && !String(window.getSelection())) input.focus();
   });
   $('dock').addEventListener('click', (e) => {
@@ -650,8 +773,8 @@
     renderStatus();
     scrollToPrompt();
     // Reopen the view used last (after printing today's log into the scrollback).
-    let saved = 'cli';
-    try { saved = localStorage.getItem(VIEW_KEY) || 'cli'; } catch (_) { /* default view */ }
+    let saved = 'gui';
+    try { saved = localStorage.getItem(VIEW_KEY) || 'gui'; } catch (_) { /* default view */ }
     if (saved === 'gui') setView('gui', { save: false });
   });
 })();

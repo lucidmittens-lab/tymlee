@@ -336,6 +336,37 @@
     return out.join('\n');
   }
 
+  // Apply edited fields (from the GUI's entry card) to an entry. `fields` has
+  // time ("HH:MM", on the entry's own day), wo, text and notes. Returns
+  // { entry } or { error }, with the same rules as /edit.
+  function editEntry(entry, fields, now) {
+    const { category, note } = parseInput(fields.text || '');
+    const text = note ? `${category} ${note}` : category;
+    if (!text) return { error: 'the entry needs some text (a category at least)' };
+    if (text.startsWith('/')) return { error: 'entries can\'t start with "/"' };
+    if (text.length > MAX_TEXT) return { error: `entries are limited to ${MAX_TEXT} characters` };
+    const wo = String(fields.wo || '').trim().replace(/^\[(.*)\]$/, '$1');
+    if (wo && !validWo(wo)) return { error: `"${wo}" is not a valid work order (no spaces or brackets, up to ${MAX_WO} characters)` };
+    const notes = String(fields.notes || '').split('\n').map((l) => l.trimEnd()).join('\n').trim();
+    if (notes.length > MAX_NOTES) return { error: `notes are limited to ${MAX_NOTES} characters` };
+    const m = String(fields.time || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!m || +m[1] > 23 || +m[2] > 59) return { error: 'the start time should look like 14:30' };
+    let ts = entry.ts;
+    if (`${pad2(+m[1])}:${m[2]}` !== hhmm(entry.ts)) {
+      const at = new Date(entry.ts);
+      at.setHours(+m[1], +m[2], 0, 0);
+      ts = at.getTime();
+    }
+    if (ts > now) return { error: `${hhmm(ts)} is in the future` };
+    // A work order typed here applies to this entry only (like /wopunch),
+    // unless it is the one it already had.
+    const wl = Boolean(entry.wl && wo === (entry.wo || ''));
+    const next = makeEntry({ id: entry.id, ts, text }, { notes, wo, wl });
+    const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
+      (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl);
+    return { entry: next, changed: !same };
+  }
+
   // ---- timeline ------------------------------------------------------------
 
   // Color slot per category: the first 8 categories ever used get slots 0-7
@@ -874,7 +905,7 @@
     parseRange, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

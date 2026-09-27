@@ -653,7 +653,20 @@ button.gui-day {
   .tl-block { border-radius: 6px; }
 
   #app.gui-mode #divider { height: 22px; }
-  #app.gui-mode #matches { min-height: 0; } /* completions push in only when there are some */
+  /* Completions float above the prompt, over the console, so they never
+     move the timeline. */
+  #app.gui-mode #dock .col { position: relative; }
+  #app.gui-mode #matches { min-height: 0; }
+  #app.gui-mode #matches:not(:empty) {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    z-index: 4;
+    padding: 0 16px 0 calc(16px + 2ch);
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
   #app.gui-mode #prompt { margin-top: 4px; }
   .divider-label { display: none; }
   .grip { width: 44px; height: 5px; margin: -2.5px 0 0 -22px; }
@@ -762,3 +775,5 @@ button.gui-day {
 @keyframes sheet-fade { from { opacity: 0; } }
 @keyframes sheet-unfade { to { opacity: 0; } }
 #gui:has(.entry-card) .tl-tip { display: none; } /* no hover details while editing */
+/* Out of the way while typing notes too. */
+#app:has(#notes-box:not([hidden])) #about { display: none; }

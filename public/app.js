@@ -39,10 +39,9 @@
     if (/\breport\b/.test(cls || '')) appendLines(pre, text);
     else pre.textContent = text;
     out.append(pre);
-    // In the GUI view, bigger output (reports, help, keys) opens the console
-    // tray up to show it, instead of taking the timeline's place.
+    // In the GUI view, bigger output (reports, help, keys) shows in the
+    // console tray from its top; the tray keeps its size (scroll to read on).
     pinned = /\b(report|key)\b/.test(cls || '') ? pre : null;
-    if (view === 'gui' && pinned) showInTray();
     if (view === 'gui') scrollToPrompt();
     return pre;
   }
@@ -123,6 +122,7 @@
     // iOS may scroll the page to reveal the input; follow the visible area.
     appEl.style.transform = viewport && viewport.offsetTop ? `translateY(${viewport.offsetTop}px)` : '';
     document.documentElement.classList.toggle('kb', window.innerHeight - height > 120);
+    dockBase = 0; // measured again for the new size
     if (view === 'gui') applyConsole();
     if (stick) scrollToPrompt();
   }
@@ -375,8 +375,24 @@
   try { consoleHeight = JSON.parse(localStorage.getItem(CONSOLE_KEY)); } catch (_) { /* default */ }
   let consoleOpen = !narrow.matches; // phones start with the peek
 
+  // The prompt area under the tray can grow for a while (multi-line notes,
+  // completions on a phone). The tray gives up that room, so the timeline
+  // above never moves. dockBase: the prompt area's usual height.
+  const dockEl = $('dock');
+  let dockBase = 0;
+
+  function dockExtra() {
+    const h = dockEl.offsetHeight;
+    if (!dockBase || h < dockBase) dockBase = h;
+    return h - dockBase;
+  }
+
+  // Room for the timeline and the tray together (as if the prompt area were
+  // its usual height).
+  const traySpace = () => scrollEl.clientHeight + dockExtra();
+
   function maxConsole() {
-    return Math.max(peekHeight(), scrollEl.clientHeight - 140);
+    return Math.max(peekHeight(), traySpace() - 140);
   }
 
   function applyConsole() {
@@ -384,40 +400,16 @@
       out.style.height = '';
       return;
     }
-    const full = consoleHeight || (narrow.matches ? scrollEl.clientHeight * 0.55 : lineHeight() * 6 + 12);
+    const full = consoleHeight || (narrow.matches ? traySpace() * 0.55 : lineHeight() * 6 + 12);
     const h = consoleOpen ? Math.min(Math.max(full, peekHeight()), maxConsole()) : peekHeight();
-    out.style.height = `${Math.round(h)}px`;
+    out.style.height = `${Math.max(0, Math.round(h - dockExtra()))}px`;
     appEl.classList.toggle('console-folded', !consoleOpen);
     divider.setAttribute('aria-expanded', String(consoleOpen));
-    out.scrollTop = out.scrollHeight;
+    scrollToPrompt();
   }
 
-  // Open the tray as far as the report needs, up to about two thirds of
-  // the space; it goes back to its size when you enter something next.
-  let trayGrown = false;
-
-  function showInTray() {
-    const top = pinnedTop();
-    if (!top) return;
-    const need = out.scrollHeight - top.offsetTop + 12;
-    const current = out.getBoundingClientRect().height;
-    const h = Math.min(Math.max(need, current), Math.max(current, scrollEl.clientHeight * 0.66));
-    consoleOpen = true;
-    appEl.classList.remove('console-folded');
-    divider.setAttribute('aria-expanded', 'true');
-    if (h > current + 1) {
-      appEl.classList.add('console-anim');
-      out.style.height = `${Math.round(h)}px`;
-      setTimeout(() => appEl.classList.remove('console-anim'), 250);
-      trayGrown = true;
-    }
-  }
-
-  function shrinkTray() {
-    if (!trayGrown) return;
-    trayGrown = false;
-    if (narrow.matches) consoleOpen = false; // phones go back to the one-line peek
-    applyConsole();
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { if (view === 'gui') applyConsole(); }).observe(dockEl);
   }
 
   function toggleConsole(open = !consoleOpen) {
@@ -441,8 +433,7 @@
       if (!drag.moved && Math.abs(dy) < 6) return;
       drag.moved = true;
       consoleOpen = true;
-        trayGrown = false;
-      const h = Math.min(Math.max(drag.h + dy, peekHeight()), maxConsole());
+        const h = Math.min(Math.max(drag.h + dy, peekHeight()), maxConsole());
       out.style.height = `${h}px`;
       out.scrollTop = out.scrollHeight;
     });
@@ -750,7 +741,6 @@
   function clearScreen() {
     out.replaceChildren();
     pinned = null;
-    shrinkTray();
     if (editor) out.append(editor.el); // keep an open editor
     else if (view !== chosenView) setView(chosenView, { save: false });
   }
@@ -856,7 +846,13 @@
   notesBox.setAttribute('aria-label', 'Notes');
   input.after(notesBox);
 
+  // The box grows with the notes, in the GUI view only as far as the
+  // console tray has room (at least two lines), then scrolls: the timeline
+  // stays where it is.
+  let notesRoom = 0;
+
   function fitNotesBox() {
+    notesBox.style.maxHeight = notesRoom ? `${notesRoom}px` : '';
     notesBox.style.height = 'auto';
     notesBox.style.height = `${notesBox.scrollHeight}px`;
     scrollToPrompt();
@@ -897,6 +893,8 @@
         ghost.hidden = true;
         notesBox.hidden = false;
         notesBox.value = initial || '';
+        const line = parseFloat(getComputedStyle(input).lineHeight) || 20;
+        notesRoom = view === 'gui' ? Math.max(line * 2, line + out.getBoundingClientRect().height - 8) : 0;
         notesBox.placeholder = 'type notes · Shift+Enter: new line · Enter: save · Esc: cancel';
         renderHints();
         fitNotesBox();
@@ -1096,7 +1094,6 @@
   });
 
   function submit(line) {
-    shrinkTray();
     echo(line);
     const done = shell.run(line);
     if (history[history.length - 1] !== line) history.push(line);

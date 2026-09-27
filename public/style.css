@@ -778,3 +778,196 @@ button.gui-day {
 #gui:has(.entry-card) .tl-tip { display: none; } /* no hover details while editing */
 /* Out of the way while typing notes too. */
 #app:has(#notes-box:not([hidden])) #about { display: none; }
+
+/* ---- GUI view (gui.js): timeline and a start bar, no console ------------------ */
+#app.pure-mode #divider,
+#app.pure-mode #out,
+#app.pure-mode #dock .col,
+#app.pure-mode #about { display: none !important; }
+#app.pure-mode #gui { padding-bottom: 12px; }
+
+.startbar {
+  display: grid;
+  grid-template-columns: auto minmax(8em, 13em) 1fr auto auto;
+  grid-template-areas: "menu cat title start off";
+  gap: 8px;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px;
+}
+.startbar[hidden] { display: none; }
+#app.pure-mode #dock { background: var(--panel); border-top: 1px solid var(--line); }
+.sb-menu { grid-area: menu; }
+.sb-cat { grid-area: cat; position: relative; }
+.sb-title { grid-area: title; }
+.sb-start { grid-area: start; }
+.sb-off { grid-area: off; }
+.startbar input {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+.startbar input:focus { border-color: var(--accent); }
+.startbar button, .gsheet button, .toast button {
+  font: inherit;
+  cursor: pointer;
+}
+.sb-menu, .sb-off, .sb-start {
+  border-radius: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.sb-menu { font-size: 18px; line-height: 1; padding: 7px 11px; }
+.sb-start { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.sb-off:disabled { opacity: 0.4; cursor: default; }
+.sb-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 10;
+  max-height: 16em;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.15);
+}
+.sb-suggest[hidden] { display: none; }
+.sb-opt { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.sb-opt:hover, .sb-opt.sel { background: var(--accent-bg); color: var(--accent); }
+
+/* Toasts: short messages above the start bar. */
+.toasts {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--dock-h, 100px) + 10px);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  padding: 0 16px;
+}
+.toast {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  max-width: min(560px, 100%);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+  animation: toast-in 0.18s ease;
+  white-space: pre-wrap;
+}
+.toast.err { background: var(--warn); color: #fff; }
+.toast.out { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
+.toast-action { border: 0; background: transparent; color: inherit; text-decoration: underline; padding: 0; font-weight: 600; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* Sheets: a dialog (wide screens) or a bottom sheet (phones). */
+.gsheet-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.32);
+  animation: sheet-fade 0.18s ease;
+}
+.gsheet {
+  width: min(560px, 100%);
+  max-height: 85%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.gsheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.gsheet-title { font-weight: 600; }
+.gsheet-close { border: 0; background: transparent; color: var(--muted); font-size: 16px; padding: 2px 6px; }
+.gsheet-body { overflow-y: auto; padding: 12px 16px 16px; }
+.gsheet-text { margin: 0 0 10px; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gsheet-text .ln { display: block; padding-left: var(--hang, 2ch); text-indent: calc(-1 * var(--hang, 2ch)); }
+.gsheet-text.err { color: var(--warn); }
+.gsheet-text.ok { color: var(--accent); }
+.gsheet-text.dim { color: var(--muted); }
+.gsheet-wrap.out { opacity: 0; transition: opacity 0.15s; }
+
+.gmenu { display: flex; flex-direction: column; }
+.gmenu-section { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; margin: 12px 0 4px; }
+.gmenu-section:first-child { margin-top: 0; }
+.gmenu-item {
+  text-align: left;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+}
+.gmenu-item:hover { background: var(--accent-bg); }
+.gmenu-about { margin-top: 14px; color: var(--muted); font-size: 12px; }
+.gmenu-about a { color: var(--muted); }
+
+.gform { display: flex; flex-direction: column; gap: 12px; }
+.gform-intro { margin: 0; color: var(--muted); }
+.gform-field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.gform-field input {
+  font: inherit;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+.gform-field input:focus { border-color: var(--accent); }
+.gform-ranges { display: flex; flex-wrap: wrap; gap: 6px; }
+.gform-range { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; background: transparent; color: var(--muted); }
+.gform-range[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.gform-go { align-self: flex-start; border: 0; border-radius: 8px; padding: 9px 18px; background: var(--accent); color: var(--bg); font-weight: 600; }
+.gform-go.danger { background: var(--warn); color: #fff; }
+
+@media (max-width: 600px) {
+  .startbar {
+    grid-template-columns: 44px minmax(0, 0.8fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      "cat cat title"
+      "menu off start";
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  .sb-menu { padding: 9px 0; }
+  .startbar input, .gform-field input { font-size: 15px; }
+  .sb-start, .sb-off { padding: 10px 14px; }
+  .gsheet-wrap { align-items: flex-end; padding: 0; }
+  .gsheet { width: 100%; max-height: 88%; border-radius: 16px 16px 0 0; animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .gsheet-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .gmenu-item { padding: 12px 10px; }
+}

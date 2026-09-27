@@ -14,6 +14,8 @@
   const matchesEl = $('matches');
   const statusEl = $('status');
 
+  let gui = null; // the GUI view (gui.js), set up once the shell exists
+
   const store = window.TymleeStore.createStore({
     onChange: () => { renderStatus(); refreshTimelines(); },
     onNotice: (text, cls) => { print(text, cls); scrollToPrompt(); },
@@ -40,6 +42,7 @@
     if (/\breport\b/.test(cls || '')) appendLines(pre, text);
     else pre.textContent = text;
     out.append(pre);
+    if (gui) gui.output(text, cls); // the GUI view shows it as a toast or a sheet
     // In the GUI view, bigger output (reports, help, keys) shows in the
     // console tray from its top; the tray keeps its size (scroll to read on).
     pinned = /\b(report|key)\b/.test(cls || '') ? pre : null;
@@ -50,18 +53,19 @@
   // Reports are columns of text. On a narrow screen their lines wrap rather
   // than scroll sideways, and a wrapped line continues under its last column
   // (the entry's text, say) so the columns stay readable.
-  function charsPerLine() {
+  // How many characters fit across `box` (the console, or a GUI sheet).
+  function charsPerLine(box = out, padding = 32) {
     const probe = document.createElement('span');
     probe.textContent = '0'.repeat(20);
     probe.style.visibility = 'hidden';
-    out.append(probe);
+    box.append(probe);
     const width = probe.getBoundingClientRect().width / 20;
     probe.remove();
-    return width ? Math.floor((out.clientWidth - 32) / width) : 80;
+    return width && box.clientWidth ? Math.floor((box.clientWidth - padding) / width) : 80;
   }
 
-  function appendLines(pre, text) {
-    const maxHang = Math.max(4, Math.floor(charsPerLine() / 2)); // at most halfway across
+  function appendLines(pre, text, box, padding) {
+    const maxHang = Math.max(4, Math.floor(charsPerLine(box, padding) / 2)); // at most halfway across
     const lines = text.split('\n');
     lines.forEach((line, i) => {
       const row = document.createElement('span');
@@ -195,6 +199,41 @@
         close: closeEditor,
       },
     },
+  });
+
+  // ---- the GUI view (gui.js) --------------------------------------------------
+
+  // Run a line as if typed (without echoing it), for the GUI's buttons and menu.
+  async function runLine(line, { undo = false } = {}) {
+    gui.markStart(undo);
+    try {
+      await shell.run(shell.route(line));
+    } finally {
+      gui.markStart(false);
+    }
+    renderStatus();
+  }
+
+  gui = window.TymleeGui.createGui({
+    T,
+    store,
+    shell,
+    appEl,
+    dockEl: $('dock'),
+    run: runLine,
+    // /edit and /restore need the text box: the CLI view, then back.
+    openCli(line) {
+      setView('cli', { save: false });
+      submit(line);
+    },
+    setView: (v) => setView(v),
+    // Reports in a sheet wrap like in the console (continuing under their
+    // last column).
+    formatReport(pre, text) {
+      pre.replaceChildren();
+      appendLines(pre, text, pre, 0);
+    },
+    about: { version: T.VERSION, build: BUILD ? BUILD.commit.slice(0, 7) : '', repo: T.REPO_URL },
   });
 
   function download(name, body, type) {
@@ -501,6 +540,7 @@
 
   // The prompt, or the notes box while notes are being typed.
   function focusPrompt() {
+    if (view === 'pure') return; // no prompt in the GUI view
     (modal && modal.multiline ? notesBox : input).focus();
   }
 
@@ -672,16 +712,24 @@
 
   let chosenView = 'gui'; // the view picked with the switch (commands can show the other for a while)
 
+  // Views: 'cli' (the scrollback), 'gui' (Hybrid: timeline and console) and
+  // 'pure' (GUI: timeline and start bar, no console; gui.js).
+  const TIMELINE_VIEWS = ['gui', 'pure'];
+  const onTimeline = () => TIMELINE_VIEWS.includes(view);
+
   function setView(next, { save = true } = {}) {
     view = next;
     if (save) chosenView = next;
-    guiEl.hidden = view !== 'gui';
+    guiEl.hidden = !onTimeline();
     divider.hidden = view !== 'gui';
-    appEl.classList.toggle('gui-mode', view === 'gui');
+    appEl.classList.toggle('gui-mode', onTimeline());
+    appEl.classList.toggle('pure-mode', view === 'pure');
+    if (view === 'pure') gui.show();
+    else gui.hide();
     if (save) {
       try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* a per-browser convenience */ }
     }
-    if (view === 'gui') {
+    if (onTimeline()) {
       renderGui();
       scrollToNow();
     } else {
@@ -707,7 +755,7 @@
       guiUnit = null;
       guiRange = range;
     }
-    setView('gui');
+    setView(view === 'pure' ? 'pure' : 'gui');
   }
 
   let refreshQueued = false;
@@ -716,7 +764,7 @@
     refreshQueued = true;
     setTimeout(() => {
       refreshQueued = false;
-      if (guiTimeline && view === 'gui') guiTimeline.refresh();
+      if (guiTimeline && onTimeline()) guiTimeline.refresh();
     }, 250);
   }
   setInterval(refreshTimelines, 30000);
@@ -725,12 +773,13 @@
     const wrap = span('view-toggle', '');
     wrap.setAttribute('role', 'group');
     wrap.setAttribute('aria-label', 'View');
-    for (const v of ['cli', 'gui']) {
+    for (const [v, long, short, what] of [['cli', 'CLI', 'CLI', 'Command view'], ['gui', 'Hybrid', 'HYB', 'Timeline and console'], ['pure', 'GUI', 'GUI', 'Timeline with buttons']]) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = v.toUpperCase();
+      b.append(span('tl-long', long), span('tl-short', short));
       b.setAttribute('aria-pressed', String(view === v));
-      b.title = v === 'gui' ? 'Timeline view (Ctrl/Cmd+G)' : 'Command view (Ctrl/Cmd+G)';
+      b.title = `${what} (Ctrl/Cmd+G switches CLI and the last timeline view)`;
+      b.setAttribute('aria-label', long);
       b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
       b.addEventListener('click', () => { if (view !== v) setView(v); });
       wrap.append(b);
@@ -812,8 +861,10 @@
     scrollToPrompt();
   }
 
-  // Leave the edited text on screen as a read-only record.
+  // Leave the edited text on screen as a read-only record (and go back to the
+  // GUI view if that is where /edit or /restore was opened from).
   function closeEditor() {
+    if (chosenView === 'pure' && view !== 'pure') setTimeout(() => setView('pure', { save: false }), 0);
     if (editor.mode === 'restore') {
       editor.el.remove();
     } else {
@@ -1091,7 +1142,7 @@
       clearScreen();
     } else if (mod && e.key.toLowerCase() === 'g') {
       e.preventDefault();
-      setView(view === 'gui' ? 'cli' : 'gui');
+      setView(view === 'cli' ? (chosenView === 'pure' ? 'pure' : 'gui') : 'cli');
     }
   });
 
@@ -1141,7 +1192,16 @@
     if (finePointer.matches && !String(window.getSelection())) focusPrompt();
   });
   $('dock').addEventListener('click', (e) => {
+    if (view === 'pure') return;
     if (e.target !== input && e.target !== notesBox && !e.target.closest('#matches span')) focusPrompt();
+  });
+
+  // The GUI view has no prompt: Ctrl/Cmd+Z undoes there too (outside fields).
+  document.addEventListener('keydown', (e) => {
+    if (view !== 'pure' || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    e.preventDefault();
+    runLine('/undo');
   });
 
   // ---- about: version and source, floating above the CLI | GUI switch -----
@@ -1200,8 +1260,10 @@
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
     statusEl.replaceChildren(...[left, today, right, viewToggle()].filter(Boolean));
+    if (gui) gui.update(st);
     const h = `${statusEl.offsetHeight}px`;
     if (h !== lastStatusHeight) $('dock').style.setProperty('--status-h', (lastStatusHeight = h));
+    appEl.style.setProperty('--dock-h', `${$('dock').offsetHeight}px`); // toasts sit above it
   }
 
   // ---- boot ----------------------------------------------------------------
@@ -1222,7 +1284,7 @@
     // Reopen the view used last (after printing today's log into the scrollback).
     let saved = 'gui';
     try { saved = localStorage.getItem(VIEW_KEY) || 'gui'; } catch (_) { /* default view */ }
-    chosenView = saved === 'cli' ? 'cli' : 'gui';
-    if (chosenView === 'gui') setView('gui', { save: false });
+    chosenView = ['cli', 'gui', 'pure'].includes(saved) ? saved : 'gui';
+    if (chosenView !== 'cli') setView(chosenView, { save: false });
   });
 })();

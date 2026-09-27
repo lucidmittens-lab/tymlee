@@ -1,8 +1,12 @@
-// Cloudflare deploy settings. The site is plain static files served as-is;
-// there is no build step and no server code.
+// Cloudflare deploy settings. The site is plain static files served as-is,
+// with no server code. The one build step stamps the commit being deployed
+// into public/build.js (the build ID shown next to the version).
 {
   "name": "tymlee",
   "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "node scripts/stamp-build.js"
+  },
   "assets": {
     "directory": "./public"
   }

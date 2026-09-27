@@ -24,7 +24,7 @@ done
 lipo -create "$WORK/tymlee-arm64" "$WORK/tymlee-x64" -output "$WORK/root/usr/local/bin/tymlee"
 chmod 755 "$WORK/root/usr/local/bin/tymlee"
 codesign --sign - --force "$WORK/root/usr/local/bin/tymlee"
-"$WORK/root/usr/local/bin/tymlee" --version | grep -qx "$VERSION"
+"$WORK/root/usr/local/bin/tymlee" --version | grep -q "^$VERSION"
 
 pkgbuild --root "$WORK/root" --identifier date.tymlee.cli --version "$VERSION" \
   --install-location / "$WORK/tymlee-component.pkg"

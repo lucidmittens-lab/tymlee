@@ -45,7 +45,8 @@ jobs:
         run: |
           pkgutil --payload-files dist/tymlee.pkg | grep -qx './usr/local/bin/tymlee'
           sudo installer -pkg dist/tymlee.pkg -target /
-          test "$(/usr/local/bin/tymlee --version)" = "$VERSION"
+          /usr/local/bin/tymlee --version
+          test "$(/usr/local/bin/tymlee --version)" = "$VERSION (build ${GITHUB_SHA::7})"
           TYMLEE_HOME="$RUNNER_TEMP/tymlee" /usr/local/bin/tymlee dev release check | grep -q 'in #1 dev release check'
           lipo -archs /usr/local/bin/tymlee
 

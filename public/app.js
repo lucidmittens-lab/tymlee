@@ -2,6 +2,7 @@
   'use strict';
 
   const T = window.Tymlee;
+  const BUILD = window.TYMLEE_BUILD && /^[0-9a-f]{7,40}$/.test(window.TYMLEE_BUILD.commit) ? window.TYMLEE_BUILD : null;
   const V = window.TymleeVault;
 
   const $ = (id) => document.getElementById(id);
@@ -180,6 +181,7 @@
       // Opened from the Home Screen, the emailed link would sign in the
       // browser instead of this app, so only the code is offered.
       helpFooter: ['', `Terminal app for Mac: ${T.REPO_URL}/releases/latest/download/tymlee.pkg`],
+      build: BUILD ? BUILD.commit.slice(0, 7) : '',
       linkSignIn: !(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches),
       showTimeline,
       pickEntry,
@@ -1152,7 +1154,19 @@
     link.rel = 'noopener';
     link.textContent = 'GitHub';
     link.title = 'The code for tymlee';
-    el.append(`tymlee v${T.VERSION} · `, link);
+    el.append(`tymlee v${T.VERSION} · `);
+    // The build: the commit this copy of the site was deployed from.
+    if (BUILD) {
+      const b = document.createElement('a');
+      b.href = `${T.REPO_URL}/commit/${BUILD.commit}`;
+      b.target = '_blank';
+      b.rel = 'noopener';
+      b.className = 'build';
+      b.textContent = BUILD.commit.slice(0, 7);
+      b.title = `build ${BUILD.commit.slice(0, 7)}${BUILD.at ? `, deployed ${new Date(BUILD.at).toLocaleString()}` : ''}`;
+      el.append(b, ' · ');
+    }
+    el.append(link);
   })();
 
   // ---- status bar ----------------------------------------------------------

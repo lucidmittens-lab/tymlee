@@ -17,6 +17,15 @@ After a version bump that affects the terminal app, the Mac installer is
 released by running the "Release terminal app" workflow
 (`.github/workflows/release-cli.yml`); it creates the tag `v<version>`.
 
+## Build IDs
+
+The build ID is the commit a copy was built from, shown next to the version.
+Nothing to maintain: Cloudflare runs `scripts/stamp-build.js` before each
+deploy (the `build` command in `wrangler.jsonc`), which writes
+`public/build.js`; the committed `public/build.js` is an empty placeholder.
+The Mac installer gets it from `GITHUB_SHA` (`cli/build.js`), and a git
+checkout of the terminal app reads its own commit.
+
 ## Deploying
 
 The website is the `public/` folder, deployed by Cloudflare from the branch

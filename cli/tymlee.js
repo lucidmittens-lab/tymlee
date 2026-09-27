@@ -20,6 +20,22 @@ const stdin = process.stdin;
 const stdout = process.stdout;
 const args = process.argv.slice(2);
 const oneShot = args.length > 0;
+
+// The build ID: the commit this was built from (the installed app), or the
+// checkout's current commit (installed from git).
+let buildCache = null;
+function buildId() {
+  if (buildCache != null) return buildCache;
+  buildCache = '';
+  // eslint-disable-next-line no-undef
+  if (typeof TYMLEE_BUILT_COMMIT !== 'undefined' && TYMLEE_BUILT_COMMIT) {
+    buildCache = TYMLEE_BUILT_COMMIT.slice(0, 7); // eslint-disable-line no-undef
+  } else if (fs.existsSync(path.join(__dirname, '..', '.git'))) {
+    const r = spawnSync('git', ['-C', path.join(__dirname, '..'), 'rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' });
+    if (r.status === 0) buildCache = r.stdout.trim();
+  }
+  return buildCache;
+}
 const tty = Boolean(stdin.isTTY && stdout.isTTY);
 const color = Boolean(stdout.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
 
@@ -34,7 +50,7 @@ if (args[0] === '--help' || args[0] === '-h') {
   process.exit(0);
 }
 if (args[0] === '--version' || args[0] === '-v') {
-  stdout.write(`${T.VERSION}\n`);
+  stdout.write(`${T.VERSION}${buildId() ? ` (build ${buildId()})` : ''}\n`);
   process.exit(0);
 }
 
@@ -600,6 +616,7 @@ const shell = createShell({
       '        Ctrl+D        quit (or /exit)',
     ],
     linkSignIn: false,
+    get build() { return buildId(); },
     paint,
     width: () => stdout.columns || 80,
     pickEntry,
@@ -671,7 +688,7 @@ async function runOnce() {
 }
 
 async function interactive() {
-  print(`tymlee v${T.VERSION} · type what you are starting and press Enter · /help for commands`, 'dim');
+  print(`tymlee v${T.VERSION}${buildId() ? ` (${buildId()})` : ''} · type what you are starting and press Enter · /help for commands`, 'dim');
   await statusStart();
   try {
     await store.init();

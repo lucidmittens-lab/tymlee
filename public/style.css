@@ -89,6 +89,7 @@ body {
 }
 #about a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
 #about a:hover { color: var(--accent); }
+#about a.build { text-decoration: none; }
 /* Out of the way while typing on a phone. */
 .kb #about { display: none; }
 #dock .col {

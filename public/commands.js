@@ -302,7 +302,7 @@
             ...(io.keys && io.keys.length ? ['', ...io.keys] : []),
             ...(io.helpFooter || []),
             '',
-            `tymlee v${T.VERSION} · ${T.REPO_URL}`,
+            `tymlee v${T.VERSION}${io.build ? ` (build ${io.build})` : ''} · ${T.REPO_URL}`,
           ].join('\n'), 'report dim');
         },
       },

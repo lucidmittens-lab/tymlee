@@ -210,13 +210,28 @@
 
     // ---- editing and restoring -------------------------------------------------
 
+    // Entries added or changed in /edit get the work order /wolink linked to
+    // their category that day, like typed entries, unless they have their
+    // own ([4471] in the line, or /wopunch).
+    function withLinkedWorkOrders(ops) {
+      return ops.map((op) => {
+        if (op.op !== 'put' || T.isOff(op.entry) || T.isLink(op.entry)) return op;
+        const e = op.entry;
+        if (e.wo && !e.wl) return op;
+        const link = linkFor(T.parseInput(e.text).category, e.ts);
+        const wo = link && link.wo ? link.wo : '';
+        if (wo === (e.wo || '')) return op;
+        return { op: 'put', entry: T.makeEntry(e, wo ? { wo, wl: true } : { wo: '', wl: false }) };
+      });
+    }
+
     function applyEdit(text, items) {
       const result = T.parseEditable(text, items, Date.now());
       if (result.errors.length) {
         print([...result.errors, inline ? 'nothing was saved; fix the lines above and /save again' : 'nothing was saved'].join('\n'), 'err');
         return false;
       }
-      store.apply(result.ops);
+      store.apply(withLinkedWorkOrders(result.ops));
       const parts = [];
       if (result.changed) parts.push(`${result.changed} changed`);
       if (result.added) parts.push(`${result.added} added`);

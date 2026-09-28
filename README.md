@@ -75,9 +75,17 @@ The settings sync across your devices with your account (encrypted like your ent
 
 On a phone, use your browser's **Add to Home Screen** to get tymlee as an app: its own icon, opening full screen without browser bars. On iPhone a Home Screen app keeps its own storage, apart from the browser, so set it up like a new device: `/login you@example.com`, then `/code` with the code from the email (the emailed link would open the browser, not the app), and `/link` or `/recover` if you use encryption.
 
-## Timeline (GUI view)
+## Views: CLI, Hybrid and GUI
 
-The website opens in the GUI view: a live timeline, with the console tray under it (the latest output and the prompt, on their own surface). The **CLI | GUI** switch in the bottom-right of the status bar swaps to the full command scrollback and back. **Ctrl/Cmd+G** does the same, and `/timeline [range]` opens the GUI view on a range.
+The switch in the bottom-right of the status bar picks one of three views, and the choice is remembered:
+
+- **CLI:** the full command scrollback and the prompt.
+- **Hybrid** (the default): a live timeline, with the console tray under it (the latest output and the prompt, on their own surface).
+- **GUI:** the timeline with buttons instead of a console. At the bottom, pick or type a **category** (it suggests the ones you've used), add a **title**, and press **▶ Start** (or Enter); **■ Off** clocks out. Short messages show as toasts, and the one after Start has **Undo**. Reports and anything longer open in a window. Everything else is in the **☰ menu**: undo, notes, editing entries (with Save and Cancel), reports, export, work orders, pay, signing in, encryption, restore, and help. Ctrl/Cmd+Z undoes.
+
+**Ctrl/Cmd+G** switches between CLI and your timeline view, and `/timeline [range]` opens the timeline on a range.
+
+### Timeline
 
 - **Layout:** each day is a column on a shared hour axis, and each entry is a block sized by its duration, labeled with its work order, category, note, times and notes (as far as the block's height allows). Off time is a hatched gap.
 - **Today:** a "now" line crosses the column and the running entry grows. Anything you log appears straight away.

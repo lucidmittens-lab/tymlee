@@ -318,7 +318,6 @@
             fields: [{ name: 'format', label: 'Format', choices: [['txt', 'Text'], ['csv', 'CSV']] }],
             submit: 'Download',
           }, (v) => runMenu('Export', `/export ${v.range}${v.format === 'csv' ? ' csv' : ''}`))],
-          ['Copy', () => form('Copy', { intro: 'Copies the log to paste somewhere else.', range: true, submit: 'Copy' }, (v) => runMenu('Copy', `/copy ${v.range}`))],
         ]],
         ['Work orders', [
           ['Link to a category', () => form('Link a work order', {

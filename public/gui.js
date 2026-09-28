@@ -116,7 +116,7 @@
     async function start() {
       const c = cat.value.trim().replace(/^\/+/, '').replace(/\s+/g, '-');
       if (!c) {
-        toast('pick or type a category first', 'err');
+        toast('Choose a category first', 'err');
         cat.focus();
         return;
       }
@@ -197,7 +197,25 @@
       const f = el('form', 'gform');
       if (intro) f.append(el('p', 'gform-intro', intro));
       const inputs = {};
+      const picked = {};
       for (const fd of fields) {
+        if (fd.choices) {
+          // A few buttons, one pressed.
+          const row = el('div', 'gform-ranges');
+          picked[fd.name] = fd.value || fd.choices[0][0];
+          for (const [key, text] of fd.choices) {
+            const b = button(text, 'gform-range', () => {
+              picked[fd.name] = key;
+              for (const x of row.children) x.setAttribute('aria-pressed', String(x === b));
+            });
+            b.setAttribute('aria-pressed', String(key === picked[fd.name]));
+            row.append(b);
+          }
+          const label = el('div', 'gform-field');
+          label.append(el('span', null, fd.label), row);
+          f.append(label);
+          continue;
+        }
         const label = el('label', 'gform-field');
         const input = el('input');
         input.type = fd.type || 'text';
@@ -229,7 +247,7 @@
       f.append(go);
       f.addEventListener('submit', (e) => {
         e.preventDefault();
-        const values = { range: chosenRange };
+        const values = { range: chosenRange, ...picked };
         for (const [k, input] of Object.entries(inputs)) values[k] = input.value.trim();
         closeSheet();
         onSubmit(values);
@@ -281,41 +299,45 @@
     function menuItems() {
       const signedIn = Boolean(store.user);
       const enc = store.encryption;
+      const show = (heading, cmd) => form(heading, { range: true, submit: 'Show' }, (v) => runMenu(heading, `${cmd} ${v.range}`));
       return [
         ['Entries', [
-          ['Undo the last change', () => runMenu('Undo', '/undo')],
-          ['Note on the current entry…', () => form('Note on the current entry', {
-            intro: 'Adds a line to the notes of the entry that is running (or the last one).',
-            fields: [{ name: 'text', label: 'Note', placeholder: 'called the client back' }], submit: 'Add note',
+          ['Undo', () => runMenu('Undo', '/undo')],
+          ['Add a note', () => form('Add a note', {
+            intro: 'Goes on the current entry, as a new line.',
+            fields: [{ name: 'text', label: 'Note', placeholder: 'called the client back' }], submit: 'Add',
           }, (v) => v.text && runMenu('Note', `/note ${v.text}`))],
-          ['Edit entries as text', () => opts.openCli('/edit')],
+          ['Edit entries', () => opts.openCli('/edit')],
         ]],
         ['Reports', [
-          ['Log…', () => form('Log', { range: true, submit: 'Show' }, (v) => runMenu('Log', `/log ${v.range}`))],
-          ['By category…', () => form('By category', { range: true, submit: 'Show' }, (v) => runMenu('By category', `/report ${v.range}`))],
-          ['Work orders…', () => form('Work orders', { range: true, submit: 'Show' }, (v) => runMenu('Work orders', `/wolist ${v.range}`))],
-          ['Export…', () => form('Export', { intro: 'Downloads the log as a text file, or a CSV for spreadsheets.', range: true, fields: [{ name: 'csv', label: 'Format (txt or csv)', value: 'txt' }], submit: 'Download' },
-            (v) => runMenu('Export', `/export ${v.range}${/csv/i.test(v.csv) ? ' csv' : ''}`))],
-          ['Copy log…', () => form('Copy log', { range: true, submit: 'Copy' }, (v) => runMenu('Copy', `/copy ${v.range}`))],
+          ['Log', () => show('Log', '/log')],
+          ['Categories', () => show('Categories', '/report')],
+          ['Work orders', () => show('Work orders', '/wolist')],
+          ['Export', () => form('Export', {
+            range: true,
+            fields: [{ name: 'format', label: 'Format', choices: [['txt', 'Text'], ['csv', 'CSV']] }],
+            submit: 'Download',
+          }, (v) => runMenu('Export', `/export ${v.range}${v.format === 'csv' ? ' csv' : ''}`))],
+          ['Copy', () => form('Copy', { intro: 'Copies the log to paste somewhere else.', range: true, submit: 'Copy' }, (v) => runMenu('Copy', `/copy ${v.range}`))],
         ]],
         ['Work orders', [
-          ['Link a work order to a category…', () => form('Link a work order', {
-            intro: 'Every entry of the category on that day gets the work order (you can do this before starting them).',
+          ['Link to a category', () => form('Link a work order', {
+            intro: "Every entry in the category that day gets it, including ones you haven't started yet.",
             fields: [
               { name: 'category', label: 'Category', placeholder: 'dev' },
               { name: 'wo', label: 'Work order', placeholder: '4471' },
-              { name: 'date', label: 'Day (YYYY-MM-DD, empty for today)', placeholder: T.ymd(Date.now()) },
+              { name: 'date', label: 'Day (leave empty for today)', placeholder: T.ymd(Date.now()) },
             ],
             submit: 'Link',
           }, (v) => v.category && v.wo && runMenu('Work order', `/wolink ${v.category} ${v.date ? `${v.date} ` : ''}${v.wo}`))],
         ]],
         ['Pay', [
-          ['Pay settings…', () => form('Pay', {
-            intro: 'Your hourly rate, and overtime per week (Monday to Sunday). Leave a field empty to turn it off.',
+          ['Rate and overtime', () => form('Pay', {
+            intro: 'Overtime counts per week, Monday to Sunday. Clear a field to turn it off.',
             fields: [
               { name: 'rate', label: 'Hourly rate ($)', value: money('rate'), type: 'number', step: '0.01' },
               { name: 'otmin', label: 'Overtime after (hours a week)', value: money('otmin'), type: 'number', step: '0.5' },
-              { name: 'otrate', label: 'Overtime factor', value: money('otrate'), type: 'number', step: '0.05', placeholder: '1.5' },
+              { name: 'otrate', label: 'Overtime pay (× rate)', value: money('otrate'), type: 'number', step: '0.05', placeholder: '1.5' },
             ],
             submit: 'Save',
           }, (v) => {
@@ -328,41 +350,41 @@
           })],
         ]],
         ['Account', signedIn ? [
-          ['Account and sync', () => runMenu('Account', '/whoami')],
+          ['Account', () => runMenu('Account', '/whoami')],
           ['Sync now', () => runMenu('Sync', '/sync')],
-          ['Sign out', () => form('Sign out', { intro: 'Your entries stay in your account; this browser forgets them and the key.', submit: 'Sign out' }, () => runMenu('Sign out', '/logout'))],
+          ['Sign out', () => form('Sign out', { intro: 'Your log stays in your account. This device forgets it, and its key.', submit: 'Sign out' }, () => runMenu('Sign out', '/logout'))],
         ] : [
-          ['Sign in…', () => signIn()],
+          ['Sign in', () => signIn()],
         ]],
         ...(signedIn ? [['Encryption', [
           ...(enc === 'ready' ? [
-            ['Link another device', () => runMenu('Link a device', '/link')],
-            ['New recovery key', () => form('New recovery key', { intro: 'Makes a new recovery key; the old one stops working.', submit: 'Make a new one' }, () => runMenu('Recovery key', '/recovery'))],
+            ['Link a device', () => runMenu('Link a device', '/link')],
+            ['New recovery key', () => form('New recovery key', { intro: 'Your old recovery key stops working.', submit: 'Make a new key' }, () => runMenu('Recovery key', '/recovery'))],
           ] : [
-            ['Enter a link code…', () => form('Link this device', { intro: 'On a device that is set up, open the menu and choose "Link another device", then type the code here.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))],
-            ['Use the recovery key…', () => form('Recovery key', { fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Unlock' }, (v) => v.key && runMenu('Recovery', `/recover ${v.key}`))],
-            ['Start over (reset encryption)…', () => form('Reset encryption', {
-              intro: "Only if no device has the key and the recovery key is lost: your synced log and settings are deleted (nobody can decrypt them), and you get a new key. Type DELETE to confirm.",
-              fields: [{ name: 'confirm', label: 'Type DELETE', placeholder: 'DELETE' }], submit: 'Delete and start over', danger: true,
-            }, (v) => (v.confirm === 'DELETE' ? runMenu('Reset encryption', '/reset-encryption DELETE') : toast('reset cancelled; nothing was changed', 'dim')))],
+            ['Enter a link code', () => form('Link this device', { intro: 'On a device that is set up, choose Menu → Link a device, and type the code it shows.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))],
+            ['Use recovery key', () => form('Recovery key', { fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Unlock' }, (v) => v.key && runMenu('Recovery', `/recover ${v.key}`))],
+            ['Reset encryption', () => form('Reset encryption', {
+              intro: 'Only if no device has the key and the recovery key is lost. Your synced log and settings are deleted (nobody can read them without the key) and you get a new key.',
+              fields: [{ name: 'confirm', label: 'Type DELETE to confirm', placeholder: 'DELETE' }], submit: 'Delete and start over', danger: true,
+            }, (v) => (v.confirm === 'DELETE' ? runMenu('Reset encryption', '/reset-encryption DELETE') : toast('Reset cancelled. Nothing changed.', 'dim')))],
           ]),
         ]]] : []),
-        ['Backups', [
+        ['Backup', [
           ['Restore from a file', () => opts.openCli('/restore file')],
         ]],
         ['View', [
           ['CLI', () => opts.setView('cli')],
-          ['Hybrid (timeline and console)', () => opts.setView('gui')],
+          ['Hybrid', () => opts.setView('gui')],
           ['Help', () => runMenu('Help', '/help')],
         ]],
       ];
     }
 
     function signIn() {
-      form('Sign in', { intro: 'We email you a 6-digit code.', fields: [{ name: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' }], submit: 'Email me a code' }, async (v) => {
+      form('Sign in', { intro: "We'll email you a 6-digit code.", fields: [{ name: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' }], submit: 'Send code' }, async (v) => {
         if (!v.email) return;
         await runMenu('Sign in', `/login ${v.email}`);
-        form('Sign in', { intro: `Type the code emailed to ${v.email}.`, fields: [{ name: 'code', label: 'Code', placeholder: '123456' }], submit: 'Sign in' },
+        form('Sign in', { intro: `Enter the code sent to ${v.email}.`, fields: [{ name: 'code', label: 'Code', placeholder: '123456' }], submit: 'Sign in' },
           (c) => c.code && runMenu('Sign in', `/code ${c.code}`));
       });
     }

@@ -792,7 +792,7 @@
   function clearScreen() {
     out.replaceChildren();
     pinned = null;
-    if (editor) out.append(editor.el); // keep an open editor
+    if (editor) out.append(editor.el, editor.bar); // keep an open editor
     else if (view !== chosenView) setView(chosenView, { save: false });
   }
 
@@ -852,10 +852,26 @@
         input.focus();
       }
     });
-    out.append(el);
-    editor = { el, items, mode };
+    // Save / Cancel buttons (the same as /save and /cancel).
+    const bar = document.createElement('div');
+    bar.className = 'editor-buttons';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'editor-save';
+    save.textContent = mode === 'restore' ? 'Add entries' : 'Save';
+    save.addEventListener('click', () => submit('/save'));
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => submit('/cancel'));
+    const hint = document.createElement('span');
+    hint.className = 'editor-hint';
+    hint.textContent = 'or Ctrl/Cmd+Enter';
+    bar.append(save, cancel, hint);
+    out.append(el, bar);
+    editor = { el, bar, items, mode };
     fitEditor(el);
-    input.placeholder = `${mode === 'restore' ? 'restoring' : 'editing'} · /save or /cancel`;
+    input.placeholder = `${mode === 'restore' ? 'restoring' : 'editing'} · Save or Cancel below`;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
     scrollToPrompt();
@@ -873,9 +889,10 @@
       pre.textContent = editor.el.value.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n').trimEnd();
       editor.el.replaceWith(pre);
     }
+    editor.bar.remove();
     editor = null;
     input.placeholder = '';
-    input.focus();
+    backToPrompt();
   }
 
   // ---- input: completion ---------------------------------------------------

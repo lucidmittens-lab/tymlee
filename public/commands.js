@@ -416,9 +416,7 @@
           store.apply(ops);
           const updated = ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length;
           if (!wo) return print(link || updated ? `work order unlinked from ${category} on ${day}` : `no work order was linked to ${category} on ${day}`, 'ok');
-          const today = day === T.ymd(Date.now());
-          print(`${T.woTag(wo)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated` +
-            (today ? `; new ${category} entries today get it too` : ''), 'ok');
+          print(`${T.woTag(wo)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated`, 'ok');
         },
       },
       wopunch: {

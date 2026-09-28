@@ -792,7 +792,7 @@
   function clearScreen() {
     out.replaceChildren();
     pinned = null;
-    if (editor) out.append(editor.el, editor.bar); // keep an open editor
+    if (editor) out.append(editor.el, ...(editor.bar ? [editor.bar] : [])); // keep an open editor
     else if (view !== chosenView) setView(chosenView, { save: false });
   }
 
@@ -852,7 +852,9 @@
         input.focus();
       }
     });
-    // Save / Cancel buttons (the same as /save and /cancel).
+    // Save / Cancel buttons (the same as /save and /cancel), when the text box
+    // was opened from the GUI view; the CLI and Hybrid views type them.
+    const buttons = chosenView === 'pure';
     const bar = document.createElement('div');
     bar.className = 'editor-buttons';
     const save = document.createElement('button');
@@ -868,10 +870,11 @@
     hint.className = 'editor-hint';
     hint.textContent = 'or Ctrl/Cmd+Enter';
     bar.append(save, cancel, hint);
-    out.append(el, bar);
-    editor = { el, bar, items, mode };
+    out.append(el);
+    if (buttons) out.append(bar);
+    editor = { el, bar: buttons ? bar : null, items, mode };
     fitEditor(el);
-    input.placeholder = `${mode === 'restore' ? 'restoring' : 'editing'} · Save or Cancel below`;
+    input.placeholder = `${mode === 'restore' ? 'restoring' : 'editing'} · ${buttons ? 'Save or Cancel below' : '/save or /cancel'}`;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
     scrollToPrompt();
@@ -889,7 +892,7 @@
       pre.textContent = editor.el.value.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n').trimEnd();
       editor.el.replaceWith(pre);
     }
-    editor.bar.remove();
+    if (editor.bar) editor.bar.remove();
     editor = null;
     input.placeholder = '';
     backToPrompt();

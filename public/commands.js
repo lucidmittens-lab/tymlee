@@ -101,8 +101,15 @@
       const needs = k.field === 'wo'
         ? 'work orders need the latest supabase/schema.sql on the server; run it, then /sync'
         : 'equipment needs end-to-end encryption on this account (/encrypt), then /sync';
-      const invalid = (v) => `"${v}" is not a valid ${k.noun}${k.field === 'eq' ? ' name' : ''} (no spaces or brackets, up to ${T.MAX_WO} characters)`;
-      const clean = (typed) => typed.trim().replace(k.field === 'wo' ? /^\[(.*)\]$/ : /^\{(.*)\}$/, '$1');
+      const invalid = (typed) => (k.field === 'wo'
+        ? `"${typed.trim()}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`
+        : `"${typed.trim()}" is not valid equipment (${T.EQ_RULES})`);
+      // The typed value, cleaned up; null if it isn't valid.
+      const clean = (typed) => {
+        if (k.field === 'eq') return T.normalizeEq(typed);
+        const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
+        return !wo || T.validWo(wo) ? wo : null;
+      };
       return {
         [`${k.cmd}link`]: {
           usage: `/${k.cmd}link <category> [YYYY-MM-DD] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
@@ -126,7 +133,7 @@
             const typed = rest.length ? rest.join(' ') : await io.ask(`${k.noun} for ${category} on ${day}`, (link && link[k.field]) || '', k.field);
             if (typed == null) return print(`${k.noun} cancelled`, 'dim');
             const v = clean(typed);
-            if (v && !T.validWo(v)) return print(invalid(v), 'err');
+            if (v == null) return print(invalid(typed), 'err');
             const set = { [k.field]: v, [k.flag]: Boolean(v) };
             const ops = [];
             if (v) {
@@ -163,8 +170,8 @@
             const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`${k.noun} for ${entryLabel(chosen)}`, current[k.field] || '', k.field);
             if (typed == null) return print(`${k.noun} cancelled`, 'dim');
             const v = clean(typed);
+            if (v == null) return print(invalid(typed), 'err');
             if (v === (current[k.field] || '') && !current[k.flag]) return print(`${k.noun} unchanged`, 'dim');
-            if (v && !T.validWo(v)) return print(invalid(v), 'err');
             store.apply([{ op: 'put', entry: T.makeEntry(current, { [k.field]: v, [k.flag]: false }) }]);
             print(v ? `${k.tag(v)} set on #${chosen.n} ${describe(chosen)}` : `${k.noun} removed from #${chosen.n} ${describe(chosen)}`, 'ok');
           },
@@ -948,7 +955,8 @@
               '',
               'repeat part of a form per group; tokens inside cover just that group:',
               '  %{each category} ... %{end}    also %{each wo} and %{each entry}',
-              'outside any %{each}, tokens cover the whole day',
+              'outside any %{each}, tokens cover the whole day; inside %{each entry}, %{in} and %{out} are that entry\'s',
+              'a token alone on its line that comes out empty (no notes, say) leaves no blank line',
             ].join('\n'), 'report');
           }
           await fillForm(args[0], args.slice(1));

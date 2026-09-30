@@ -678,10 +678,35 @@ test('equipment is kept through makeEntry, the entry card and /edit', () => {
   const set = T.editEntry(e, { time: '09:00', text: 'dev a', eq: '{rig-2}', notes: '' }, NOW);
   assert.equal(set.entry.eq, 'rig-2');
   assert.equal(set.entry.ql, undefined);
-  assert.match(T.editEntry(e, { time: '09:00', text: 'dev a', eq: 'two words' }, NOW).error, /not a valid equipment name/);
+  assert.match(T.editEntry(e, { time: '09:00', text: 'dev a', eq: 'rig{1}' }, NOW).error, /not valid equipment/);
+  assert.equal(T.editEntry(e, { time: '09:00', text: 'dev a', eq: 'rig-1 ,rig 2, RIG-1' }, NOW).entry.eq, 'rig-1, rig 2');
   // /edit: the text doesn't show equipment, and saving keeps it.
   const { text, items } = T.formatEditable([e], T.parseRange('2026-09-24', NOW), NOW);
   const r = T.parseEditable(text.replace('dev a', 'dev renamed'), items, NOW);
   assert.equal(r.ops[0].entry.eq, 'rig-1');
   assert.equal(r.ops[0].entry.text, 'dev renamed');
+});
+
+test('equipment lists: several names, each its own %{each equipment} section', () => {
+  assert.equal(T.normalizeEq('ler-resolve-01, ler-resolve-07'), 'ler-resolve-01, ler-resolve-07');
+  assert.equal(T.normalizeEq('{a,b}'), 'a, b');
+  assert.equal(T.normalizeEq(' a ,, A , b  c '), 'a, b c');
+  assert.equal(T.normalizeEq('a[1]'), null);
+  assert.equal(T.normalizeEq('x'.repeat(41)), null);
+  const log = FORM_LOG.map((e) => (e.id === 'a' ? { ...e, eq: 'r-01, r-07' } : e.id === 'c' ? { ...e, eq: 'r-07' } : e));
+  const day = T.parseRange('2026-09-24', NOW);
+  const fill = (t) => T.fillForm(t, log, day, NOW).text;
+  assert.equal(fill('%{equipment}\n'), 'r-01, r-07\n');
+  const div = `\n\n${'-'.repeat(40)}\n\n`;
+  assert.equal(fill('%{each equipment}\n%{equipment}: %{hours} %{titles}\n%{end}'),
+    `r-01: 1:30 refactor${div}r-07: 3:30 refactor, review${div}(none): 1:30 standup, deploy\n`);
+});
+
+test('forms: a token alone on its line leaves no blank line when empty', () => {
+  const day = T.parseRange('2026-09-24', NOW);
+  const t = '%{each entry}\n%{title} %{in}-%{out}\n  %{notes}\n%{wo}\n%{end}\nWO: %{wo}\n';
+  assert.equal(T.fillForm(t, FORM_LOG.slice(0, 2), day, NOW).text,
+    'refactor 08:00-09:30\n  root cause\n4471\nstandup 09:30-now\nWO: 4471\n');
+  const multi = [{ ...FORM_LOG[0], notes: 'one\ntwo' }, FORM_LOG[1]];
+  assert.equal(T.fillForm('> %{notes}\n  %{notes}\n', multi, day, NOW).text, '> one\ntwo\n  one\n  two\n');
 });

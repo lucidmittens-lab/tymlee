@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.3.0';
+  const VERSION = '1.3.1';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -26,10 +26,27 @@
   const validWo = (wo) => typeof wo === 'string' && /^[^\s\[\]]{1,40}$/.test(wo);
   const woTag = (wo) => (wo ? `[${wo}]` : '');
 
-  // Equipment: the same kind of short code ("ler-resolve-07"), set per
-  // entry with /eqpunch or per category and day with /eqlink. Shown as
-  // "{ler-resolve-07}".
+  // Equipment: one or more names separated by commas ("ler-resolve-01,
+  // ler-resolve-07"), set per entry with /eqpunch or per category and day
+  // with /eqlink. Shown as "{ler-resolve-01, ler-resolve-07}".
   const eqTag = (eq) => (eq ? `{${eq}}` : '');
+  const MAX_EQ = 200;
+  const eqNames = (eq) => (eq ? String(eq).split(',').map((n) => n.trim()).filter(Boolean) : []);
+
+  // Typed equipment -> "a, b" (repeats dropped), or null if a name is too
+  // long or has brackets, or the list is too long.
+  function normalizeEq(text) {
+    const names = [];
+    for (const raw of String(text || '').trim().replace(/^\{(.*)\}$/, '$1').split(',')) {
+      const name = raw.trim().replace(/\s+/g, ' ');
+      if (!name) continue;
+      if (name.length > MAX_WO || /[[\]{}]/.test(name)) return null;
+      if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) names.push(name);
+    }
+    const eq = names.join(', ');
+    return eq.length > MAX_EQ ? null : eq;
+  }
+  const EQ_RULES = `names up to ${MAX_WO} characters, separated by commas, no brackets`;
 
   // An entry with its optional fields set only when they have a value.
   function makeEntry(base, extra) {
@@ -419,8 +436,8 @@
     // unless it is the one it already had.
     const wl = Boolean(entry.wl && wo === (entry.wo || ''));
     // Equipment likewise, when the card has the field.
-    const eq = fields.eq == null ? entry.eq || '' : String(fields.eq).trim().replace(/^\{(.*)\}$/, '$1');
-    if (eq && !validWo(eq)) return { error: `"${eq}" is not a valid equipment name (no spaces or brackets, up to ${MAX_WO} characters)` };
+    const eq = fields.eq == null ? entry.eq || '' : normalizeEq(fields.eq);
+    if (eq == null) return { error: `"${String(fields.eq).trim()}" is not valid equipment (${EQ_RULES})` };
     const ql = Boolean(entry.ql && eq === (entry.eq || ''));
     const next = makeEntry({ id: entry.id, ts, text }, { notes, wo, wl, eq, ql });
     const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
@@ -608,19 +625,21 @@
   const FORM_DIVIDER = '-'.repeat(40);
 
   // Template text -> { nodes, errors }. A %{each} or %{end} alone on its line
-  // takes the whole line, so it leaves no blank line behind.
+  // takes the whole line, so it leaves no blank line behind; so does a token
+  // alone on its line that comes out empty (%{notes} with no notes).
   function parseForm(text) {
     const root = [];
     const stack = [{ body: root }];
     const errors = [];
     const top = () => stack[stack.length - 1].body;
-    const re = /^[ \t]*%\{\s*(each\s+\S+|end)\s*\}[ \t]*\r?\n?|%\{([^}]*)\}/gim;
+    const re = /^([ \t]*)%\{([^}]*)\}[ \t]*(\r?\n|$)|%\{([^}]*)\}/gm;
     let last = 0;
     let m;
     while ((m = re.exec(text))) {
       if (m.index > last) top().push({ text: text.slice(last, m.index) });
       last = re.lastIndex;
-      const tok = (m[1] || m[2]).trim();
+      const alone = m[2] != null;
+      const tok = (alone ? m[2] : m[4]).trim();
       const each = tok.match(/^each\s+(\S+)$/i);
       if (each) {
         const key = { title: 'entry', titles: 'entry', entries: 'entry' }[each[1].toLowerCase()] || each[1].toLowerCase();
@@ -641,7 +660,7 @@
         } else if (!FORM_TOKENS.some(([t]) => t === name)) {
           errors.push(`unknown token %{${tok}} (/form tokens lists them)`);
         }
-        top().push({ token: name, arg });
+        top().push(alone ? { token: name, arg, line: { indent: m[1], nl: m[3] } } : { token: name, arg });
       }
     }
     if (last < text.length) top().push({ text: text.slice(last) });
@@ -655,10 +674,13 @@
     if (key === 'entry') return spans.map((s) => ({ spans: [s], where: `#${s.n}` }));
     const groups = new Map();
     for (const s of spans) {
-      const value = key === 'wo' ? s.wo || '' : key === 'equipment' ? s.eq || '' : s.category;
-      const k = value.toLowerCase();
-      if (!groups.has(k)) groups.set(k, { value, spans: [] });
-      groups.get(k).spans.push(s);
+      // An entry with several pieces of equipment goes under each of them.
+      const values = key === 'wo' ? [s.wo || ''] : key === 'equipment' ? (s.eq ? eqNames(s.eq) : ['']) : [s.category];
+      for (const value of values) {
+        const k = value.toLowerCase();
+        if (!groups.has(k)) groups.set(k, { value, spans: [] });
+        groups.get(k).spans.push(s);
+      }
     }
     const list = Array.from(groups.values());
     const coded = key === 'wo' || key === 'equipment';
@@ -667,11 +689,13 @@
     return list.map((g) => ({
       spans: g.spans,
       none: coded && !g.value ? key : '',
+      eq: key === 'equipment' ? g.value : null,
       where: coded ? (g.value ? tag(g.value) : `no ${key === 'wo' ? 'work order' : 'equipment'}`) : g.value,
     }));
   }
 
-  function formValues(spans, range, now, none) {
+  // `eq`: inside %{each equipment}, the one piece the section is for.
+  function formValues(spans, range, now, none, eq) {
     const uniq = (xs) => {
       const out = [];
       for (const x of xs) if (x && !out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
@@ -689,7 +713,7 @@
       day: oneDay ? FULL_DAY_NAMES[new Date(range.from).getDay()].replace(/^./, (c) => c.toUpperCase()) : '',
       category: uniq(spans.map((s) => s.category)).join(', '),
       wo: none === 'wo' ? '(none)' : uniq(spans.map((s) => s.wo)).join(', '),
-      equipment: none === 'equipment' ? '(none)' : uniq(spans.map((s) => s.eq)).join(', '),
+      equipment: none === 'equipment' ? '(none)' : eq || uniq(spans.flatMap((s) => eqNames(s.eq))).join(', '),
       in: first ? clock(first.ts) : '',
       out: last ? (last.running ? 'now' : clock(last.end)) : '',
       in12: first ? clockAs('12', first.ts) : '',
@@ -716,17 +740,25 @@
     // Copies made by a top-level %{each} get a divider between them; nested
     // ones (entries inside a category, say) and entries, which are lines
     // rather than sections, just follow each other.
-    const render = (list, scope, where, none) => {
+    const render = (list, scope, where, none, eq) => {
       let vals = null;
       return list.map((n) => {
         if (n.text != null) return n.text;
         if (n.each) {
-          const copies = formGroups(scope, n.each).map((g) => render(n.body, g.spans, g.where, g.none));
+          const copies = formGroups(scope, n.each).map((g) => render(n.body, g.spans, g.where, g.none, g.eq || eq));
           return list === nodes && n.each !== 'entry' ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
         }
-        if (n.token === 'ask') return answer ? answer(n.arg, where) || '' : '';
-        vals = vals || formValues(scope, range, now, none);
-        return vals[n.token];
+        let value;
+        if (n.token === 'ask') {
+          value = answer ? answer(n.arg, where) || '' : '';
+        } else {
+          vals = vals || formValues(scope, range, now, none, eq);
+          value = vals[n.token];
+        }
+        // Alone on its line: the line goes when there's nothing to show.
+        // Its indent goes on every line of it (notes).
+        if (n.line) return value ? `${value.split('\n').map((l) => n.line.indent + l).join('\n')}${n.line.nl}` : '';
+        return value;
       }).join('');
     };
     return { text: render(nodes, spans, '', ''), count: spans.length };
@@ -1226,7 +1258,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

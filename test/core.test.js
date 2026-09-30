@@ -432,21 +432,21 @@ test('/report groups entries by category, largest first', () => {
     'report: today (2026-09-24)',
     '',
     'dev                     0:57   79%  2 entries',
-    '  1  09:00    0:45  fixing login bug',
+    '  1  09:00-09:45    0:45  fixing login bug',
     '     > root cause: expired token',
     '     > fix in auth.js',
-    '  3  10:00    0:12  code review',
+    '  3  10:00-now      0:12  code review',
     '     > PR #42',
     '',
     'mtg                     0:15   21%  1 entry',
-    '  2  09:45    0:15  standup',
+    '  2  09:45-10:00    0:15  standup',
     '',
     '-'.repeat(48),
     'total                   1:12        3 entries',
   ].join('\n'));
   const week = T.formatCategoryReport(LOG, T.parseRange('week', NOW), NOW);
   assert.match(week, /report: week \(2026-09-23 \.\. 2026-09-24\)/);
-  assert.match(week, / {2}1 {2}Wed 09-23 16:00 {4}1:30 {2}wrap up/);
+  assert.match(week, / {2}1 {2}Wed 09-23 16:00-17:30 {4}1:30 {2}wrap up/);
   assert.ok(!/\(off\)/.test(week), 'off time is left out');
   assert.equal(T.formatCategoryReport(NOTED, T.parseRange('2026-01-01', NOW), NOW), 'no entries (2026-01-01)');
 });
@@ -469,7 +469,7 @@ test('work orders show in a column before the time', () => {
   ].join('\n'));
   // No work orders in view: no column.
   assert.ok(!/ wo /.test(T.formatReport(LOG, T.parseRange('today', NOW), NOW)));
-  assert.match(T.formatCategoryReport(WO_LOG, T.parseRange('today', NOW), NOW), / {2}1 {2}\[4471\] {3}09:00 {4}0:45 {2}fixing login bug\n/);
+  assert.match(T.formatCategoryReport(WO_LOG, T.parseRange('today', NOW), NOW), / {2}1 {2}\[4471\] {3}09:00-09:45 {4}0:45 {2}fixing login bug\n/);
 });
 
 test('/wolist totals time per work order', () => {

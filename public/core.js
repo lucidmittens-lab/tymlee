@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.1.0';
+  const VERSION = '1.1.1';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -287,7 +287,9 @@
       const mine = spans.filter((s) => s.category.toLowerCase() === t.category.toLowerCase());
       out.push(`${t.category.padEnd(20)}  ${formatHM(t.ms).padStart(6)}  ${String(pct).padStart(3)}%  ${plural(mine.length, 'entry', 'entries')}`);
       for (const s of mine) {
-        const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${hhmm(s.ts)}` : hhmm(s.ts);
+        // In and out: the next entry's start isn't always this one's end.
+        const inOut = `${hhmm(s.ts)}-${s.running ? 'now  ' : hhmm(s.end)}`;
+        const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${inOut}` : inOut;
         const wo = woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '';
         out.push(`  ${String(s.n).padStart(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));

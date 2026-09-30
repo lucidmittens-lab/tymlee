@@ -609,3 +609,50 @@ test('/clock 12 shows times as 2:30pm; typing stays HH:MM', () => {
   assert.equal(T.clock(at('2026-09-24T14:30:00Z')), '14:30');
   assert.equal(T.hourLabel(9), '09:00');
 });
+
+// ---- forms ----------------------------------------------------------------------
+
+const FORM_LOG = [
+  { id: 'a', ts: at('2026-09-24T08:00:00Z'), text: 'dev refactor', wo: '4471', notes: 'root cause' },
+  { id: 'b', ts: at('2026-09-24T09:30:00Z'), text: 'mtg standup' },
+  { id: 'c', ts: at('2026-09-24T10:00:00Z'), text: 'dev review', wo: '4471', notes: 'PR #42' },
+  { id: 'd', ts: at('2026-09-24T12:00:00Z'), text: 'dev deploy', wo: '4480' },
+  { id: 'e', ts: at('2026-09-24T13:00:00Z'), text: '/off' },
+];
+
+test('forms: tokens cover the entries in scope; %{each} repeats per group', () => {
+  const day = T.parseRange('2026-09-24', NOW);
+  const fill = (t, answer) => T.fillForm(t, FORM_LOG, day, NOW, answer).text;
+  assert.equal(fill('%{date} %{day}: %{hours} %{in}-%{out} down %{down} · %{category} · %{wo} · %{entries}\n'),
+    '2026-09-24 Thursday: 5:00 08:00-13:00 down 0:00 · dev, mtg · 4471, 4480 · 4\n');
+  assert.equal(fill('%{each category}\n%{category} %{hours} %{in}-%{out} down %{down} [%{titles}]\n%{notes}\n%{end}\n'), [
+    'dev 4:30 08:00-13:00 down 0:30 [refactor, review, deploy]',
+    'root cause\nPR #42',
+    '',
+    '-'.repeat(40),
+    '',
+    'mtg 0:30 09:30-10:00 down 0:00 [standup]',
+    '',
+  ].join('\n'));
+  // Work orders: time without one gets its own "(none)" section, last.
+  const byWo = fill('%{each wo}\n%{wo}: %{hours} %{ask:System}\n%{end}', (label, where) => `${label}@${where}`);
+  assert.equal(byWo, `4471: 3:30 System@[4471]\n\n${'-'.repeat(40)}\n\n4480: 1:00 System@[4480]\n\n${'-'.repeat(40)}\n\n(none): 0:30 System@no work order\n`);
+  // Nested: no dividers inside.
+  assert.equal(fill('%{each category}\n%{category}\n%{each entry}\n- %{in} %{titles}\n%{end}\n%{end}\n'),
+    `dev\n- 08:00 refactor\n- 10:00 review\n- 12:00 deploy\n\n${'-'.repeat(40)}\n\nmtg\n- 09:30 standup\n`);
+  assert.deepEqual(T.formQuestions('%{ask:System} %{each wo}%{ask:System}%{end}', FORM_LOG, day, NOW).map((q) => q.where), ['', '[4471]', '[4480]', 'no work order']);
+  assert.deepEqual(T.fillForm('%{each day}\n%{hourz}\n%{ask:}', FORM_LOG, day, NOW).errors, [
+    '%{each day}: use %{each category}, %{each wo} or %{each entry}',
+    'unknown token %{hourz} (/form tokens lists them)',
+    '%{ask:...} needs a label, e.g. %{ask:System}',
+    '%{each day} without an %{end}',
+  ]);
+});
+
+test('day names are ranges: the latest one, today included', () => {
+  // NOW is Thursday 2026-09-24.
+  assert.equal(T.parseRange('thu', NOW).label, '2026-09-24');
+  assert.equal(T.parseRange('tuesday', NOW).label, '2026-09-22');
+  assert.equal(T.parseRange('fri', NOW).label, '2026-09-18');
+  assert.equal(T.parseRange('th', NOW), null);
+});

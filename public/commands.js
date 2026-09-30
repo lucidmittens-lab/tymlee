@@ -109,6 +109,127 @@
       if (!store.settings.pay) store.setSettings({ ...store.settings, pay: old });
     }
 
+    // ---- forms -----------------------------------------------------------------
+
+    // Templates (/newform) live with the account's settings, as do the last
+    // answers to their %{ask:...} questions.
+    const FORM_HELP = [
+      '# your form: text, with tokens filled in from the log',
+      '# %{hours} %{in} %{out} %{notes} ... (/form lists them all)',
+      '# %{each category} ... %{end} repeats a part per category (or wo, entry)',
+      '# %{ask:System} asks you when the form is filled in',
+      '# lines starting with # up here are left out',
+    ];
+    const FORM_STARTER = 'Date: %{date}\n\n%{each category}\nProject: %{category}\nWork order: %{wo}\nHours: %{hours}\nWorked: %{in}-%{out}\nNotes:\n%{notes}\n%{end}\n';
+    const validFormName = (name) => /^[\w-]{1,40}$/.test(name || '');
+
+    function forms() {
+      return store.settings.forms || {};
+    }
+
+    // The stored name for `name`, matched without regard to case.
+    function formName(name) {
+      const low = String(name || '').toLowerCase();
+      return Object.keys(forms()).find((k) => k.toLowerCase() === low) || null;
+    }
+
+    function formList() {
+      const names = Object.keys(forms()).sort();
+      return names.length ? names.join(', ') : 'none yet';
+    }
+
+    // The editor's text -> the template: the # lines at the top are help.
+    function templateFrom(text) {
+      const lines = text.split('\n');
+      while (lines.length && lines[0].startsWith('#')) lines.shift();
+      while (lines.length && !lines[0].trim()) lines.shift();
+      return lines.join('\n').replace(/\s+$/, '') + '\n';
+    }
+
+    function applyForm(text, items) {
+      const name = items && items.form;
+      const template = templateFrom(text);
+      if (!template.trim()) {
+        print(inline ? 'the form is empty; type it in, or /cancel' : 'the form is empty', 'err');
+        return false;
+      }
+      const { errors } = T.parseForm(template);
+      if (errors.length) {
+        print(errors.concat(inline ? 'nothing was saved; fix the form and /save again' : 'nothing was saved').join('\n'), 'err');
+        return false;
+      }
+      const existing = formName(name);
+      const next = { ...forms() };
+      if (existing) delete next[existing];
+      next[name] = template;
+      store.setSettings({ ...store.settings, forms: next });
+      print(`form ${name} saved · /form ${name} fills it in for today, /form ${name} tue for Tuesday`, 'ok');
+      return true;
+    }
+
+    async function openForm(name, template) {
+      print(inline
+        ? `editing form ${name} · /save to keep it, /cancel to discard`
+        : `editing form ${name} in your editor…`, 'dim');
+      await openText({ text: `${FORM_HELP.join('\n')}\n\n${template}`, items: { form: name }, mode: 'form', label: `Form ${name}` });
+    }
+
+    // The questions a form will ask for a day, with the last answers:
+    // [{ label, where, last }], or null (explained) if it can't be filled in.
+    // For the GUI, which asks them in a sheet and passes them to presetAnswers.
+    function formQuestions(name, day) {
+      const found = formName(name);
+      if (!found) {
+        print(`no form called "${name}"`, 'err');
+        return null;
+      }
+      const range = rangeFrom(day ? [day] : []);
+      if (!range) return null;
+      const remembered = store.settings.formAnswers || {};
+      return T.formQuestions(forms()[found], store.entries, range, Date.now())
+        .map((q) => ({ ...q, last: remembered[`${q.label}\n${q.where}`] || remembered[`${q.label}\n`] || '' }));
+    }
+
+    // Answers for the next /form, in question order, instead of asking.
+    let preset = null;
+    function presetAnswers(list) {
+      preset = list.slice();
+    }
+
+    // /form name [day]: ask its questions (offering the last answers), then
+    // show it filled in.
+    async function fillForm(name, rangeArgs) {
+      const given = preset;
+      preset = null;
+      const found = formName(name);
+      if (!found) return print(`no form called "${name}" · your forms: ${formList()} · /newform ${name} makes it`, 'err');
+      const range = rangeFrom(rangeArgs);
+      if (!range) return;
+      const now = Date.now();
+      const template = forms()[found];
+      if (!T.withSpans(store.entries, now).some((s) => !s.off && s.ts >= range.from && s.ts < range.to)) {
+        return print(`no entries (${range.label}); nothing to fill ${found} in from`, 'dim');
+      }
+      const questions = T.formQuestions(template, store.entries, range, now);
+      const remembered = { ...(store.settings.formAnswers || {}) };
+      const answers = new Map();
+      for (const q of questions) {
+        const key = `${q.label}\n${q.where}`;
+        const typed = given
+          ? given.shift() || ''
+          : await io.ask(q.where ? `${q.label} for ${q.where}` : q.label, remembered[key] || remembered[`${q.label}\n`] || '', 'form');
+        if (typed == null) return print('form cancelled', 'dim');
+        answers.set(key, typed.trim());
+      }
+      if (answers.size) {
+        for (const [k, v] of answers) remembered[k] = v;
+        store.setSettings({ ...store.settings, formAnswers: remembered });
+      }
+      const result = T.fillForm(template, store.entries, range, now, (label, where) => answers.get(`${label}\n${where}`));
+      if (result.errors) return print(result.errors.join('\n'), 'err');
+      print(result.text.replace(/\s+$/, ''), 'report');
+    }
+
     // ---- the clock ---------------------------------------------------------------
 
     // 12- or 24-hour times, kept with the account's settings like pay.
@@ -279,7 +400,7 @@
     // Open text for editing: in the inline box (finished with /save), or in an
     // external editor, reopening it to fix mistakes.
     async function openText({ text, items, mode, label }) {
-      const apply = (t) => (mode === 'restore' ? applyRestore(t) : applyEdit(t, items));
+      const apply = (t) => (mode === 'restore' ? applyRestore(t) : mode === 'form' ? applyForm(t, items) : applyEdit(t, items));
       if (inline) {
         io.editor.open({ text, items, mode, label });
         return;
@@ -727,20 +848,21 @@
       ...(inline ? {
         save: {
           usage: '/save',
-          about: 'apply /edit changes or add /restore entries (Ctrl+Enter)',
+          about: 'save /edit changes, /restore entries or a form (Ctrl+Enter)',
           run() {
-            if (!io.editor.isOpen()) return print('nothing to save; start with /edit or /restore', 'err');
+            if (!io.editor.isOpen()) return print('nothing to save; start with /edit, /restore or /newform', 'err');
             const text = io.editor.value();
-            const ok = io.editor.mode() === 'restore' ? applyRestore(text) : applyEdit(text, io.editor.items());
+            const mode = io.editor.mode();
+            const ok = mode === 'restore' ? applyRestore(text) : mode === 'form' ? applyForm(text, io.editor.items()) : applyEdit(text, io.editor.items());
             if (ok) io.editor.close();
           },
         },
         cancel: {
           usage: '/cancel',
-          about: 'close /edit or /restore without changing anything',
+          about: 'close /edit, /restore or a form without changing anything',
           run() {
             if (!io.editor.isOpen()) return print('nothing to cancel', 'err');
-            const what = io.editor.mode() === 'restore' ? 'restore' : 'edit';
+            const what = { restore: 'restore', form: 'form' }[io.editor.mode()] || 'edit';
             io.editor.close();
             print(`${what} cancelled; nothing was changed`, 'ok');
           },
@@ -779,6 +901,60 @@
             show: (n) => `overtime paid at ${n}× your rate`,
             check: (n) => (n >= 1 && n <= 10 ? '' : 'that should be between 1 and 10'),
           });
+        },
+      },
+      form: {
+        usage: '/form [name] [day]',
+        about: 'fill in one of your forms from the log, e.g. /form service tue; /form alone lists forms and tokens',
+        async run(args) {
+          if (!args.length) {
+            const width = Math.max(...T.FORM_TOKENS.map(([t]) => t.length)) + 4;
+            return print([
+              `forms: ${formList()}`,
+              '/form <name> [day]   fill one in (today, yesterday, tue, 2026-09-29, week)',
+              '/newform <name>  /editform <name>  /delform <name>',
+              '',
+              'tokens (worked out from the entries they cover):',
+              ...T.FORM_TOKENS.map(([t, what]) => `  ${`%{${t}}`.padEnd(width)}${what}`),
+              `  ${'%{ask:Label}'.padEnd(width)}asked for when you fill it in (your last answer is offered)`,
+              '',
+              'repeat part of a form per group; tokens inside cover just that group:',
+              '  %{each category} ... %{end}    also %{each wo} and %{each entry}',
+              'outside any %{each}, tokens cover the whole day',
+            ].join('\n'), 'report');
+          }
+          await fillForm(args[0], args.slice(1));
+        },
+      },
+      newform: {
+        usage: '/newform <name>',
+        about: 'write a new form template (paste yours, add %{tokens})',
+        async run(args) {
+          const name = args[0];
+          if (!validFormName(name)) return print('usage: /newform <name>   (letters, numbers, - and _)', 'err');
+          if (formName(name)) return print(`there is already a form called ${formName(name)}; /editform ${formName(name)} changes it`, 'err');
+          await openForm(name, FORM_STARTER);
+        },
+      },
+      editform: {
+        usage: '/editform <name>',
+        about: 'change one of your forms',
+        async run(args) {
+          const found = formName(args[0]);
+          if (!found) return print(args[0] ? `no form called "${args[0]}" · your forms: ${formList()}` : `usage: /editform <name> · your forms: ${formList()}`, 'err');
+          await openForm(found, forms()[found]);
+        },
+      },
+      delform: {
+        usage: '/delform <name>',
+        about: 'delete one of your forms',
+        run(args) {
+          const found = formName(args[0]);
+          if (!found) return print(args[0] ? `no form called "${args[0]}" · your forms: ${formList()}` : `usage: /delform <name> · your forms: ${formList()}`, 'err');
+          const next = { ...forms() };
+          delete next[found];
+          store.setSettings({ ...store.settings, forms: next });
+          print(`form ${found} deleted`, 'ok');
         },
       },
       clock: {
@@ -835,6 +1011,9 @@
     // Words that complete what has been typed: commands after "/", categories
     // otherwise.
     function completions(text, opts) {
+      // Form names after /form, /editform and /delform.
+      const m = text.match(/^(\/(?:form|editform|delform)\s+)(\S*)$/i);
+      if (m) return T.suggest(m[2], Object.keys(forms()).sort(), opts).map((n) => m[1] + n);
       return T.suggest(text, text.startsWith('/') ? commandWords : T.knownCategories(store.entries), opts);
     }
 
@@ -895,6 +1074,9 @@
       status,
       applyClock,
       setClock,
+      formNames: () => Object.keys(forms()).sort(),
+      formQuestions,
+      presetAnswers,
       commandWords,
       recentTexts: (n) => shown().slice(-n).map((e) => e.text),
     };

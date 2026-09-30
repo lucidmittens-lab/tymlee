@@ -9,6 +9,7 @@
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const FULL_DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
   // /off is stored as an entry with this text. Typed entries can never start
   // with "/" (that is a command), so it cannot clash with a real entry. Time
@@ -229,6 +230,13 @@
     }
     const d = date(a);
     if (d != null) return { from: d, to: addDays(d, 1), label: a };
+    // A day name: the latest one, today included ("tue", "tuesday").
+    const wd = a.length >= 3 ? FULL_DAY_NAMES.findIndex((n) => n.startsWith(a)) : -1;
+    if (wd >= 0) {
+      let day = today;
+      while (new Date(day).getDay() !== wd) day = addDays(day, -1);
+      return { from: day, to: addDays(day, 1), label: ymd(day) };
+    }
     return null;
   }
 
@@ -546,6 +554,156 @@
     const t = String(text || '').trim().replace(/^\$/, '').replace(/,/g, '');
     if (!/^\d+(\.\d+)?$/.test(t)) return null;
     return Number(t);
+  }
+
+  // ---- forms -----------------------------------------------------------------
+  // A form is your own text with tokens filled in from the log:
+  //   %{hours}, %{in}, %{notes}, ...    worked out from the entries in scope
+  //   %{each category} ... %{end}       repeated per category (or wo, entry)
+  //   %{ask:System}                     asked for when the form is filled in
+  // Outside any %{each} the scope is every entry in the range asked for;
+  // inside, it is that one group's entries.
+
+  const FORM_GROUPS = ['category', 'wo', 'entry'];
+  const FORM_TOKENS = [
+    ['date', 'the day asked for, e.g. 2026-09-29'],
+    ['day', 'its weekday, e.g. Tuesday'],
+    ['category', 'the categories, e.g. "dev, mtg"'],
+    ['wo', 'the work orders'],
+    ['in', 'the first start'],
+    ['out', 'the last end ("now" if running)'],
+    ['hours', 'the time logged'],
+    ['down', 'time between in and out that was not logged here'],
+    ['titles', 'the entry titles'],
+    ['notes', 'the notes, one per line'],
+    ['entries', 'how many entries'],
+  ];
+  const FORM_DIVIDER = '-'.repeat(40);
+
+  // Template text -> { nodes, errors }. A %{each} or %{end} alone on its line
+  // takes the whole line, so it leaves no blank line behind.
+  function parseForm(text) {
+    const root = [];
+    const stack = [{ body: root }];
+    const errors = [];
+    const top = () => stack[stack.length - 1].body;
+    const re = /^[ \t]*%\{\s*(each\s+\S+|end)\s*\}[ \t]*\r?\n?|%\{([^}]*)\}/gim;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) top().push({ text: text.slice(last, m.index) });
+      last = re.lastIndex;
+      const tok = (m[1] || m[2]).trim();
+      const each = tok.match(/^each\s+(\S+)$/i);
+      if (each) {
+        const key = each[1].toLowerCase();
+        if (!FORM_GROUPS.includes(key)) errors.push(`%{each ${each[1]}}: use %{each category}, %{each wo} or %{each entry}`);
+        const node = { each: key, body: [] };
+        top().push(node);
+        stack.push(node);
+      } else if (/^end$/i.test(tok)) {
+        if (stack.length === 1) errors.push('%{end} without an %{each ...} before it');
+        else stack.pop();
+      } else {
+        const at = tok.indexOf(':');
+        const name = (at < 0 ? tok : tok.slice(0, at)).trim().toLowerCase();
+        const arg = at < 0 ? '' : tok.slice(at + 1).trim();
+        if (name === 'ask') {
+          if (!arg) errors.push('%{ask:...} needs a label, e.g. %{ask:System}');
+        } else if (!FORM_TOKENS.some(([t]) => t === name)) {
+          errors.push(`unknown token %{${tok}} (/form tokens lists them)`);
+        }
+        top().push({ token: name, arg });
+      }
+    }
+    if (last < text.length) top().push({ text: text.slice(last) });
+    if (stack.length > 1) errors.push(`%{each ${stack[stack.length - 1].each}} without an %{end}`);
+    return { nodes: root, errors };
+  }
+
+  // Entries grouped for %{each key}, in the order they were first logged;
+  // time without a work order comes last.
+  function formGroups(spans, key) {
+    if (key === 'entry') return spans.map((s) => ({ spans: [s], where: `#${s.n}` }));
+    const groups = new Map();
+    for (const s of spans) {
+      const value = key === 'wo' ? s.wo || '' : s.category;
+      const k = value.toLowerCase();
+      if (!groups.has(k)) groups.set(k, { value, spans: [] });
+      groups.get(k).spans.push(s);
+    }
+    const list = Array.from(groups.values());
+    if (key === 'wo') list.sort((a, b) => (!a.value) - (!b.value));
+    return list.map((g) => ({
+      spans: g.spans,
+      none: key === 'wo' && !g.value,
+      where: key === 'wo' ? (g.value ? woTag(g.value) : 'no work order') : g.value,
+    }));
+  }
+
+  function formValues(spans, range, now, none) {
+    const uniq = (xs) => {
+      const out = [];
+      for (const x of xs) if (x && !out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
+      return out;
+    };
+    const first = spans[0];
+    const last = spans[spans.length - 1];
+    const ms = spans.reduce((sum, s) => sum + s.duration, 0);
+    const oneDay = Number.isFinite(range.from) && addDays(range.from, 1) >= range.to;
+    let date = oneDay ? ymd(range.from) : '';
+    if (!oneDay && first) date = ymd(first.ts) === ymd(last.ts) ? ymd(first.ts) : `${ymd(first.ts)} .. ${ymd(last.ts)}`;
+    const lastEnd = last ? (last.running ? now : last.end) : 0;
+    return {
+      date,
+      day: oneDay ? FULL_DAY_NAMES[new Date(range.from).getDay()].replace(/^./, (c) => c.toUpperCase()) : '',
+      category: uniq(spans.map((s) => s.category)).join(', '),
+      wo: none ? '(none)' : uniq(spans.map((s) => s.wo)).join(', '),
+      in: first ? clock(first.ts) : '',
+      out: last ? (last.running ? 'now' : clock(last.end)) : '',
+      hours: formatHM(ms),
+      down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
+      titles: uniq(spans.map((s) => s.note)).join(', '),
+      notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
+      entries: String(spans.length),
+    };
+  }
+
+  // Fill a template from the entries in `range`. answer(label, where) gives
+  // the text for %{ask:label}; `where` names the group it is in ("dev",
+  // "[4471]", "#3"), or '' outside any %{each}.
+  // Returns { text, count } or { errors }.
+  function fillForm(template, entries, range, now, answer) {
+    const { nodes, errors } = parseForm(template);
+    if (errors.length) return { errors };
+    const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    // Copies made by a top-level %{each} get a divider between them; nested
+    // ones (entries inside a category, say) just follow each other.
+    const render = (list, scope, where, none) => {
+      let vals = null;
+      return list.map((n) => {
+        if (n.text != null) return n.text;
+        if (n.each) {
+          const copies = formGroups(scope, n.each).map((g) => render(n.body, g.spans, g.where, g.none));
+          return list === nodes ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
+        }
+        if (n.token === 'ask') return answer ? answer(n.arg, where) || '' : '';
+        vals = vals || formValues(scope, range, now, none);
+        return vals[n.token];
+      }).join('');
+    };
+    return { text: render(nodes, spans, '', false), count: spans.length };
+  }
+
+  // The %{ask:...} questions a template will ask, in order: [{ label, where }].
+  function formQuestions(template, entries, range, now) {
+    const seen = new Map();
+    fillForm(template, entries, range, now, (label, where) => {
+      const key = `${label}\n${where}`;
+      if (!seen.has(key)) seen.set(key, { label, where });
+      return '';
+    });
+    return Array.from(seen.values());
   }
 
   // Text timeline for the terminal: one row per `rowMinutes` (15 by
@@ -1032,6 +1190,7 @@
     clock, clockCol, setClock, clockMode, hourLabel,
     OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
+    FORM_TOKENS, parseForm, fillForm, formQuestions,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tymlee = api;

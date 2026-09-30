@@ -296,6 +296,40 @@
       return v == null ? '' : String(v);
     }
 
+    // ---- forms ---------------------------------------------------------------
+
+    function pickForm(heading, submit, then, danger) {
+      const names = shell.formNames();
+      form(heading, { fields: [{ name: 'name', label: 'Form', choices: names.map((n) => [n, n]) }], submit, danger }, (v) => then(v.name));
+    }
+
+    // Choose the form and day, answer its questions (if it has any), then
+    // show it filled in.
+    function fillInForm() {
+      const names = shell.formNames();
+      if (!names.length) return toast('No forms yet. Choose New form to make one.', 'dim');
+      form('Fill in a form', {
+        fields: [
+          { name: 'name', label: 'Form', choices: names.map((n) => [n, n]) },
+          { name: 'day', label: 'Day (leave empty for today)', placeholder: 'tue or 2026-09-29' },
+        ],
+        submit: 'Next',
+      }, (v) => {
+        const day = (v.day || 'today').trim();
+        const line = `/form ${v.name} ${day}`;
+        const questions = shell.formQuestions(v.name, day);
+        if (!questions) return;
+        if (!questions.length) return runMenu(v.name, line);
+        form(v.name, {
+          fields: questions.map((q, i) => ({ name: `q${i}`, label: q.where ? `${q.label} for ${q.where}` : q.label, value: q.last })),
+          submit: 'Fill in',
+        }, (a) => {
+          shell.presetAnswers(questions.map((q, i) => a[`q${i}`] || ''));
+          runMenu(v.name, line);
+        });
+      });
+    }
+
     function menuItems() {
       const signedIn = Boolean(store.user);
       const enc = store.encryption;
@@ -329,6 +363,18 @@
             ],
             submit: 'Link',
           }, (v) => v.category && v.wo && runMenu('Work order', `/wolink ${v.category} ${v.date ? `${v.date} ` : ''}${v.wo}`))],
+        ]],
+        ['Forms', [
+          ['Fill in a form', () => fillInForm()],
+          ['New form', () => form('New form', {
+            intro: 'Opens the form in the text editor: paste yours and add tokens like %{hours}. /form lists the tokens.',
+            fields: [{ name: 'name', label: 'Name', placeholder: 'service' }], submit: 'Write it',
+          }, (v) => v.name && opts.openCli(`/newform ${v.name.trim().replace(/\s+/g, '-')}`))],
+          ...(shell.formNames().length ? [
+            ['Edit a form', () => pickForm('Edit a form', 'Edit', (name) => opts.openCli(`/editform ${name}`))],
+            ['Delete a form', () => pickForm('Delete a form', 'Delete', (name) => runMenu('Form', `/delform ${name}`), true)],
+          ] : []),
+          ['Tokens', () => runMenu('Form tokens', '/form')],
         ]],
         ['Pay', [
           ['Rate and overtime', () => form('Pay', {

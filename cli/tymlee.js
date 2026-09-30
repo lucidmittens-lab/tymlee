@@ -296,7 +296,11 @@ function pickEntry(choices, name) {
 
 function ask(label, initial, name) {
   if (!rl || !tty) {
-    print(name === 'confirm' ? 'confirming needs the tymlee shell; or type /reset-encryption DELETE' : 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
+    const why = {
+      confirm: 'confirming needs the tymlee shell; or type /reset-encryption DELETE',
+      form: 'this form asks questions (%{ask:...}); fill it in from the tymlee shell',
+    };
+    print(why[name] || 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {

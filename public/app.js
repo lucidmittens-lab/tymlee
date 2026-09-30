@@ -623,7 +623,7 @@
       backToPrompt();
       if (!r.changed) return;
       store.apply([{ op: 'put', entry: r.entry }]);
-      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${T.hhmm(r.entry.ts)} ${r.entry.text}`, 'ok');
+      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
     });
     cancel.addEventListener('click', () => {
       closeEntryEditor();
@@ -638,7 +638,7 @@
       closeEntryEditor();
       backToPrompt();
       store.remove(b.id);
-      print(`removed #${b.n} ${T.hhmm(entry.ts)} ${entry.text}`, 'ok');
+      print(`removed #${b.n} ${T.clock(entry.ts)} ${entry.text}`, 'ok');
     });
     card.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -782,6 +782,31 @@
       b.setAttribute('aria-label', long);
       b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
       b.addEventListener('click', () => { if (view !== v) setView(v); });
+      wrap.append(b);
+    }
+    return wrap;
+  }
+
+  // 12h | 24h, next to the view switch; the same as /clock 12 and /clock 24.
+  function clockToggle() {
+    const mode = shell.applyClock();
+    const wrap = span('view-toggle clock-toggle', '');
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Clock');
+    for (const [v, what] of [['12', '12-hour clock (2:30pm)'], ['24', '24-hour clock (14:30)']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.append(v, span('ck-h', 'h'));
+      b.setAttribute('aria-pressed', String(mode === v));
+      b.title = what;
+      b.setAttribute('aria-label', what);
+      b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
+      b.addEventListener('click', () => {
+        if (mode === v) return;
+        shell.setClock(v);
+        renderStatus();
+        refreshTimelines();
+      });
       wrap.append(b);
     }
     return wrap;
@@ -1279,7 +1304,7 @@
       today.append(span('since', ` · since ${st.since}`));
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
-    statusEl.replaceChildren(...[left, today, right, viewToggle()].filter(Boolean));
+    statusEl.replaceChildren(...[left, today, right, clockToggle(), viewToggle()].filter(Boolean));
     if (gui) gui.update(st);
     const h = `${statusEl.offsetHeight}px`;
     if (h !== lastStatusHeight) $('dock').style.setProperty('--status-h', (lastStatusHeight = h));

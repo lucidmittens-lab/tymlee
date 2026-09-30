@@ -73,7 +73,7 @@
     // "#12 [4471] 10:00 dev code review", with the date when it isn't today.
     function entryLabel(s) {
       const today = T.ymd(s.ts) === T.ymd(Date.now());
-      const when = today ? T.hhmm(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.hhmm(s.ts)}`;
+      const when = today ? T.clock(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.clock(s.ts)}`;
       return `#${s.n} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
     }
 
@@ -107,6 +107,19 @@
       if (!old) return;
       io.storage.removeItem(OLD_PAY_KEY);
       if (!store.settings.pay) store.setSettings({ ...store.settings, pay: old });
+    }
+
+    // ---- the clock ---------------------------------------------------------------
+
+    // 12- or 24-hour times, kept with the account's settings like pay.
+    function applyClock() {
+      T.setClock(store.settings.clock);
+      return T.clockMode();
+    }
+
+    function setClock(mode) {
+      store.setSettings({ ...store.settings, clock: mode });
+      return applyClock();
     }
 
     // /rate, /otmin, /otrate: show the setting with no argument, set it with
@@ -202,7 +215,7 @@
       const link = linkFor(category, Date.now());
       const entry = store.add(note ? `${category} ${note}` : category, link && link.wo ? { wo: link.wo, wl: true } : undefined);
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
-      const parts = [T.hhmm(entry.ts)];
+      const parts = [T.clock(entry.ts)];
       if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
       parts.push(`in #${shown().length} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
@@ -472,7 +485,7 @@
           const now = Date.now();
           const last = T.withSpans(store.entries, now).pop();
           store.remove(last.id);
-          const msg = [`undid #${last.n} ${T.hhmm(last.ts)} ${describe(last)}`];
+          const msg = [`undid #${last.n} ${T.clock(last.ts)} ${describe(last)}`];
           const cur = T.withSpans(store.entries, now).pop();
           if (cur) msg.push(cur.off ? 'still off' : `resumed ${describe(cur)}`);
           print(msg.join('  '), 'ok');
@@ -486,7 +499,7 @@
           const cur = before[before.length - 1];
           if (!cur || cur.off) return print('not clocked in', 'err');
           const entry = store.add(T.OFF);
-          print(`${T.hhmm(entry.ts)}  out ${cur.category} (${T.formatHM(entry.ts - cur.ts)})  off`, 'ok');
+          print(`${T.clock(entry.ts)}  out ${cur.category} (${T.formatHM(entry.ts - cur.ts)})  off`, 'ok');
         },
       },
       rm: {
@@ -499,7 +512,7 @@
           }
           const s = T.withSpans(store.entries, Date.now())[n - 1];
           store.remove(s.id);
-          print(`removed #${n} ${T.ymd(s.ts)} ${T.hhmm(s.ts)} ${describe(s)}`, 'ok');
+          print(`removed #${n} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
         },
       },
       export: {
@@ -768,6 +781,17 @@
           });
         },
       },
+      clock: {
+        usage: '/clock [12|24]',
+        about: 'show times on the 12-hour (2:30pm) or 24-hour (14:30) clock',
+        run(args) {
+          const arg = (args[0] || '').toLowerCase().replace(/h$/, '');
+          if (!arg) return print(`clock: ${applyClock()}-hour`, 'ok');
+          if (arg !== '12' && arg !== '24') return print('usage: /clock 12 or /clock 24', 'err');
+          setClock(arg);
+          print(`clock: ${arg}-hour, e.g. ${T.clock(Date.now())}`, 'ok');
+        },
+      },
       clear: {
         usage: '/clear',
         about: 'clear the screen (the log is kept)',
@@ -789,6 +813,7 @@
     // Run a routed line: a command, or a new entry. Resolves when done.
     async function run(line) {
       if (!line) return;
+      applyClock();
       if (!line.startsWith('/')) {
         add(line);
         return;
@@ -822,6 +847,7 @@
 
     // What the status line shows. `state` is 'idle', 'off' or 'running'.
     function status(now) {
+      applyClock();
       const sync = { status: store.status, label: syncLabel() };
       if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync };
       const spans = T.withSpans(store.entries, now);
@@ -857,7 +883,7 @@
         todayMoney,
         what: `${cur.wo ? `${T.woTag(cur.wo)} ` : ''}${describe(cur)}`,
         today: `today ${T.formatHM(todayMs)}`,
-        since: T.hhmm(cur.ts),
+        since: T.clock(cur.ts),
         sync,
       };
     }
@@ -867,6 +893,8 @@
       run,
       completions,
       status,
+      applyClock,
+      setClock,
       commandWords,
       recentTexts: (n) => shown().slice(-n).map((e) => e.text),
     };

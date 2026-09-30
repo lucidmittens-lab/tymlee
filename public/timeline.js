@@ -18,9 +18,9 @@
   const slotColor = (slot) => (slot == null ? 'var(--muted)' : slot < 0 ? 'var(--s-other)' : `var(--s${slot + 1})`);
 
   function blockTitle(b) {
-    if (b.off) return `off ${T.hhmm(b.start)}–${T.hhmm(b.end)} (${T.formatHM(b.end - b.start)})`;
-    const end = b.running ? 'now' : T.hhmm(b.start + b.duration);
-    return `#${b.n} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.hhmm(b.start)}–${end} · ${T.formatHM(b.duration)}`;
+    if (b.off) return `off ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
+    const end = b.running ? 'now' : T.clock(b.start + b.duration);
+    return `#${b.n} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
   }
 
   const DAY_MS = 86400000;
@@ -128,7 +128,10 @@
       axis.style.height = `${height}px`;
       for (let m = axisFrom; m <= axisTo; m += 60) {
         const tick = el('span', 'tl-hour');
-        tick.append(String(Math.floor(m / 60) % 24).padStart(2, '0'), el('span', 'tl-min', ':00'));
+        // "14:00" or "2pm"; narrow week columns drop the dimmed part ("14", "2p").
+        const label = T.hourLabel(Math.floor(m / 60));
+        const cut = T.clockMode() === '12' ? label.length - 1 : 2;
+        tick.append(label.slice(0, cut), el('span', 'tl-min', label.slice(cut)));
         tick.style.top = `${(m - axisFrom) * MIN_PX}px`;
         axis.append(tick);
       }
@@ -161,8 +164,8 @@
             block.append(line1);
           }
           if (h >= 34 && !b.off) {
-            const end = b.running ? 'now' : T.hhmm(b.start + b.duration);
-            block.append(el('div', 'tl-line tl-muted tl-times', `${T.hhmm(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}`));
+            const end = b.running ? 'now' : T.clock(b.start + b.duration);
+            block.append(el('div', 'tl-line tl-muted tl-times', `${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}`));
           }
           // Notes: as many lines as the block has room for.
           if (h >= 52 && b.notes) {
@@ -181,7 +184,7 @@
           if (m >= axisFrom && m <= axisTo) {
             const line = el('div', 'tl-now');
             line.style.top = `${(m - axisFrom) * MIN_PX}px`;
-            line.append(el('span', null, T.hhmm(now)));
+            line.append(el('span', null, T.clock(now)));
             col.append(line);
           }
         }
@@ -200,7 +203,7 @@
       let start = first;
       while (new Date(start).getDay() !== 1) start = T.addDays(start, -1);
       const span = Math.max(60, axisTo - axisFrom);
-      const hh = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:00`;
+      const hh = (m) => T.hourLabel(Math.floor(m / 60));
 
       const wrap = el('div', 'tl-cal');
       wrap.append(el('div', 'tl-cal-hours tl-muted', `each day ${hh(axisFrom)}–${hh(axisTo)}, top to bottom`));

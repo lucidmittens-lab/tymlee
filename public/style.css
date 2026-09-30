@@ -625,6 +625,12 @@ button.gui-day {
   #status .now { flex: 1 0 100%; }
   #status .sync { font-size: 0; margin-left: auto; }
   #status .sync::before { content: '●'; font-size: 12px; }
+  #status { column-gap: 1ch; }
+  #status .view-toggle button { padding: 0 5px; }
+}
+/* Narrow phones: "12 | 24", so both switches fit on the second row. */
+@media (max-width: 420px) {
+  .clock-toggle .ck-h { display: none; }
 
   #app.gui-mode #gui { padding-left: 10px; padding-right: 10px; }
   .tl-top { padding-top: 10px; }

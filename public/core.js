@@ -157,9 +157,35 @@
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
 
+  // "HH:MM", 24-hour: what you type (edits, /edit) and what's compared.
   function hhmm(ts) {
     const d = new Date(ts);
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
+  // The clock times are shown in: '24' ("14:30") or '12' ("2:30pm"). Set from
+  // the account's settings (/clock) by whatever is showing them.
+  let clock12 = false;
+  function setClock(mode) { clock12 = mode === '12'; }
+  function clockMode() { return clock12 ? '12' : '24'; }
+
+  // A time to show: "14:30", or "2:30pm" on the 12-hour clock.
+  function clock(ts) {
+    if (!clock12) return hhmm(ts);
+    const d = new Date(ts);
+    const h = d.getHours();
+    return `${h % 12 || 12}:${pad2(d.getMinutes())}${h < 12 ? 'am' : 'pm'}`;
+  }
+
+  // The same, padded to one width so times line up in columns.
+  const clockWidth = () => (clock12 ? 7 : 5);
+  const clockCol = (ts) => clock(ts).padStart(clockWidth());
+  const nowCol = () => 'now'.padEnd(clockWidth());
+
+  // An hour on a time axis: "14:00", or "2pm".
+  function hourLabel(hour) {
+    const h = ((hour % 24) + 24) % 24;
+    return clock12 ? `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}` : `${pad2(h)}:00`;
   }
 
   // 45 min -> "0:45", 26h 5m -> "26:05"
@@ -244,14 +270,14 @@
     const out = [];
     for (const day of days) {
       out.push(`${DAY_NAMES[new Date(day.ts).getDay()]} ${day.key}`);
-      const endHead = compact ? '' : 'end    ';
+      const endHead = compact ? '' : `${'end'.padEnd(clockWidth())}  `;
       const woHead = woWidth ? `${'wo'.padEnd(woWidth)}  ` : '';
-      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}start  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
+      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}${'start'.padEnd(clockWidth())}  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
-        const end = compact ? '' : `${s.running ? 'now  ' : hhmm(s.end)}  `;
+        const end = compact ? '' : `${s.running ? nowCol() : clockCol(s.end)}  `;
         const dur = s.off ? '-' : formatHM(s.duration);
         out.push(
-          `  ${String(s.n).padStart(numWidth)}  ${woCell(s)}${hhmm(s.ts)}  ${end}${dur.padStart(6)}  ` +
+          `  ${String(s.n).padStart(numWidth)}  ${woCell(s)}${clockCol(s.ts)}  ${end}${dur.padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
@@ -288,7 +314,7 @@
       out.push(`${t.category.padEnd(20)}  ${formatHM(t.ms).padStart(6)}  ${String(pct).padStart(3)}%  ${plural(mine.length, 'entry', 'entries')}`);
       for (const s of mine) {
         // In and out: the next entry's start isn't always this one's end.
-        const inOut = `${hhmm(s.ts)}-${s.running ? 'now  ' : hhmm(s.end)}`;
+        const inOut = `${clockCol(s.ts)}-${s.running ? nowCol() : clock(s.end).padEnd(clockWidth())}`;
         const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${inOut}` : inOut;
         const wo = woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '';
         out.push(`  ${String(s.n).padStart(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
@@ -542,15 +568,15 @@
         const bar = b.off ? paint(null, '┆ ') : paint(b.slot, '██');
         const label = b.off ? 'off' : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
         const dur = b.off ? formatHM(b.end - b.start) : `${formatHM(b.duration)}${b.running ? ' ▶' : ''}`;
-        const room = Math.max(10, width - 8 - 3 - dur.length - 2);
+        const room = Math.max(10, width - clockWidth() - 6 - dur.length - 2);
         const text = label.length > room ? `${label.slice(0, room - 1)}…` : label;
-        out.push(`${hhmm(b.start)}  ${bar} ${text.padEnd(room)}  ${dur}`.trimEnd());
+        out.push(`${clockCol(b.start)}  ${bar} ${text.padEnd(room)}  ${dur}`.trimEnd());
         const extra = [];
         if (b.notes) for (const l of b.notes.split('\n')) extra.push(`> ${l}`);
         for (let i = 1; i < rows || extra.length; i++) {
           const note = extra.shift();
           const more = i === rows - 1 && want > rows && !note ? ' ⋮' : '';
-          out.push(`       ${i < rows ? bar : '  '} ${note ? note.slice(0, room) : ''}${more}`.trimEnd());
+          out.push(`${' '.repeat(clockWidth() + 2)}${i < rows ? bar : '  '} ${note ? note.slice(0, room) : ''}${more}`.trimEnd());
           if (i >= rows && !extra.length) break;
         }
       }
@@ -1003,6 +1029,7 @@
     formatEditable, parseEditable,
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
+    clock, clockCol, setClock, clockMode, hourLabel,
     OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
   };

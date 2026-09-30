@@ -582,3 +582,30 @@ test('the terminal package has the same version as the app', () => {
   assert.match(T.VERSION, /^\d+\.\d+\.\d+$/);
   assert.equal(require('../cli/package.json').version, T.VERSION);
 });
+
+// ---- the clock ------------------------------------------------------------------
+
+test('/clock 12 shows times as 2:30pm; typing stays HH:MM', () => {
+  try {
+    T.setClock('12');
+    assert.equal(T.clockMode(), '12');
+    assert.equal(T.clock(at('2026-09-24T00:05:00Z')), '12:05am');
+    assert.equal(T.clock(at('2026-09-24T09:00:00Z')), '9:00am');
+    assert.equal(T.clock(at('2026-09-24T12:30:00Z')), '12:30pm');
+    assert.equal(T.clock(at('2026-09-24T14:30:00Z')), '2:30pm');
+    assert.equal(T.hhmm(at('2026-09-24T14:30:00Z')), '14:30');
+    assert.equal(T.hourLabel(0), '12am');
+    assert.equal(T.hourLabel(13), '1pm');
+    const report = T.formatCategoryReport(NOTED, T.parseRange('today', NOW), NOW);
+    assert.match(report, / {2}1 {2} 9:00am-9:45am {5}0:45 {2}fixing login bug/);
+    assert.match(report, / {2}3 {2}10:00am-now {8}0:12 {2}code review/);
+    const log = T.formatReport(NOTED, T.parseRange('today', NOW), NOW);
+    assert.match(log, /# {2}start {4}end {9}dur/);
+    assert.match(log, / {2}1 {2} 9:00am {2} 9:45am {4}0:45/);
+    assert.match(T.formatEditable(NOTED, T.parseRange('today', NOW), NOW).text, / 09:00 {2}dev fixing login bug/);
+  } finally {
+    T.setClock('24');
+  }
+  assert.equal(T.clock(at('2026-09-24T14:30:00Z')), '14:30');
+  assert.equal(T.hourLabel(9), '09:00');
+});

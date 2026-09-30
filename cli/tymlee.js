@@ -587,7 +587,7 @@ const storage = fileStorage(path.join(dir, 'data.json'), () => {
 
 store = createStore({
   env: nodeEnv({ config, storage }),
-  onChange: () => { drawPane(); drawStatus(); },
+  onChange: () => { if (store) T.setClock(store.settings.clock); drawPane(); drawStatus(); },
   onNotice: (text, cls) => { if (!quiet) print(text, cls); },
 });
 

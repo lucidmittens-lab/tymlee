@@ -226,7 +226,9 @@ body {
 /* With the keyboard open, the home-indicator gap is not needed. */
 .kb #status { padding-bottom: 4px; }
 #status .now { display: flex; flex: 1; min-width: 0; }
-#status .what { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Only the entry's text gives way when space runs out. */
+#status .now > span { flex-shrink: 0; }
+#status .now > .what { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #status .today { color: var(--muted); flex-shrink: 0; }
 #status .sync { color: var(--muted); flex-shrink: 0; }
 #status .sync-synced { color: var(--accent); }
@@ -617,11 +619,12 @@ button.gui-day {
 
 /* ---- phones: a timeline-first layout ------------------------------------------ */
 @media (max-width: 600px) {
-  /* Status bar: the entry gets the room. Sync is a colored dot (its label is
-     still read out), and the GUI view shows the day's total itself. */
-  #status .sync { font-size: 0; }
+  /* Status bar, in two rows: the current entry on top; the day, sync and the
+     view switch below. Sync is a colored dot (its label is still read out). */
+  #status { flex-wrap: wrap; row-gap: 4px; align-items: center; }
+  #status .now { flex: 1 0 100%; }
+  #status .sync { font-size: 0; margin-left: auto; }
   #status .sync::before { content: '●'; font-size: 12px; }
-  #app.gui-mode #status .today { display: none; }
 
   #app.gui-mode #gui { padding-left: 10px; padding-right: 10px; }
   .tl-top { padding-top: 10px; }

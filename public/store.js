@@ -247,16 +247,18 @@
       serverVersion = v2.error ? 1 : 2;
     }
 
-    // Whether notes / work orders ('notes' or 'wo') can be kept here: always
-    // on this device alone, and when signed in if they travel sealed with the
-    // entry or the server has the column for them.
+    // Whether notes / work orders / equipment ('notes', 'wo' or 'eq') can be
+    // kept here: always on this device alone, and when signed in if they
+    // travel sealed with the entry or the server has the column for them
+    // (equipment only travels sealed).
     async function supports(field) {
       if (!user || !client) return true;
       await schedule(async () => {
         await vaultOpen();
         await detectServer();
       });
-      return (vault.mode === 'ready' && serverVersion === 2) || (field === 'wo' ? serverWo : serverNotes);
+      if (vault.mode === 'ready' && serverVersion === 2) return true;
+      return field === 'eq' ? false : field === 'wo' ? serverWo : serverNotes;
     }
 
     // Send queued changes, in order, in batches.
@@ -329,6 +331,8 @@
       let notes = r.notes || '';
       let wo = r.wo || '';
       let wl = Boolean(r.wo_linked);
+      let eq = '';
+      let ql = false;
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
       if (encrypted && vault.mode !== 'ready') {
@@ -348,6 +352,7 @@
           ({ ts, text } = opened);
           notes = opened.notes || notes;
           if (opened.wo) ({ wo, wl } = { wo: opened.wo, wl: Boolean(opened.wl) });
+          if (opened.eq) ({ eq, ql } = { eq: opened.eq, ql: Boolean(opened.ql) });
         }
         if (V.isEncrypted(notes)) {
           notes = await V.decryptNotes(vault.key, r.id, notes);
@@ -362,7 +367,7 @@
         return null;
       }
       if (!encrypted && vault.mode === 'ready') reseal = true;
-      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl }), reseal };
+      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl, eq, ql }), reseal };
     }
 
     // Download changes and merge them with the local log, then re-apply unsent

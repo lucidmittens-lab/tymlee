@@ -364,6 +364,17 @@
             submit: 'Link',
           }, (v) => v.category && v.wo && runMenu('Work order', `/wolink ${v.category} ${v.date ? `${v.date} ` : ''}${v.wo}`))],
         ]],
+        ['Equipment', [
+          ['Link to a category', () => form('Link equipment', {
+            intro: "Every entry in the category that day gets it, including ones you haven't started yet.",
+            fields: [
+              { name: 'category', label: 'Category', placeholder: 'dev' },
+              { name: 'eq', label: 'Equipment', placeholder: 'ler-resolve-07' },
+              { name: 'date', label: 'Day (leave empty for today)', placeholder: T.ymd(Date.now()) },
+            ],
+            submit: 'Link',
+          }, (v) => v.category && v.eq && runMenu('Equipment', `/eqlink ${v.category} ${v.date ? `${v.date} ` : ''}${v.eq}`))],
+        ]],
         ['Forms', [
           ['Fill in a form', () => fillInForm()],
           ['New form', () => form('New form', {

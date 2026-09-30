@@ -147,7 +147,8 @@
   const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
   const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
 
-  // Seal an entry's start time, text, notes and work order together.
+  // Seal an entry's start time, text, notes, work order and equipment
+  // together.
   function sealEntry(key, id, entry) {
     const payload = { t: entry.ts, x: entry.text };
     if (entry.notes) payload.n = entry.notes;
@@ -155,18 +156,26 @@
       payload.w = entry.wo;
       if (entry.wl) payload.l = 1;
     }
+    if (entry.eq) {
+      payload.q = entry.eq;
+      if (entry.ql) payload.k = 1;
+    }
     return encryptWith(SEALED, key, id, JSON.stringify(payload));
   }
 
-  // { ts, text } plus notes / wo / wl when the entry has them.
+  // { ts, text } plus notes / wo / wl / eq / ql when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x, n, w, l } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n, w, l, q, k } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
     const entry = { ts: t, text: x };
     if (typeof n === 'string' && n) entry.notes = n;
     if (typeof w === 'string' && w) {
       entry.wo = w;
       if (l) entry.wl = true;
+    }
+    if (typeof q === 'string' && q) {
+      entry.eq = q;
+      if (k) entry.ql = true;
     }
     return entry;
   }

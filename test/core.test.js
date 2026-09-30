@@ -642,7 +642,7 @@ test('forms: tokens cover the entries in scope; %{each} repeats per group', () =
     `dev\n- 08:00 refactor\n- 10:00 review\n- 12:00 deploy\n\n${'-'.repeat(40)}\n\nmtg\n- 09:30 standup\n`);
   assert.deepEqual(T.formQuestions('%{ask:System} %{each wo}%{ask:System}%{end}', FORM_LOG, day, NOW).map((q) => q.where), ['', '[4471]', '[4480]', 'no work order']);
   assert.deepEqual(T.fillForm('%{each day}\n%{hourz}\n%{ask:}', FORM_LOG, day, NOW).errors, [
-    '%{each day}: use %{each category}, %{each wo} or %{each entry}',
+    '%{each day}: use %{each category}, %{each wo}, %{each equipment} or %{each entry}',
     'unknown token %{hourz} (/form tokens lists them)',
     '%{ask:...} needs a label, e.g. %{ask:System}',
     '%{each day} without an %{end}',
@@ -655,4 +655,33 @@ test('day names are ranges: the latest one, today included', () => {
   assert.equal(T.parseRange('tuesday', NOW).label, '2026-09-22');
   assert.equal(T.parseRange('fri', NOW).label, '2026-09-18');
   assert.equal(T.parseRange('th', NOW), null);
+});
+
+test('forms: %{dur}, %{in12} / %{out12}, %{title} and equipment', () => {
+  const log = FORM_LOG.map((e) => (e.id === 'a' || e.id === 'c' ? { ...e, eq: 'ler-resolve-07', ql: true } : e));
+  const day = T.parseRange('2026-09-24', NOW);
+  const fill = (t) => T.fillForm(t, log, day, NOW).text;
+  assert.equal(fill('%{each title}\n%{title} - %{dur}\n%{end}'), 'refactor - 1:30\nstandup - 0:30\nreview - 2:00\ndeploy - 1:00\n');
+  assert.equal(fill('%{in12}-%{out12} / %{in24}-%{out24} / %{in}-%{out}\n'), '8:00am-1:00pm / 08:00-13:00 / 08:00-13:00\n');
+  assert.equal(fill('%{equipment}|%{eq}\n'), 'ler-resolve-07|ler-resolve-07\n');
+  assert.equal(fill('%{each equipment}\n%{equipment}: %{hours}\n%{end}'), `ler-resolve-07: 3:30\n\n${'-'.repeat(40)}\n\n(none): 1:30\n`);
+});
+
+test('equipment is kept through makeEntry, the entry card and /edit', () => {
+  const e = T.makeEntry({ id: 'x', ts: at('2026-09-24T09:00:00Z'), text: 'dev a', eq: 'rig-1', ql: true });
+  assert.deepEqual(e, { id: 'x', ts: at('2026-09-24T09:00:00Z'), text: 'dev a', eq: 'rig-1', ql: true });
+  assert.deepEqual(T.makeEntry(e, { notes: 'n' }).eq, 'rig-1');
+  // The card: unchanged when it doesn't send the field; set (unlinked) when it does.
+  const kept = T.editEntry(e, { time: '09:00', text: 'dev b', notes: '' }, NOW);
+  assert.equal(kept.entry.eq, 'rig-1');
+  assert.equal(kept.entry.ql, true);
+  const set = T.editEntry(e, { time: '09:00', text: 'dev a', eq: '{rig-2}', notes: '' }, NOW);
+  assert.equal(set.entry.eq, 'rig-2');
+  assert.equal(set.entry.ql, undefined);
+  assert.match(T.editEntry(e, { time: '09:00', text: 'dev a', eq: 'two words' }, NOW).error, /not a valid equipment name/);
+  // /edit: the text doesn't show equipment, and saving keeps it.
+  const { text, items } = T.formatEditable([e], T.parseRange('2026-09-24', NOW), NOW);
+  const r = T.parseEditable(text.replace('dev a', 'dev renamed'), items, NOW);
+  assert.equal(r.ops[0].entry.eq, 'rig-1');
+  assert.equal(r.ops[0].entry.text, 'dev renamed');
 });

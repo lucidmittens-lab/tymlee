@@ -26,14 +26,23 @@
   const validWo = (wo) => typeof wo === 'string' && /^[^\s\[\]]{1,40}$/.test(wo);
   const woTag = (wo) => (wo ? `[${wo}]` : '');
 
+  // Equipment: the same kind of short code ("ler-resolve-07"), set per
+  // entry with /eqpunch or per category and day with /eqlink. Shown as
+  // "{ler-resolve-07}".
+  const eqTag = (eq) => (eq ? `{${eq}}` : '');
+
   // An entry with its optional fields set only when they have a value.
   function makeEntry(base, extra) {
     const e = { id: base.id, ts: base.ts, text: base.text };
-    const x = { notes: base.notes, wo: base.wo, wl: base.wl, ...(extra || {}) };
+    const x = { notes: base.notes, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, ...(extra || {}) };
     if (x.notes) e.notes = x.notes;
     if (x.wo) {
       e.wo = x.wo;
       if (x.wl) e.wl = true;
+    }
+    if (x.eq) {
+      e.eq = x.eq;
+      if (x.ql) e.ql = true;
     }
     return e;
   }
@@ -60,7 +69,7 @@
   // /wolink stores "dev -> WO 4471 for this day" as a hidden entry with the
   // text "/wo dev", at the start of that day. It syncs like an entry but is
   // never shown, timed or numbered; new entries of that category that day
-  // pick up its work order.
+  // pick up its work order. /eqlink keeps equipment on the same entry.
   const LINK = '/wo ';
   const isLink = (e) => Boolean(e) && typeof e.text === 'string' && e.text.startsWith(LINK);
   const linkCategory = (e) => e.text.slice(LINK.length);
@@ -176,6 +185,13 @@
     const d = new Date(ts);
     const h = d.getHours();
     return `${h % 12 || 12}:${pad2(d.getMinutes())}${h < 12 ? 'am' : 'pm'}`;
+  }
+
+  // A time on a given clock, whatever the setting: for form tokens.
+  function clockAs(mode, ts) {
+    const was = clock12;
+    clock12 = mode === '12';
+    try { return clock(ts); } finally { clock12 = was; }
   }
 
   // The same, padded to one width so times line up in columns.
@@ -402,9 +418,14 @@
     // A work order typed here applies to this entry only (like /wopunch),
     // unless it is the one it already had.
     const wl = Boolean(entry.wl && wo === (entry.wo || ''));
-    const next = makeEntry({ id: entry.id, ts, text }, { notes, wo, wl });
+    // Equipment likewise, when the card has the field.
+    const eq = fields.eq == null ? entry.eq || '' : String(fields.eq).trim().replace(/^\{(.*)\}$/, '$1');
+    if (eq && !validWo(eq)) return { error: `"${eq}" is not a valid equipment name (no spaces or brackets, up to ${MAX_WO} characters)` };
+    const ql = Boolean(entry.ql && eq === (entry.eq || ''));
+    const next = makeEntry({ id: entry.id, ts, text }, { notes, wo, wl, eq, ql });
     const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
-      (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl);
+      (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl) &&
+      (next.eq || '') === (entry.eq || '') && Boolean(next.ql) === Boolean(entry.ql);
     return { entry: next, changed: !same };
   }
 
@@ -448,7 +469,7 @@
       const lastEnd = worked.length ? Math.min(dayEnd, Math.max(...worked.map((s) => s.end))) : day.blocks[0].ts;
       day.blocks = day.blocks
         .map((s) => ({
-          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', wo: s.wo || '',
+          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', wo: s.wo || '', eq: s.eq || '',
           off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
           duration: s.duration, clipped: s.end > dayEnd,
           slot: s.off ? null : slots.get(s.category.toLowerCase()),
@@ -559,22 +580,28 @@
   // ---- forms -----------------------------------------------------------------
   // A form is your own text with tokens filled in from the log:
   //   %{hours}, %{in}, %{notes}, ...    worked out from the entries in scope
-  //   %{each category} ... %{end}       repeated per category (or wo, entry)
+  //   %{each category} ... %{end}       repeated per category (or wo, equipment, entry)
   //   %{ask:System}                     asked for when the form is filled in
   // Outside any %{each} the scope is every entry in the range asked for;
   // inside, it is that one group's entries.
 
-  const FORM_GROUPS = ['category', 'wo', 'entry'];
+  const FORM_GROUPS = ['category', 'wo', 'equipment', 'entry'];
   const FORM_TOKENS = [
     ['date', 'the day asked for, e.g. 2026-09-29'],
     ['day', 'its weekday, e.g. Tuesday'],
     ['category', 'the categories, e.g. "dev, mtg"'],
     ['wo', 'the work orders'],
+    ['equipment', 'the equipment (/eqlink, /eqpunch)'],
     ['in', 'the first start'],
     ['out', 'the last end ("now" if running)'],
+    ['in12', 'the first start on the 12-hour clock, e.g. 2:30pm'],
+    ['out12', 'the last end on the 12-hour clock'],
+    ['in24', 'the first start on the 24-hour clock, e.g. 14:30'],
+    ['out24', 'the last end on the 24-hour clock'],
     ['hours', 'the time logged'],
+    ['dur', 'the same, e.g. one entry\'s duration inside %{each entry}'],
     ['down', 'time between in and out that was not logged here'],
-    ['titles', 'the entry titles'],
+    ['titles', 'the entry titles (%{title} works too)'],
     ['notes', 'the notes, one per line'],
     ['entries', 'how many entries'],
   ];
@@ -596,8 +623,8 @@
       const tok = (m[1] || m[2]).trim();
       const each = tok.match(/^each\s+(\S+)$/i);
       if (each) {
-        const key = each[1].toLowerCase();
-        if (!FORM_GROUPS.includes(key)) errors.push(`%{each ${each[1]}}: use %{each category}, %{each wo} or %{each entry}`);
+        const key = { title: 'entry', titles: 'entry', entries: 'entry' }[each[1].toLowerCase()] || each[1].toLowerCase();
+        if (!FORM_GROUPS.includes(key)) errors.push(`%{each ${each[1]}}: use %{each category}, %{each wo}, %{each equipment} or %{each entry}`);
         const node = { each: key, body: [] };
         top().push(node);
         stack.push(node);
@@ -606,7 +633,8 @@
         else stack.pop();
       } else {
         const at = tok.indexOf(':');
-        const name = (at < 0 ? tok : tok.slice(0, at)).trim().toLowerCase();
+        const typed = (at < 0 ? tok : tok.slice(0, at)).trim().toLowerCase();
+        const name = { title: 'titles', eq: 'equipment' }[typed] || typed;
         const arg = at < 0 ? '' : tok.slice(at + 1).trim();
         if (name === 'ask') {
           if (!arg) errors.push('%{ask:...} needs a label, e.g. %{ask:System}');
@@ -627,17 +655,19 @@
     if (key === 'entry') return spans.map((s) => ({ spans: [s], where: `#${s.n}` }));
     const groups = new Map();
     for (const s of spans) {
-      const value = key === 'wo' ? s.wo || '' : s.category;
+      const value = key === 'wo' ? s.wo || '' : key === 'equipment' ? s.eq || '' : s.category;
       const k = value.toLowerCase();
       if (!groups.has(k)) groups.set(k, { value, spans: [] });
       groups.get(k).spans.push(s);
     }
     const list = Array.from(groups.values());
-    if (key === 'wo') list.sort((a, b) => (!a.value) - (!b.value));
+    const coded = key === 'wo' || key === 'equipment';
+    if (coded) list.sort((a, b) => (!a.value) - (!b.value));
+    const tag = key === 'wo' ? woTag : eqTag;
     return list.map((g) => ({
       spans: g.spans,
-      none: key === 'wo' && !g.value,
-      where: key === 'wo' ? (g.value ? woTag(g.value) : 'no work order') : g.value,
+      none: coded && !g.value ? key : '',
+      where: coded ? (g.value ? tag(g.value) : `no ${key === 'wo' ? 'work order' : 'equipment'}`) : g.value,
     }));
   }
 
@@ -658,10 +688,16 @@
       date,
       day: oneDay ? FULL_DAY_NAMES[new Date(range.from).getDay()].replace(/^./, (c) => c.toUpperCase()) : '',
       category: uniq(spans.map((s) => s.category)).join(', '),
-      wo: none ? '(none)' : uniq(spans.map((s) => s.wo)).join(', '),
+      wo: none === 'wo' ? '(none)' : uniq(spans.map((s) => s.wo)).join(', '),
+      equipment: none === 'equipment' ? '(none)' : uniq(spans.map((s) => s.eq)).join(', '),
       in: first ? clock(first.ts) : '',
       out: last ? (last.running ? 'now' : clock(last.end)) : '',
+      in12: first ? clockAs('12', first.ts) : '',
+      out12: last ? (last.running ? 'now' : clockAs('12', last.end)) : '',
+      in24: first ? hhmm(first.ts) : '',
+      out24: last ? (last.running ? 'now' : hhmm(last.end)) : '',
       hours: formatHM(ms),
+      dur: formatHM(ms),
       down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
       titles: uniq(spans.map((s) => s.note)).join(', '),
       notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
@@ -678,21 +714,22 @@
     if (errors.length) return { errors };
     const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
     // Copies made by a top-level %{each} get a divider between them; nested
-    // ones (entries inside a category, say) just follow each other.
+    // ones (entries inside a category, say) and entries, which are lines
+    // rather than sections, just follow each other.
     const render = (list, scope, where, none) => {
       let vals = null;
       return list.map((n) => {
         if (n.text != null) return n.text;
         if (n.each) {
           const copies = formGroups(scope, n.each).map((g) => render(n.body, g.spans, g.where, g.none));
-          return list === nodes ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
+          return list === nodes && n.each !== 'entry' ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
         }
         if (n.token === 'ask') return answer ? answer(n.arg, where) || '' : '';
         vals = vals || formValues(scope, range, now, none);
         return vals[n.token];
       }).join('');
     };
-    return { text: render(nodes, spans, '', false), count: spans.length };
+    return { text: render(nodes, spans, '', ''), count: spans.length };
   }
 
   // The %{ask:...} questions a template will ask, in order: [{ label, where }].
@@ -724,7 +761,7 @@
         const want = Math.max(1, Math.round(minutes / rowMinutes));
         const rows = b.off ? Math.min(want, 2) : Math.min(want, MAX_ROWS);
         const bar = b.off ? paint(null, '┆ ') : paint(b.slot, '██');
-        const label = b.off ? 'off' : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
+        const label = b.off ? 'off' : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.eq ? `${eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
         const dur = b.off ? formatHM(b.end - b.start) : `${formatHM(b.duration)}${b.running ? ' ▶' : ''}`;
         const room = Math.max(10, width - clockWidth() - 6 - dur.length - 2);
         const text = label.length > room ? `${label.slice(0, room - 1)}…` : label;
@@ -791,7 +828,7 @@
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl) }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql) }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
     let day = '';
@@ -905,7 +942,8 @@
       // A work order typed here applies to this entry only, unless it is
       // the one it already had (which keeps any /wolink).
       const keepsLink = Boolean(r.it && r.it.wl && r.wo === r.it.wo);
-      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text }, { notes, wo: r.wo, wl: keepsLink });
+      // Equipment isn't in the text: an entry keeps its own.
+      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text }, { notes, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
       if (!r.it) {
         ops.push({ op: 'put', entry });
         added++;
@@ -1188,7 +1226,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

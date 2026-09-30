@@ -74,7 +74,7 @@
     function entryLabel(s) {
       const today = T.ymd(s.ts) === T.ymd(Date.now());
       const when = today ? T.clock(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.clock(s.ts)}`;
-      return `#${s.n} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
+      return `#${s.n} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${s.eq ? `${T.eqTag(s.eq)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
     }
 
     // Entries you can see (not /wolink's hidden links).
@@ -86,6 +86,90 @@
     function linkFor(category, ts) {
       const day = T.ymd(ts);
       return store.entries.find((e) => T.isLink(e) && sameCategory(T.linkCategory(e), category) && T.ymd(e.ts) === day) || null;
+    }
+
+    // ---- work orders and equipment ------------------------------------------------
+
+    // Two kinds of code, set the same ways: per category and day (/wolink,
+    // /eqlink, kept on the hidden link entry) or per entry (/wopunch, /eqpunch).
+    const CODES = [
+      { cmd: 'wo', field: 'wo', flag: 'wl', noun: 'work order', tag: T.woTag, example: '4471' },
+      { cmd: 'eq', field: 'eq', flag: 'ql', noun: 'equipment', tag: T.eqTag, example: 'ler-resolve-07' },
+    ];
+
+    function linkCommands(k) {
+      const needs = k.field === 'wo'
+        ? 'work orders need the latest supabase/schema.sql on the server; run it, then /sync'
+        : 'equipment needs end-to-end encryption on this account (/encrypt), then /sync';
+      const invalid = (v) => `"${v}" is not a valid ${k.noun}${k.field === 'eq' ? ' name' : ''} (no spaces or brackets, up to ${T.MAX_WO} characters)`;
+      const clean = (typed) => typed.trim().replace(k.field === 'wo' ? /^\[(.*)\]$/ : /^\{(.*)\}$/, '$1');
+      return {
+        [`${k.cmd}link`]: {
+          usage: `/${k.cmd}link <category> [YYYY-MM-DD] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
+          about: `link ${k.field === 'wo' ? 'a work order' : 'equipment'} to a category for a day (today by default)`,
+          async run(args) {
+            if (busy()) return;
+            const category = args[0] || '';
+            if (!category || category.startsWith('/')) return print(`usage: /${k.cmd}link <category> [YYYY-MM-DD] [${k.noun}]`, 'err');
+            let rest = args.slice(1);
+            let dayTs = Date.now();
+            if (rest[0] && /^\d{4}-\d{2}-\d{2}$/.test(rest[0])) {
+              const range = T.parseRange(rest[0], Date.now());
+              if (!range) return print(`"${rest[0]}" is not a real date`, 'err');
+              dayTs = range.from;
+              rest = rest.slice(1);
+            }
+            const day = T.ymd(dayTs);
+            if (!(await store.supports(k.field))) return print(needs, 'err');
+            const link = linkFor(category, dayTs);
+            const matching = shown().filter((e) => !T.isOff(e) && T.ymd(e.ts) === day && sameCategory(T.parseInput(e.text).category, category));
+            const typed = rest.length ? rest.join(' ') : await io.ask(`${k.noun} for ${category} on ${day}`, (link && link[k.field]) || '', k.field);
+            if (typed == null) return print(`${k.noun} cancelled`, 'dim');
+            const v = clean(typed);
+            if (v && !T.validWo(v)) return print(invalid(v), 'err');
+            const set = { [k.field]: v, [k.flag]: Boolean(v) };
+            const ops = [];
+            if (v) {
+              // The hidden link, at the start of the day.
+              const linkEntry = link ? T.makeEntry(link, set) : T.makeEntry({ id: T.uuid(), ts: T.startOfDay(dayTs), text: `${T.LINK}${category}` }, set);
+              ops.push({ op: 'put', entry: linkEntry });
+              // Entries punched with /${k.cmd}punch keep their own.
+              for (const e of matching) if (!e[k.field] || e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
+            } else {
+              // The link goes when nothing else is linked on it.
+              if (link) {
+                const other = CODES.some((o) => o !== k && link[o.field]);
+                ops.push(other ? { op: 'put', entry: T.makeEntry(link, set) } : { op: 'del', id: link.id });
+              }
+              for (const e of matching) if (e[k.field] && e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
+            }
+            store.apply(ops);
+            const updated = ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length;
+            if (!v) return print(link || updated ? `${k.noun} unlinked from ${category} on ${day}` : `no ${k.noun} was linked to ${category} on ${day}`, 'ok');
+            print(`${k.tag(v)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated`, 'ok');
+          },
+        },
+        [`${k.cmd}punch`]: {
+          usage: `/${k.cmd}punch [#] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
+          about: `set the ${k.noun} on one entry (Tab: older, Shift+Tab: newer)`,
+          async run(args) {
+            if (busy()) return;
+            if (!shown().some((e) => !T.isOff(e))) return print('no entries yet', 'err');
+            if (!(await store.supports(k.field))) return print(needs, 'err');
+            const chosen = await chooseEntry(args, `/${k.cmd}punch [#] [${k.noun}]`, `${k.cmd}punch`);
+            if (!chosen) return args.length ? undefined : print(`${k.noun} cancelled`, 'dim');
+            const current = store.entries.find((e) => e.id === chosen.id);
+            if (!current) return print('that entry was removed in the meantime', 'err');
+            const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`${k.noun} for ${entryLabel(chosen)}`, current[k.field] || '', k.field);
+            if (typed == null) return print(`${k.noun} cancelled`, 'dim');
+            const v = clean(typed);
+            if (v === (current[k.field] || '') && !current[k.flag]) return print(`${k.noun} unchanged`, 'dim');
+            if (v && !T.validWo(v)) return print(invalid(v), 'err');
+            store.apply([{ op: 'put', entry: T.makeEntry(current, { [k.field]: v, [k.flag]: false }) }]);
+            print(v ? `${k.tag(v)} set on #${chosen.n} ${describe(chosen)}` : `${k.noun} removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+          },
+        },
+      };
     }
 
     // ---- pay settings ----------------------------------------------------------
@@ -334,28 +418,34 @@
       const before = shown();
       // A /wolink for this category today gives the entry its work order.
       const link = linkFor(category, Date.now());
-      const entry = store.add(note ? `${category} ${note}` : category, link && link.wo ? { wo: link.wo, wl: true } : undefined);
+      const extra = {};
+      if (link && link.wo) Object.assign(extra, { wo: link.wo, wl: true });
+      if (link && link.eq) Object.assign(extra, { eq: link.eq, ql: true });
+      const entry = store.add(note ? `${category} ${note}` : category, Object.keys(extra).length ? extra : undefined);
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
       const parts = [T.clock(entry.ts)];
       if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
-      parts.push(`in #${shown().length} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${describe(T.parseInput(entry.text))}`);
+      parts.push(`in #${shown().length} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
     }
 
     // ---- editing and restoring -------------------------------------------------
 
-    // Entries added or changed in /edit get the work order /wolink linked to
-    // their category that day, like typed entries, unless they have their
-    // own ([4471] in the line, or /wopunch).
+    // Entries added or changed in /edit get the work order and equipment
+    // /wolink and /eqlink linked to their category that day, like typed
+    // entries, unless they have their own ([4471] in the line, or /wopunch,
+    // /eqpunch).
     function withLinkedWorkOrders(ops) {
       return ops.map((op) => {
         if (op.op !== 'put' || T.isOff(op.entry) || T.isLink(op.entry)) return op;
-        const e = op.entry;
-        if (e.wo && !e.wl) return op;
+        let e = op.entry;
         const link = linkFor(T.parseInput(e.text).category, e.ts);
-        const wo = link && link.wo ? link.wo : '';
-        if (wo === (e.wo || '')) return op;
-        return { op: 'put', entry: T.makeEntry(e, wo ? { wo, wl: true } : { wo: '', wl: false }) };
+        for (const k of CODES) {
+          if (e[k.field] && !e[k.flag]) continue;
+          const v = link && link[k.field] ? link[k.field] : '';
+          if (v !== (e[k.field] || '')) e = T.makeEntry(e, { [k.field]: v, [k.flag]: Boolean(v) });
+        }
+        return e === op.entry ? op : { op: 'put', entry: e };
       });
     }
 
@@ -444,7 +534,7 @@
             '  mtg standup',
             '',
             'Commands:',
-            ...Object.values(COMMANDS).map((c) => `  ${c.usage.padEnd(26)}${c.about}`),
+            ...Object.values(COMMANDS).map((c) => `  ${`${c.usage}  `.padEnd(28)}${c.about}`),
             '',
             'Ranges: today (default), yesterday, week, month, all, Nd (last N days),',
             '        YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
@@ -526,70 +616,8 @@
           print(T.formatTimeline(store.entries, range, Date.now(), { paint: io.paint, width: io.width ? io.width() : 80 }), 'report');
         },
       },
-      wolink: {
-        usage: '/wolink <category> [YYYY-MM-DD] [wo]',
-        about: "link a work order to a category for a day (today by default)",
-        async run(args) {
-          if (busy()) return;
-          const category = args[0] || '';
-          if (!category || category.startsWith('/')) return print('usage: /wolink <category> [YYYY-MM-DD] [work order]', 'err');
-          let rest = args.slice(1);
-          let dayTs = Date.now();
-          if (rest[0] && /^\d{4}-\d{2}-\d{2}$/.test(rest[0])) {
-            const range = T.parseRange(rest[0], Date.now());
-            if (!range) return print(`"${rest[0]}" is not a real date`, 'err');
-            dayTs = range.from;
-            rest = rest.slice(1);
-          }
-          const day = T.ymd(dayTs);
-          if (!(await store.supports('wo'))) {
-            return print('work orders need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
-          }
-          const link = linkFor(category, dayTs);
-          const matching = shown().filter((e) => !T.isOff(e) && T.ymd(e.ts) === day && sameCategory(T.parseInput(e.text).category, category));
-          const typed = rest.length ? rest.join(' ') : await io.ask(`work order for ${category} on ${day}`, (link && link.wo) || '', 'wo');
-          if (typed == null) return print('work order cancelled', 'dim');
-          const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
-          if (wo && !T.validWo(wo)) return print(`"${wo}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`, 'err');
-          const ops = [];
-          if (wo) {
-            // The hidden link, at the start of the day.
-            const linkEntry = link ? T.makeEntry(link, { wo, wl: true }) : T.makeEntry({ id: T.uuid(), ts: T.startOfDay(dayTs), text: `${T.LINK}${category}` }, { wo, wl: true });
-            ops.push({ op: 'put', entry: linkEntry });
-            // Entries punched with /wopunch keep their own work order.
-            for (const e of matching) if (!e.wo || e.wl) ops.push({ op: 'put', entry: T.makeEntry(e, { wo, wl: true }) });
-          } else {
-            if (link) ops.push({ op: 'del', id: link.id });
-            for (const e of matching) if (e.wo && e.wl) ops.push({ op: 'put', entry: T.makeEntry(e, { wo: '', wl: false }) });
-          }
-          store.apply(ops);
-          const updated = ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length;
-          if (!wo) return print(link || updated ? `work order unlinked from ${category} on ${day}` : `no work order was linked to ${category} on ${day}`, 'ok');
-          print(`${T.woTag(wo)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated`, 'ok');
-        },
-      },
-      wopunch: {
-        usage: '/wopunch [#] [wo]',
-        about: 'set the work order on one entry (Tab: older, Shift+Tab: newer)',
-        async run(args) {
-          if (busy()) return;
-          if (!shown().some((e) => !T.isOff(e))) return print('no entries yet', 'err');
-          if (!(await store.supports('wo'))) {
-            return print('work orders need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
-          }
-          const chosen = await chooseEntry(args, '/wopunch [#] [work order]', 'wopunch');
-          if (!chosen) return args.length ? undefined : print('work order cancelled', 'dim');
-          const current = store.entries.find((e) => e.id === chosen.id);
-          if (!current) return print('that entry was removed in the meantime', 'err');
-          const typed = args.length > 1 ? args.slice(1).join(' ') : await io.ask(`work order for ${entryLabel(chosen)}`, current.wo || '', 'wo');
-          if (typed == null) return print('work order cancelled', 'dim');
-          const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
-          if (wo === (current.wo || '') && !current.wl) return print('work order unchanged', 'dim');
-          if (wo && !T.validWo(wo)) return print(`"${wo}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`, 'err');
-          store.apply([{ op: 'put', entry: T.makeEntry(current, { wo, wl: false }) }]);
-          print(wo ? `${T.woTag(wo)} set on #${chosen.n} ${describe(chosen)}` : `work order removed from #${chosen.n} ${describe(chosen)}`, 'ok');
-        },
-      },
+      ...linkCommands(CODES[0]),
+      ...linkCommands(CODES[1]),
       wolist: {
         usage: '/wolist [range]',
         about: 'time per work order for a range, with linked work orders',

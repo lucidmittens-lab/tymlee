@@ -565,6 +565,11 @@
     wo.value = entry.wo || '';
     wo.placeholder = 'none';
     wo.spellcheck = false;
+    const eq = document.createElement('input');
+    eq.type = 'text';
+    eq.value = entry.eq || '';
+    eq.placeholder = 'none';
+    eq.spellcheck = false;
     const text = document.createElement('input');
     text.type = 'text';
     text.value = entry.text;
@@ -573,10 +578,10 @@
     notes.rows = 3;
     notes.value = entry.notes || '';
     notes.placeholder = 'notes';
-    for (const c of [wo, text, notes]) c.setAttribute('autocapitalize', 'off');
+    for (const c of [wo, eq, text, notes]) c.setAttribute('autocapitalize', 'off');
     // Not a login or address form: keep browser autofill bars away.
     card.setAttribute('autocomplete', 'off');
-    for (const c of [time, wo, text, notes]) c.setAttribute('autocomplete', 'off');
+    for (const c of [time, wo, eq, text, notes]) c.setAttribute('autocomplete', 'off');
 
     const error = document.createElement('div');
     error.className = 'ec-error';
@@ -598,15 +603,15 @@
 
     const row = document.createElement('div');
     row.className = 'ec-row';
-    row.append(field('Start', time), field('Work order', wo));
+    row.append(field('Start', time), field('Work order', wo), field('Equipment', eq));
     card.append(title, row, field('Entry', text), field('Notes', notes), error, buttons);
 
-    // Notes and work orders need server support when signed in.
-    for (const [name, control] of [['notes', notes], ['wo', wo]]) {
+    // Notes, work orders and equipment need server support when signed in.
+    for (const [name, control] of [['notes', notes], ['wo', wo], ['eq', eq]]) {
       store.supports(name).then((ok) => {
         if (ok) return;
         control.disabled = true;
-        control.placeholder = 'needs the latest supabase/schema.sql';
+        control.placeholder = name === 'eq' ? 'needs encryption' : 'needs the latest supabase/schema.sql';
       });
     }
 
@@ -614,7 +619,7 @@
       e.preventDefault();
       const current = store.entries.find((x) => x.id === b.id);
       if (!current) return closeEntryEditor();
-      const r = T.editEntry(current, { time: time.value, wo: wo.value, text: text.value, notes: notes.value }, Date.now());
+      const r = T.editEntry(current, { time: time.value, wo: wo.value, eq: eq.value, text: text.value, notes: notes.value }, Date.now());
       if (r.error) {
         error.textContent = r.error;
         return;
@@ -623,7 +628,7 @@
       backToPrompt();
       if (!r.changed) return;
       store.apply([{ op: 'put', entry: r.entry }]);
-      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
+      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${r.entry.eq ? `${T.eqTag(r.entry.eq)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
     });
     cancel.addEventListener('click', () => {
       closeEntryEditor();

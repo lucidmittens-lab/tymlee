@@ -714,8 +714,8 @@ button.gui-day {
   font-size: 12px;
 }
 .ec-title { color: var(--muted); }
-.ec-row { display: flex; gap: 10px; }
-.ec-row .ec-field { flex: 1; min-width: 0; }
+.ec-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.ec-row .ec-field { flex: 1 1 120px; min-width: 0; }
 .ec-field { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
 .entry-card input,
 .entry-card textarea {

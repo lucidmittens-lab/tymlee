@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.3.1';
+  const VERSION = '1.3.2';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -448,16 +448,17 @@
 
   // ---- timeline ------------------------------------------------------------
 
-  // Color slot per category: the first 8 categories ever used get slots 0-7
-  // in the order they first appeared, so a category keeps its color and a new
-  // one never repaints the others. Later categories share slot -1 ("other").
+  // Color slot per category, for the range on screen: its categories get
+  // slots 0-7 in the order they first appear there, so a day (or week) with
+  // up to 8 categories shows 8 distinct colors. More than that cycle back
+  // through them; the labels and legend still tell them apart.
   const TIMELINE_SLOTS = 8;
-  function categorySlots(entries) {
+  function categorySlots(spans) {
     const slots = new Map();
-    for (const e of visible(entries)) {
-      if (isOff(e)) continue;
-      const key = parseInput(e.text).category.toLowerCase();
-      if (!slots.has(key)) slots.set(key, slots.size < TIMELINE_SLOTS ? slots.size : -1);
+    for (const s of spans) {
+      if (s.off) continue;
+      const key = s.category.toLowerCase();
+      if (!slots.has(key)) slots.set(key, slots.size % TIMELINE_SLOTS);
     }
     return slots;
   }
@@ -466,8 +467,8 @@
   // entry (or off time) clipped to its day; `axisFrom`/`axisTo` are whole
   // hours (ms) spanning the logged time of every day, for a shared axis.
   function timelineDays(entries, range, now) {
-    const slots = categorySlots(entries);
     const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
+    const slots = categorySlots(spans);
     const days = [];
     for (const s of spans) {
       const key = ymd(s.ts);

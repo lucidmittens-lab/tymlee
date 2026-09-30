@@ -710,3 +710,16 @@ test('forms: a token alone on its line leaves no blank line when empty', () => {
   const multi = [{ ...FORM_LOG[0], notes: 'one\ntwo' }, FORM_LOG[1]];
   assert.equal(T.fillForm('> %{notes}\n  %{notes}\n', multi, day, NOW).text, '> one\ntwo\n  one\n  two\n');
 });
+
+test('timeline colors are per range: a day\'s categories get distinct colors', () => {
+  const log = [];
+  // Ten categories on Wednesday, then three new ones on Thursday.
+  for (let i = 0; i < 10; i++) log.push({ id: `w${i}`, ts: at(`2026-09-23T${String(8 + i).padStart(2, '0')}:00:00Z`), text: `cat${i} x` });
+  log.push({ id: 'o', ts: at('2026-09-23T19:00:00Z'), text: '/off' });
+  for (const [i, c] of ['alpha', 'beta', 'gamma'].entries()) log.push({ id: `t${i}`, ts: at(`2026-09-24T${String(8 + i).padStart(2, '0')}:00:00Z`), text: `${c} y` });
+  const thu = T.timelineDays(log, T.parseRange('2026-09-24', NOW), NOW);
+  assert.deepEqual(thu.days[0].blocks.map((b) => b.slot), [0, 1, 2]);
+  const wed = T.timelineDays(log, T.parseRange('2026-09-23', NOW), NOW);
+  // Past 8 they cycle rather than going grey.
+  assert.deepEqual(wed.days[0].blocks.filter((b) => !b.off).map((b) => b.slot), [0, 1, 2, 3, 4, 5, 6, 7, 0, 1]);
+});

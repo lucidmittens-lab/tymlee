@@ -18,7 +18,7 @@
   // Longest entry text and notes accepted (the server allows room for
   // encryption).
   const MAX_TEXT = 1000;
-  const MAX_NOTES = 1000;
+  const MAX_NOTES = 8000; // needs the 64000 limit in supabase/schema.sql (an encrypted entry holds text and notes)
 
   // Work orders: a short code per entry (no spaces or brackets), shown as
   // "[4471]" in a column before the start time.

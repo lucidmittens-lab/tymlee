@@ -88,6 +88,14 @@
     let serverSettings = null; // null (not checked yet), true, or false (no table: stay on this device)
     let settingsNoticeShown = false;
     let autoEncrypting = false; // turning encryption on for an account that doesn't have it yet
+    // Records: small items that aren't entries (forms and their remembered
+    // answers), one encrypted row each in the `records` table. Kept locally
+    // as [{ id, kind, body, at }] (plus { id, deleted } until a deletion is
+    // sent); `recordsDirty` lists ids changed here and not yet sent.
+    let records = [];
+    let recordsDirty = [];
+    let serverRecords = null; // null (not checked yet), true, or false (no table yet)
+    let recordsCursor = null; // newest modified_at seen, for fetching only changes
 
     // ---- local persistence -------------------------------------------------
 
@@ -120,6 +128,10 @@
       queue = read(key(who, 'queue'), []);
       settings = readObject(key(who, 'settings'));
       settingsDirty = readObject(key(who, 'settingsDirty')).dirty === true;
+      records = read(key(who, 'records'), []).filter((r) => r && typeof r.id === 'string');
+      recordsDirty = read(key(who, 'recordsDirty'), []);
+      // Signed out, records stay on this device: move old forms right away.
+      if (who === LOCAL) moveFormsFromSettings();
     }
 
     function readObject(k) {
@@ -136,6 +148,11 @@
       write(key(owner, 'settingsDirty'), { dirty: settingsDirty });
     }
 
+    function persistRecords() {
+      write(key(owner, 'records'), records);
+      write(key(owner, 'recordsDirty'), recordsDirty);
+    }
+
     function persist() {
       write(key(owner, 'entries'), entries);
       write(key(owner, 'queue'), queue);
@@ -147,6 +164,8 @@
       storage.removeItem(key(who, 'key'));
       storage.removeItem(key(who, 'settings'));
       storage.removeItem(key(who, 'settingsDirty'));
+      storage.removeItem(key(who, 'records'));
+      storage.removeItem(key(who, 'recordsDirty'));
     }
 
     // This device's copy of the account's master key.
@@ -505,6 +524,157 @@
       }
     }
 
+    // ---- records ---------------------------------------------------------------
+
+    // Whether records sync (or, on this device alone, are kept): signed out,
+    // or signed in to a server with the `records` table. Until then the
+    // shell keeps forms in the settings, as before.
+    const recordsReady = () => owner === LOCAL || serverRecords === true;
+
+    // The records of a kind, newest first: [{ id, at, ...body }].
+    function listRecords(kind) {
+      return records.filter((r) => !r.deleted && r.kind === kind)
+        .sort((a, b) => b.at - a.at)
+        .map((r) => ({ ...r.body, id: r.id, at: r.at }));
+    }
+
+    function touchRecord(id) {
+      if (owner !== LOCAL && !recordsDirty.includes(id)) recordsDirty.push(id);
+    }
+
+    // Add a record, or replace the one with `id`. Returns its id.
+    function putRecord(kind, body, id) {
+      const rec = { id: id || T.uuid(), kind, body, at: Date.now() };
+      records = records.filter((r) => r.id !== rec.id).concat(rec);
+      touchRecord(rec.id);
+      persistRecords();
+      onChange();
+      if (user) schedule(syncRecords);
+      return rec.id;
+    }
+
+    function deleteRecords(ids) {
+      if (!ids.length) return;
+      records = records.filter((r) => !ids.includes(r.id));
+      if (owner !== LOCAL) for (const id of ids) { records.push({ id, deleted: true }); touchRecord(id); }
+      persistRecords();
+      onChange();
+      if (user) schedule(syncRecords);
+    }
+
+    // Fetch other devices' changes, then send this one's. Like settings, it
+    // never fails the entry sync: changes just wait for the next one.
+    async function syncRecords() {
+      if (!user || !client || serverRecords === false || vault.mode !== 'ready') return;
+      const who = owner;
+      const key0 = vault.key;
+      try {
+        const rows = [];
+        const page = 1000;
+        for (let from = 0; ; from += page) {
+          let query = client.from('records').select('id,data,deleted,modified_at');
+          if (recordsCursor != null) query = query.gte('modified_at', new Date(recordsCursor - CURSOR_MARGIN_MS).toISOString());
+          const { data, error } = await query.order('modified_at', { ascending: true }).range(from, from + page - 1);
+          if (error) {
+            if (missingTable(error)) serverRecords = false;
+            else throw error;
+            return;
+          }
+          rows.push(...data);
+          if (data.length < page) break;
+        }
+        if (owner !== who) return;
+        const firstTime = serverRecords !== true;
+        serverRecords = true;
+        let newest = recordsCursor;
+        let changed = false;
+        for (const r of rows) {
+          const at = Date.parse(r.modified_at);
+          if (!Number.isNaN(at) && (newest == null || at > newest)) newest = at;
+          if (recordsDirty.includes(r.id)) continue; // this device's newer change wins
+          const had = records.some((x) => x.id === r.id);
+          if (r.deleted) {
+            if (had) { records = records.filter((x) => x.id !== r.id); changed = true; }
+            continue;
+          }
+          let rec;
+          try {
+            const { k, b, at: when } = JSON.parse(await V.decryptField(key0, r.id, 'record', r.data));
+            rec = { id: r.id, kind: k, body: b, at: when };
+          } catch (_) {
+            continue; // not readable with this key
+          }
+          if (owner !== who) return;
+          const cur = records.find((x) => x.id === r.id);
+          if (!cur || JSON.stringify(cur) !== JSON.stringify(rec)) {
+            records = records.filter((x) => x.id !== r.id).concat(rec);
+            changed = true;
+          }
+        }
+        if (firstTime) changed = moveFormsFromSettings() || changed;
+        // Send this device's changes.
+        const sending = recordsDirty.slice();
+        for (let i = 0; i < sending.length; i += 100) {
+          const batch = [];
+          for (const id of sending.slice(i, i + 100)) {
+            const rec = records.find((x) => x.id === id);
+            if (!rec || rec.deleted) {
+              batch.push({ id, user_id: who, data: '/deleted', deleted: true });
+            } else {
+              const json = JSON.stringify({ k: rec.kind, b: rec.body, at: rec.at });
+              batch.push({ id, user_id: who, data: await V.encryptField(key0, id, 'record', json), deleted: false });
+            }
+          }
+          const put = await client.from('records').upsert(batch);
+          if (put.error) throw put.error;
+          if (owner !== who) return;
+          const sent = new Set(batch.map((b) => b.id));
+          // Changed again while sending? Then it stays to send next time.
+          const stillSame = (id) => {
+            const rec = records.find((x) => x.id === id);
+            const b = batch.find((x) => x.id === id);
+            return !rec || rec.deleted ? b.deleted : !b.deleted;
+          };
+          recordsDirty = recordsDirty.filter((id) => !(sent.has(id) && stillSame(id)));
+          records = records.filter((r) => !(r.deleted && sent.has(r.id)));
+        }
+        recordsCursor = newest;
+        persistRecords();
+        if (changed) onChange();
+      } catch (_) {
+        // Try again on the next sync.
+      }
+    }
+
+    // Forms and answers kept in the settings by earlier versions become
+    // records (once there's somewhere to sync them), and leave the settings.
+    function moveFormsFromSettings() {
+      const forms = settings.forms || {};
+      const answers = settings.formAnswers || {};
+      if (!Object.keys(forms).length && !Object.keys(answers).length && !('forms' in settings) && !('formAnswers' in settings)) return false;
+      const now = Date.now();
+      const have = listRecords('form').map((f) => f.name.toLowerCase());
+      for (const [name, text] of Object.entries(forms)) {
+        if (have.includes(name.toLowerCase())) continue;
+        const id = T.uuid();
+        records.push({ id, kind: 'form', body: { name, text }, at: now });
+        touchRecord(id);
+      }
+      for (const [k, value] of Object.entries(answers)) {
+        const [label, where = ''] = k.split('\n');
+        const id = T.uuid();
+        records.push({ id, kind: 'answer', body: { label, where, value }, at: now });
+        touchRecord(id);
+      }
+      const { forms: _f, formAnswers: _a, ...rest } = settings;
+      settings = rest;
+      settingsDirty = owner !== LOCAL;
+      persistSettings();
+      persistRecords();
+      if (user) schedule(syncSettings);
+      return true;
+    }
+
     // ---- encryption ----------------------------------------------------------
 
     function missingTable(error) {
@@ -679,6 +849,10 @@
         const put = await client.from('settings').upsert({ user_id: who, data });
         if (put.error && !missingTable(put.error)) throw put.error;
       }
+      if (serverRecords !== false) {
+        const del = await client.from('records').delete().eq('user_id', who);
+        if (del.error && !missingTable(del.error)) throw del.error;
+      }
       const keyring = await client.from('keyring').update({ recovery, link: null }).eq('user_id', who);
       if (keyring.error) throw keyring.error;
       if (owner !== who) return '';
@@ -688,8 +862,13 @@
       settings = {};
       settingsDirty = false;
       changedCursor = null;
+      // This device's forms go back up, locked with the new key.
+      records = records.filter((r) => !r.deleted);
+      recordsDirty = records.map((r) => r.id);
+      recordsCursor = null;
       persist();
       persistSettings();
+      persistRecords();
       await unlock(raw);
       status = 'syncing';
       onChange();
@@ -774,12 +953,14 @@
         if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
         if (fullNow && (serverVersion === 1 || !serverNotes || !serverWo)) serverVersion = null;
         if (fullNow && serverSettings === false) serverSettings = null;
+        if (fullNow && serverRecords === false) serverRecords = null;
         if (fullNow && !queue.length) await verifyKey(); // flush checks when it has something to send
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
         if (fullNow) lastFullPull = now;
         await syncSettings();
+        await syncRecords();
       });
     }
 
@@ -797,6 +978,8 @@
       changedCursor = null;
       serverSettings = null;
       settingsNoticeShown = false;
+      serverRecords = null;
+      recordsCursor = null;
       loadOwner(user ? user.id : LOCAL);
       status = user ? 'syncing' : 'signed-out';
       onChange();
@@ -914,6 +1097,10 @@
       get entries() { return entries; },
       get settings() { return settings; },
       setSettings,
+      recordsReady,
+      listRecords,
+      putRecord,
+      deleteRecords,
       get user() { return user; },
       get pending() { return queue.length; },
       get status() { return status; },

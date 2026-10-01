@@ -202,8 +202,10 @@
 
     // ---- forms -----------------------------------------------------------------
 
-    // Templates (/newform) live with the account's settings, as do the last
-    // answers to their %{ask:...} questions.
+    // Templates (/newform) and the answers to their %{ask:...} questions are
+    // records (store.js): one encrypted row each, so there's no size limit and
+    // no answer is ever dropped. Until the server has the records table they
+    // stay in the account's settings, as in earlier versions.
     const FORM_HELP = [
       '# your form: text, with tokens filled in from the log',
       '# %{hours} %{in} %{out} %{notes} ... (/form lists them all)',
@@ -214,8 +216,78 @@
     const FORM_STARTER = 'Date: %{date}\n\n%{each category}\nProject: %{category}\nWork order: %{wo}\nHours: %{hours}\nWorked: %{in}-%{out}\nNotes:\n%{notes}\n%{end}\n';
     const validFormName = (name) => /^[\w-]{1,40}$/.test(name || '');
 
+    // name -> template (the newest, if two devices made one with the same name).
     function forms() {
-      return store.settings.forms || {};
+      if (!store.recordsReady()) return store.settings.forms || {};
+      const out = {};
+      const seen = new Set();
+      const add = (name, text) => {
+        if (seen.has(name.toLowerCase())) return;
+        seen.add(name.toLowerCase());
+        out[name] = text;
+      };
+      for (const f of store.listRecords('form')) add(f.name, f.text);
+      // One an older version put back in the settings, if any.
+      for (const [name, text] of Object.entries(store.settings.forms || {})) add(name, text);
+      return out;
+    }
+
+    const formRecords = (name) => store.listRecords('form').filter((f) => f.name.toLowerCase() === String(name).toLowerCase());
+
+    function saveForm(name, text) {
+      if (!store.recordsReady()) {
+        const next = { ...forms() };
+        const existing = formName(name);
+        if (existing) delete next[existing];
+        next[name] = text;
+        return store.setSettings({ ...store.settings, forms: next });
+      }
+      const [newest, ...older] = formRecords(name);
+      store.putRecord('form', { name, text }, newest && newest.id);
+      store.deleteRecords(older.map((f) => f.id));
+    }
+
+    function deleteForm(name) {
+      if (!store.recordsReady()) {
+        const next = { ...forms() };
+        delete next[name];
+        return store.setSettings({ ...store.settings, forms: next });
+      }
+      store.deleteRecords(formRecords(name).map((f) => f.id));
+      const left = store.settings.forms || {};
+      const stale = Object.keys(left).filter((n) => n.toLowerCase() === name.toLowerCase());
+      if (stale.length) {
+        const next = { ...left };
+        for (const n of stale) delete next[n];
+        store.setSettings({ ...store.settings, forms: next });
+      }
+    }
+
+    // The last answer to a question: the one given for this section (work
+    // order, category...), else the latest given for that label anywhere.
+    function lastAnswer(label, where) {
+      if (!store.recordsReady()) {
+        const old = store.settings.formAnswers || {};
+        return old[`${label}\n${where}`] || old[`${label}\n`] || '';
+      }
+      const all = store.listRecords('answer').filter((a) => a.label === label);
+      const exact = all.find((a) => a.where === where);
+      return (exact || all[0] || {}).value || '';
+    }
+
+    function saveAnswers(answers) {
+      if (!answers.size) return;
+      if (!store.recordsReady()) {
+        const old = { ...(store.settings.formAnswers || {}) };
+        for (const [k, v] of answers) old[k] = v;
+        return store.setSettings({ ...store.settings, formAnswers: old });
+      }
+      const all = store.listRecords('answer');
+      for (const [k, value] of answers) {
+        const [label, where] = k.split('\n');
+        const existing = all.find((a) => a.label === label && a.where === where);
+        store.putRecord('answer', { label, where, value }, existing && existing.id);
+      }
     }
 
     // The stored name for `name`, matched without regard to case.
@@ -249,11 +321,7 @@
         print(errors.concat(inline ? 'nothing was saved; fix the form and /save again' : 'nothing was saved').join('\n'), 'err');
         return false;
       }
-      const existing = formName(name);
-      const next = { ...forms() };
-      if (existing) delete next[existing];
-      next[name] = template;
-      store.setSettings({ ...store.settings, forms: next });
+      saveForm(name, template);
       print(`form ${name} saved · /form ${name} fills it in for today, /form ${name} tue for Tuesday`, 'ok');
       return true;
     }
@@ -276,9 +344,8 @@
       }
       const range = rangeFrom(day ? [day] : []);
       if (!range) return null;
-      const remembered = store.settings.formAnswers || {};
       return T.formQuestions(forms()[found], store.entries, range, Date.now())
-        .map((q) => ({ ...q, last: remembered[`${q.label}\n${q.where}`] || remembered[`${q.label}\n`] || '' }));
+        .map((q) => ({ ...q, last: lastAnswer(q.label, q.where) }));
     }
 
     // Answers for the next /form, in question order, instead of asking.
@@ -302,20 +369,15 @@
         return print(`no entries (${range.label}); nothing to fill ${found} in from`, 'dim');
       }
       const questions = T.formQuestions(template, store.entries, range, now);
-      const remembered = { ...(store.settings.formAnswers || {}) };
       const answers = new Map();
       for (const q of questions) {
-        const key = `${q.label}\n${q.where}`;
         const typed = given
           ? given.shift() || ''
-          : await io.ask(q.where ? `${q.label} for ${q.where}` : q.label, remembered[key] || remembered[`${q.label}\n`] || '', 'form');
+          : await io.ask(q.where ? `${q.label} for ${q.where}` : q.label, lastAnswer(q.label, q.where), 'form');
         if (typed == null) return print('form cancelled', 'dim');
-        answers.set(key, typed.trim());
+        answers.set(`${q.label}\n${q.where}`, typed.trim());
       }
-      if (answers.size) {
-        for (const [k, v] of answers) remembered[k] = v;
-        store.setSettings({ ...store.settings, formAnswers: remembered });
-      }
+      saveAnswers(answers);
       const result = T.fillForm(template, store.entries, range, now, (label, where) => answers.get(`${label}\n${where}`));
       if (result.errors) return print(result.errors.join('\n'), 'err');
       print(result.text.replace(/\s+$/, ''), 'report');
@@ -943,7 +1005,7 @@
         about: 'fill in one of your forms from the log, e.g. /form service tue; /form alone lists forms and tokens',
         async run(args) {
           if (!args.length) {
-            const width = Math.max(...T.FORM_TOKENS.map(([t]) => t.length)) + 4;
+            const width = Math.max(...T.FORM_TOKENS.map(([t]) => t.length)) + 5;
             return print([
               `forms: ${formList()}`,
               '/form <name> [day]   fill one in (today, yesterday, tue, 2026-09-29, week)',
@@ -954,7 +1016,7 @@
               `  ${'%{ask:Label}'.padEnd(width)}asked for when you fill it in (your last answer is offered)`,
               '',
               'repeat part of a form per group; tokens inside cover just that group:',
-              '  %{each category} ... %{end}    also %{each wo} and %{each entry}',
+              '  %{each category} ... %{end}    also %{each wo}, %{each equipment} and %{each entry}',
               'outside any %{each}, tokens cover the whole day; inside %{each entry}, %{in} and %{out} are that entry\'s',
               'a token alone on its line that comes out empty (no notes, say) leaves no blank line',
             ].join('\n'), 'report');
@@ -987,9 +1049,7 @@
         run(args) {
           const found = formName(args[0]);
           if (!found) return print(args[0] ? `no form called "${args[0]}" · your forms: ${formList()}` : `usage: /delform <name> · your forms: ${formList()}`, 'err');
-          const next = { ...forms() };
-          delete next[found];
-          store.setSettings({ ...store.settings, forms: next });
+          deleteForm(found);
           print(`form ${found} deleted`, 'ok');
         },
       },

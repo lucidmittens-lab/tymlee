@@ -428,9 +428,8 @@
         return null;
       }
       if (args.length) {
-        const n = Number(String(args[0]).replace(/^#/, ''));
-        const found = spans.find((s) => s.n === n);
-        if (!found) print(`usage: ${usage}   (an entry number from /log; /off entries don't count)`, 'err');
+        const found = T.findById(spans, args[0]);
+        if (!found) print(`usage: ${usage}   (an entry ID from /log, or its last digits; /off entries don't count)`, 'err');
         return found || null;
       }
       const picked = await io.pickEntry(spans.slice().reverse().map((span) => ({ span, label: entryLabel(span) })), name);
@@ -496,7 +495,7 @@
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
       const parts = [T.clock(entry.ts)];
       if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
-      parts.push(`in #${shown().length} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
+      parts.push(`in #${T.idText(entry.sid || shown().length * 10)} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
     }
 
@@ -724,15 +723,12 @@
       },
       rm: {
         usage: '/rm <#>',
-        about: 'delete an entry by number (its time goes to the one before)',
+        about: 'delete an entry by its ID, or the ID\'s last digits (its time goes to the one before)',
         run(args) {
-          const n = Number(args[0]);
-          if (!Number.isInteger(n) || n < 1 || n > shown().length) {
-            return print(`usage: /rm <#>   (# between 1 and ${shown().length || 1}, see /log)`, 'err');
-          }
-          const s = T.withSpans(store.entries, Date.now())[n - 1];
+          const s = T.findById(T.withSpans(store.entries, Date.now()), args[0]);
+          if (!s) return print('usage: /rm <#>   (an entry ID from /log, or its last digits)', 'err');
           store.remove(s.id);
-          print(`removed #${n} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
+          print(`removed #${s.n} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
         },
       },
       export: {

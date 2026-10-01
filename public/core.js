@@ -48,10 +48,73 @@
   }
   const EQ_RULES = `names up to ${MAX_WO} characters, separated by commas, no brackets`;
 
+  // Entry IDs: a number each entry keeps for good, shown with six digits
+  // ("015620"). New entries get the next multiple of 10; one added between
+  // two others (in /edit, or from a backup) takes the next free number after
+  // the one before it (015621 ... 015629) when there is room.
+  const validSid = (n) => Number.isInteger(n) && n > 0;
+  const idText = (n) => String(n).padStart(6, '0');
+
+  // Give entries without an ID one (and fix two entries sharing one, which
+  // two devices offline can cause: the one with the lower internal id keeps
+  // it). A log without any IDs (from before they existed) is numbered by
+  // position x10, so every device numbers the same log the same way.
+  // Returns { changed: [entries with a new ID], renumbered: count }.
+  function assignIds(all) {
+    const list = visible(all);
+    const owner = new Map(); // sid -> entry keeping it
+    for (const e of list) {
+      if (!validSid(e.sid)) continue;
+      const other = owner.get(e.sid);
+      if (!other || e.id < other.id) owner.set(e.sid, e);
+    }
+    const keeps = (e) => validSid(e.sid) && owner.get(e.sid) === e;
+    const renumbered = list.filter((e) => validSid(e.sid) && !keeps(e)).length;
+    if (!owner.size) {
+      return { changed: list.map((e, i) => makeEntry(e, { sid: (i + 1) * 10 })), renumbered: 0 };
+    }
+    let max = Math.max(...owner.keys());
+    const changed = [];
+    let prev = 0;
+    list.forEach((e, i) => {
+      if (keeps(e)) {
+        prev = e.sid;
+        return;
+      }
+      const next = list.slice(i + 1).find(keeps);
+      let sid = null;
+      if (next) {
+        for (let c = prev + 1; c % 10 !== 0; c++) {
+          if (c >= next.sid) break;
+          if (!owner.has(c)) { sid = c; break; }
+        }
+      }
+      if (sid == null) {
+        sid = Math.floor(max / 10) * 10 + 10;
+        max = sid;
+      }
+      owner.set(sid, e);
+      prev = sid;
+      changed.push(makeEntry(e, { sid }));
+    });
+    return { changed, renumbered };
+  }
+
+  // The entry an ID typed in a command means: all six digits for an exact
+  // match; fewer for the latest entry whose ID ends with them ("450").
+  function findById(spans, typed) {
+    const t = String(typed == null ? '' : typed).trim().replace(/^#/, '');
+    if (!/^\d+$/.test(t)) return null;
+    if (t.length >= 6) return spans.find((s) => Number(s.n) === Number(t)) || null;
+    for (let i = spans.length - 1; i >= 0; i--) if (spans[i].n.endsWith(t)) return spans[i];
+    return null;
+  }
+
   // An entry with its optional fields set only when they have a value.
   function makeEntry(base, extra) {
     const e = { id: base.id, ts: base.ts, text: base.text };
-    const x = { notes: base.notes, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, ...(extra || {}) };
+    const x = { notes: base.notes, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, sid: base.sid, ...(extra || {}) };
+    if (validSid(x.sid)) e.sid = x.sid;
     if (x.notes) e.notes = x.notes;
     if (x.wo) {
       e.wo = x.wo;
@@ -141,7 +204,7 @@
         ...e,
         ...(off ? { category: '(off)', note: '' } : parseInput(e.text)),
         off,
-        n: i + 1,
+        n: idText(validSid(e.sid) ? e.sid : (i + 1) * 10),
         end,
         running: !next,
         duration: Math.max(0, end - e.ts),
@@ -311,11 +374,24 @@
     const out = [];
     for (const day of days) {
       out.push(`${DAY_NAMES[new Date(day.ts).getDay()]} ${day.key}`);
-      const endHead = compact ? '' : `${'end'.padEnd(clockWidth())}  `;
+      if (compact) {
+        // Phones: two lines an entry (ID, start, duration and work order,
+        // then what it was), so nothing wraps mid-column.
+        for (const s of day.spans) {
+          const dur = s.off ? '-' : formatHM(s.duration);
+          out.push(`  ${String(s.n).padStart(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${woTag(s.wo)}`.trimEnd());
+          out.push(`${' '.repeat(numWidth + 4)}${s.category}${s.note ? ` ${s.note}` : ''}`);
+          out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
+        }
+        out.push(`  ${RULE}`);
+        out.push(...summaryLines(day.spans, catWidth));
+        out.push('');
+        continue;
+      }
       const woHead = woWidth ? `${'wo'.padEnd(woWidth)}  ` : '';
-      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}${'start'.padEnd(clockWidth())}  ${endHead}${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
+      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}${'start'.padEnd(clockWidth())}  ${'end'.padEnd(clockWidth())}  ${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
-        const end = compact ? '' : `${s.running ? nowCol() : clockCol(s.end)}  `;
+        const end = `${s.running ? nowCol() : clockCol(s.end)}  `;
         const dur = s.off ? '-' : formatHM(s.duration);
         out.push(
           `  ${String(s.n).padStart(numWidth)}  ${woCell(s)}${clockCol(s.ts)}  ${end}${dur.padStart(6)}  ` +
@@ -439,7 +515,7 @@
     const eq = fields.eq == null ? entry.eq || '' : normalizeEq(fields.eq);
     if (eq == null) return { error: `"${String(fields.eq).trim()}" is not valid equipment (${EQ_RULES})` };
     const ql = Boolean(entry.ql && eq === (entry.eq || ''));
-    const next = makeEntry({ id: entry.id, ts, text }, { notes, wo, wl, eq, ql });
+    const next = makeEntry({ id: entry.id, ts, text, sid: entry.sid }, { notes, wo, wl, eq, ql });
     const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
       (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl) &&
       (next.eq || '') === (entry.eq || '') && Boolean(next.ql) === Boolean(entry.ql);
@@ -861,7 +937,7 @@
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql) }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
     let day = '';
@@ -881,7 +957,7 @@
   // Turn edited text back into operations against the original entries.
   // Returns { ops, errors, changed, added, removed }; ops is empty on error.
   function parseEditable(text, items, now) {
-    const byN = new Map(items.map((it) => [it.n, it]));
+    const byN = new Map(items.map((it) => [Number(it.n), it]));
     const seen = new Set();
     const errors = [];
     const records = []; // one per entry line, with the notes lines under it
@@ -944,11 +1020,11 @@
         const n = +m[1];
         it = byN.get(n);
         if (!it) {
-          errors.push(`${where}: there is no entry #${n} in this list (remove the number to add a new entry)`);
+          errors.push(`${where}: there is no entry #${m[1]} in this list (remove the number to add a new entry)`);
           return;
         }
         if (seen.has(n)) {
-          errors.push(`${where}: entry #${n} appears more than once`);
+          errors.push(`${where}: entry #${it.n} appears more than once`);
           return;
         }
         seen.add(n);
@@ -976,7 +1052,7 @@
       // the one it already had (which keeps any /wolink).
       const keepsLink = Boolean(r.it && r.it.wl && r.wo === r.it.wo);
       // Equipment isn't in the text: an entry keeps its own.
-      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text }, { notes, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
+      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text, sid: r.it ? r.it.sid : undefined }, { notes, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
       if (!r.it) {
         ops.push({ op: 'put', entry });
         added++;
@@ -988,7 +1064,7 @@
 
     let removed = 0;
     for (const it of items) {
-      if (!seen.has(it.n)) {
+      if (!seen.has(Number(it.n))) {
         ops.push({ op: 'del', id: it.id });
         removed++;
       }
@@ -1085,6 +1161,17 @@
   // Returns { entries: [{ ts, text, notes? }], errors }.
   function parseBackup(text) {
     const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    // The phone layout of /log has two lines an entry (ID, start, duration,
+    // work order; then what it was): join them back into one row.
+    const T12 = '\\d{1,2}:\\d{2}(?:am|pm)?';
+    const phoneRow = new RegExp(`^\\s*\\d+\\s+(${T12})\\s+(-|\\d+:\\d{2})(?:\\s+(\\[[^\\]\\s]+\\]))?\\s*$`);
+    for (let i = 0; i + 1 < lines.length; i++) {
+      const m = lines[i].match(phoneRow);
+      const next = lines[i + 1].trim();
+      if (!m || !next || notesLine(next) != null) continue;
+      lines[i] = `  0  ${m[3] ? `${m[3]}  ` : ''}${m[1]}  ${m[2]}  ${next}`;
+      lines[i + 1] = '';
+    }
     const content = lines.filter((l) => !l.trim().startsWith('#'));
     const start = content.findIndex((l) => l.trim());
     if (start !== -1 && isCsvHeader(content[start])) return backupFromCSV(content.slice(start).join('\n'));
@@ -1119,9 +1206,9 @@
 
       // Report row:  3  [4471]  09:00  09:45    0:45  dev  note
       // (work order and end columns optional)
-      const row = line.match(/^\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})\s+(?:(?:\d{1,2}:\d{2}|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
+      const row = line.match(/^\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(?:(?:\d{1,2}:\d{2}(?:am|pm)?|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
       // /edit line:  3  [4471]  09:00  dev note   or   09:00 dev note
-      const edit = !row && line.match(/^(?:\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      const edit = !row && line.match(/^(?:\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
       if (!row && !edit) {
         // Per-category summary lines:  dev   0:57   79%
         if (/^\S+\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
@@ -1130,10 +1217,12 @@
       }
       const m = row || edit;
       const wo = m[1] || '';
-      const [h, min] = [+m[2], +m[3]];
+      // 12-hour times (exported on the 12-hour clock) read as 24-hour.
+      const h = m[4] ? (+m[2] % 12) + (m[4] === 'pm' ? 12 : 0) : +m[2];
+      const min = +m[3];
       let entryText;
-      if (row) entryText = row[4] === '(off)' ? OFF : [row[4], row[5]].filter(Boolean).join(' ');
-      else entryText = edit[4];
+      if (row) entryText = row[5] === '(off)' ? OFF : [row[5], row[6]].filter(Boolean).join(' ');
+      else entryText = edit[5];
       if (wo && !validWo(wo)) {
         errors.push(`${where}: "${wo}" is not a valid work order`);
         return;
@@ -1259,7 +1348,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

@@ -132,6 +132,8 @@
       recordsDirty = read(key(who, 'recordsDirty'), []);
       // Signed out, records stay on this device: move old forms right away.
       if (who === LOCAL) moveFormsFromSettings();
+      idsReady = who === LOCAL || hasIds();
+      if (who === LOCAL && idOps().length) write(key(who, 'entries'), entries);
     }
 
     function readObject(k) {
@@ -188,10 +190,30 @@
     // ---- local changes -----------------------------------------------------
 
     // Apply local changes, save them, and queue them for the server.
+    // Entry IDs (T.assignIds) are given out once this device knows the log:
+    // signed out, or when it already has numbered entries, or after the first
+    // full download (so a log from before IDs is numbered like on every other
+    // device).
+    let idsReady = false;
+    const hasIds = () => entries.some((e) => Number.isInteger(e.sid));
+
+    // Give entries without an ID one; returns the changes, for the queue.
+    function idOps() {
+      if (!idsReady) return [];
+      const { changed, renumbered } = T.assignIds(entries);
+      if (renumbered) {
+        onNotice(`${renumbered === 1 ? 'an entry' : `${renumbered} entries`} had the same ID as one made on another device, and got a new one`, 'dim');
+      }
+      const ops = changed.map((entry) => ({ op: 'put', entry }));
+      entries = T.applyOps(entries, ops);
+      return ops;
+    }
+
     function apply(ops) {
       if (!ops.length) return;
-      for (const op of ops) queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
       entries = T.applyOps(entries, ops);
+      ops = ops.concat(idOps());
+      for (const op of ops) queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
       persist();
       onChange();
       if (user) schedule(flush);
@@ -208,7 +230,7 @@
       const ts = Math.max(Date.now(), last ? last.ts + 1 : 0);
       const entry = T.makeEntry({ id: T.uuid(), ts, text }, extra);
       change({ op: 'put', entry });
-      return entry;
+      return entries.find((e) => e.id === entry.id) || entry; // with its ID
     }
 
     function remove(id) {
@@ -354,6 +376,7 @@
       let wl = Boolean(r.wo_linked);
       let eq = '';
       let ql = false;
+      let sid = null;
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
       if (encrypted && vault.mode !== 'ready') {
@@ -374,6 +397,7 @@
           notes = opened.notes || notes;
           if (opened.wo) ({ wo, wl } = { wo: opened.wo, wl: Boolean(opened.wl) });
           if (opened.eq) ({ eq, ql } = { eq: opened.eq, ql: Boolean(opened.ql) });
+          if (opened.sid) sid = opened.sid;
         }
         if (V.isEncrypted(notes)) {
           notes = await V.decryptNotes(vault.key, r.id, notes);
@@ -388,7 +412,7 @@
         return null;
       }
       if (!encrypted && vault.mode === 'ready') reseal = true;
-      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl, eq, ql }), reseal };
+      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl, eq, ql, sid }), reseal };
     }
 
     // Download changes and merge them with the local log, then re-apply unsent
@@ -445,11 +469,14 @@
       const reseal = opened.filter((o) => o.reseal && !waiting.has(o.entry.id));
       for (const o of reseal) queue = T.enqueue(queue, { op: 'put', entry: o.entry }, inFlight);
       entries = T.applyOps(base, queue);
+      if (!incremental && since == null) idsReady = true;
+      const numbered = idOps();
+      for (const op of numbered) queue = T.enqueue(queue, op, inFlight);
       persist();
       if (seen.unreadable) {
         onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
       }
-      if (reseal.length) schedule(flush);
+      if (reseal.length || numbered.length) schedule(flush);
       settle();
       // Another device has turned encryption on: find out and lock this one.
       if (seen.encrypted && (vault.mode === 'none' || vault.mode === 'plain')) {

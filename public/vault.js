@@ -151,6 +151,7 @@
   // together.
   function sealEntry(key, id, entry) {
     const payload = { t: entry.ts, x: entry.text };
+    if (entry.sid) payload.i = entry.sid;
     if (entry.notes) payload.n = entry.notes;
     if (entry.wo) {
       payload.w = entry.wo;
@@ -163,9 +164,9 @@
     return encryptWith(SEALED, key, id, JSON.stringify(payload));
   }
 
-  // { ts, text } plus notes / wo / wl / eq / ql when the entry has them.
+  // { ts, text } plus notes / wo / wl / eq / ql / sid when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x, n, w, l, q, k } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n, w, l, q, k, i } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
     const entry = { ts: t, text: x };
     if (typeof n === 'string' && n) entry.notes = n;
@@ -177,6 +178,7 @@
       entry.eq = q;
       if (k) entry.ql = true;
     }
+    if (Number.isInteger(i) && i > 0) entry.sid = i;
     return entry;
   }
 

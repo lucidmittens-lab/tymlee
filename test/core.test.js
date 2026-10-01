@@ -35,7 +35,7 @@ test('each entry runs until the next one starts', () => {
   assert.equal(spans[1].duration, 150);
   assert.equal(spans[1].running, true);
   assert.equal(spans[1].note, 'x');
-  assert.equal(spans[1].n, 2);
+  assert.equal(spans[1].n, '000020');
 });
 
 test('summarize groups by category, largest first', () => {
@@ -86,10 +86,10 @@ const LOG = [
 test('single-day report is fixed-width with a summary', () => {
   assert.equal(T.formatReport(LOG, T.parseRange('today', NOW), NOW), [
     'Thu 2026-09-24',
-    '  #  start  end       dur  category  note',
-    '  3  09:00  09:45    0:45  dev       fixing login bug',
-    '  4  09:45  10:00    0:15  mtg       standup',
-    '  5  10:00  now      0:12  dev       code review',
+    '       #  start  end       dur  category  note',
+    '  000030  09:00  09:45    0:45  dev       fixing login bug',
+    '  000040  09:45  10:00    0:15  mtg       standup',
+    '  000050  10:00  now      0:12  dev       code review',
     '  ' + '-'.repeat(56),
     '  dev         0:57   79%',
     '  mtg         0:15   21%',
@@ -103,7 +103,7 @@ test('multi-day report adds an overall summary', () => {
   assert.match(report, /\nThu 2026-09-24\n/);
   assert.match(report, /\nweek: 2026-09-23 \.\. 2026-09-24, 2 days\n/);
   // "off" runs overnight until the first entry of the next day.
-  assert.match(report, / {2}2 {2}17:30 {2}09:00 {3}15:30 {2}off\n/);
+  assert.match(report, / {2}000020 {2}17:30 {2}09:00 {3}15:30 {2}off\n/);
   assert.match(report, / {2}total {6}18:12$/);
 });
 
@@ -115,8 +115,8 @@ test('csv export quotes fields and leaves the running end blank', () => {
   const log = [...LOG, { ts: at('2026-09-24T10:05:00Z'), text: 'mtg sync, "roadmap"' }];
   const lines = T.toCSV(log, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
   assert.equal(lines[0], 'n,wo,start,end,minutes,category,note,notes');
-  assert.equal(lines[1], '3,,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
-  assert.equal(lines[4], '6,,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
+  assert.equal(lines[1], '000030,,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
+  assert.equal(lines[4], '000060,,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
 });
 
 // ---- sync ------------------------------------------------------------------
@@ -160,13 +160,39 @@ test('nextBatch takes a run of same-kind operations', () => {
   assert.equal(T.nextBatch([]), null);
 });
 
-test('compact report drops the end column', () => {
-  assert.equal(T.formatReport(LOG, T.parseRange('today', NOW), NOW, { compact: true }), [
+test('compact report (phones): two lines an entry, and restore reads it back', () => {
+  const text = T.formatReport(WO_LOG, T.parseRange('today', NOW), NOW, { compact: true });
+  assert.equal(text, [
     'Thu 2026-09-24',
-    '  #  start     dur  category  note',
-    '  3  09:00    0:45  dev       fixing login bug',
-    '  4  09:45    0:15  mtg       standup',
-    '  5  10:00    0:12  dev       code review',
+    '  000010  09:00   0:45  [4471]',
+    '          dev fixing login bug',
+    '  000020  09:45   0:15',
+    '          mtg standup',
+    '  000030  10:00   0:12  [WO-88]',
+    '          dev code review',
+    '          > PR #42',
+    '  ' + '-'.repeat(36),
+    '  dev         0:57   79%',
+    '  mtg         0:15   21%',
+    '  total       1:12',
+  ].join('\n'));
+  const back = T.parseBackup(text);
+  assert.deepEqual(back.errors, []);
+  assert.deepEqual(back.entries.map((e) => [e.text, e.wo || '', e.notes || '']),
+    [['dev fixing login bug', '4471', ''], ['mtg standup', '', ''], ['dev code review', 'WO-88', 'PR #42']]);
+  // Exports made on the 12-hour clock read back too.
+  try {
+    T.setClock('12');
+    const twelve = T.parseBackup(T.formatReport(LOG, T.parseRange('today', NOW), NOW));
+    assert.deepEqual(twelve.errors, []);
+    assert.deepEqual(twelve.entries.map((e) => T.hhmm(e.ts)), ['09:00', '09:45', '10:00']);
+  } finally {
+    T.setClock('24');
+  }
+});
+
+test('compact report keeps the summary', () => {
+  assert.equal(T.formatReport(LOG, T.parseRange('today', NOW), NOW, { compact: true }).split('\n').slice(-4).join('\n'), [
     '  ' + '-'.repeat(36),
     '  dev         0:57   79%',
     '  mtg         0:15   21%',
@@ -186,14 +212,14 @@ const last24h = { from: NOW - 86400000, to: Infinity, label: '24h' };
 
 test('formatEditable lists entries under day headers', () => {
   const { text, items } = T.formatEditable(EDIT_LOG, last24h, NOW);
-  assert.deepEqual(items.map((i) => i.n), [1, 2, 3, 4]);
+  assert.deepEqual(items.map((i) => i.n), ['000010', '000020', '000030', '000040']);
   assert.equal(text.split('\n').filter((l) => !l.startsWith('#')).join('\n'), [
     'Wed 2026-09-23',
-    '  1  17:30  off',
+    '  000010  17:30  off',
     'Thu 2026-09-24',
-    '  2  09:00  dev fixing login bug',
-    '  3  09:45  mtg standup',
-    '  4  10:00  dev code review',
+    '  000020  09:00  dev fixing login bug',
+    '  000030  09:45  mtg standup',
+    '  000040  10:00  dev code review',
     '',
   ].join('\n'));
 });
@@ -209,10 +235,10 @@ test('parseEditable: edit text and time, delete, and add', () => {
   const { items } = T.formatEditable(EDIT_LOG, last24h, NOW);
   const edited = [
     'Wed 2026-09-23',
-    '  1  17:30  off',
+    '  000010  17:30  off',
     'Thu 2026-09-24',
-    '  2  09:00  dev   fixing the login bug',
-    '  4  09:55  dev code review',
+    '  000020  09:00  dev   fixing the login bug',
+    '  000040  09:55  dev code review',
     '09:30 email inbox',
   ].join('\n');
   const r = T.parseEditable(edited, items, NOW);
@@ -235,18 +261,18 @@ test('parseEditable: reports errors and makes no changes', () => {
   const { items } = T.formatEditable(EDIT_LOG, last24h, NOW);
   const r = T.parseEditable([
     'Thu 2026-09-24',
-    '  2  09:00  dev a',
-    '  2  09:10  dev b',
-    '  9  09:20  dev c',
-    '  3  25:00  mtg',
-    '  4  10:30  dev later than now',
+    '  000020  09:00  dev a',
+    '  000020  09:10  dev b',
+    '  000090  09:20  dev c',
+    '  000030  25:00  mtg',
+    '  000040  10:30  dev later than now',
     'just some words',
     'Mon 2026-02-30',
   ].join('\n'), items, NOW);
   assert.deepEqual(r.ops, []);
   assert.deepEqual(r.errors.map((e) => e.split(':')[0]), ['line 3', 'line 4', 'line 5', 'line 6', 'line 7', 'line 8']);
   assert.match(r.errors[0], /more than once/);
-  assert.match(r.errors[1], /no entry #9/);
+  assert.match(r.errors[1], /no entry #000090/);
   assert.match(r.errors[2], /not a valid time/);
   assert.match(r.errors[3], /in the future/);
   assert.match(r.errors[4], /expected "HH:MM text"/);
@@ -277,11 +303,11 @@ test('off time is shown but not counted', () => {
   assert.deepEqual(T.knownCategories(OFF_LOG), ['mtg', 'dev']);
   assert.equal(T.formatReport(OFF_LOG, T.parseRange('today', NOW), NOW), [
     'Thu 2026-09-24',
-    '  #  start  end       dur  category  note',
-    '  1  09:00  09:45    0:45  dev       fixing login bug',
-    '  2  09:45  10:00       -  (off)',
-    '  3  10:00  10:05    0:05  mtg       standup',
-    '  4  10:05  now         -  (off)',
+    '       #  start  end       dur  category  note',
+    '  000010  09:00  09:45    0:45  dev       fixing login bug',
+    '  000020  09:45  10:00       -  (off)',
+    '  000030  10:00  10:05    0:05  mtg       standup',
+    '  000040  10:05  now         -  (off)',
     '  ' + '-'.repeat(56),
     '  dev         0:45   90%',
     '  mtg         0:05   10%',
@@ -293,7 +319,7 @@ test('off time is shown but not counted', () => {
 
 test('/edit keeps /off lines and rejects other "/" text', () => {
   const { text, items } = T.formatEditable(OFF_LOG, { from: 0, to: Infinity, label: 'all' }, NOW);
-  assert.match(text, /  2  09:45  \/off\n/);
+  assert.match(text, /  000020  09:45  \/off\n/);
   assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
   const added = T.parseEditable(text + '10:10 /off\n', items, NOW);
   assert.equal(added.added, 1);
@@ -392,8 +418,8 @@ const NOTED = [
 
 test('notes show under their entry in /log', () => {
   const report = T.formatReport(NOTED, T.parseRange('today', NOW), NOW);
-  assert.match(report, / {2}1 {2}09:00 {2}09:45 {4}0:45 {2}dev {7}fixing login bug\n {5}> root cause: expired token\n {5}> fix in auth.js\n {2}2 {2}09:45/);
-  assert.match(report, /code review\n {5}> PR #42\n/);
+  assert.match(report, / {2}000010 {2}09:00 {2}09:45 {4}0:45 {2}dev {7}fixing login bug\n {10}> root cause: expired token\n {10}> fix in auth.js\n {2}000020 {2}09:45/);
+  assert.match(report, /code review\n {10}> PR #42\n/);
 });
 
 test('notes survive the txt and csv backups', () => {
@@ -410,12 +436,12 @@ test('notes survive the txt and csv backups', () => {
 
 test('/edit shows notes and saves changes to them', () => {
   const { text, items } = T.formatEditable(NOTED, ALL, NOW);
-  assert.match(text, / {2}1 {2}09:00 {2}dev fixing login bug\n {12}> root cause: expired token\n {12}> fix in auth\.js\n/);
+  assert.match(text, / {2}000010 {2}09:00 {2}dev fixing login bug\n {17}> root cause: expired token\n {17}> fix in auth\.js\n/);
   assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
   const edited = text
     .replace('> PR #42', '> PR #42, approved')
-    .replace('  2  09:45  mtg standup', '  2  09:45  mtg standup\n> ran long')
-    .replace(/ {12}> root cause.*\n.*fix in auth\.js\n/, '');
+    .replace('  000020  09:45  mtg standup', '  000020  09:45  mtg standup\n> ran long')
+    .replace(/ {17}> root cause.*\n.*fix in auth\.js\n/, '');
   const r = T.parseEditable(edited, items, NOW);
   assert.deepEqual(r.errors, []);
   assert.equal(r.changed, 3);
@@ -432,21 +458,21 @@ test('/report groups entries by category, largest first', () => {
     'report: today (2026-09-24)',
     '',
     'dev                     0:57   79%  2 entries',
-    '  1  09:00-09:45    0:45  fixing login bug',
-    '     > root cause: expired token',
-    '     > fix in auth.js',
-    '  3  10:00-now      0:12  code review',
-    '     > PR #42',
+    '  000010  09:00-09:45    0:45  fixing login bug',
+    '          > root cause: expired token',
+    '          > fix in auth.js',
+    '  000030  10:00-now      0:12  code review',
+    '          > PR #42',
     '',
     'mtg                     0:15   21%  1 entry',
-    '  2  09:45-10:00    0:15  standup',
+    '  000020  09:45-10:00    0:15  standup',
     '',
     '-'.repeat(48),
     'total                   1:12        3 entries',
   ].join('\n'));
   const week = T.formatCategoryReport(LOG, T.parseRange('week', NOW), NOW);
   assert.match(week, /report: week \(2026-09-23 \.\. 2026-09-24\)/);
-  assert.match(week, / {2}1 {2}Wed 09-23 16:00-17:30 {4}1:30 {2}wrap up/);
+  assert.match(week, / {2}000010 {2}Wed 09-23 16:00-17:30 {4}1:30 {2}wrap up/);
   assert.ok(!/\(off\)/.test(week), 'off time is left out');
   assert.equal(T.formatCategoryReport(NOTED, T.parseRange('2026-01-01', NOW), NOW), 'no entries (2026-01-01)');
 });
@@ -461,15 +487,15 @@ const WO_LOG = [
 
 test('work orders show in a column before the time', () => {
   assert.equal(T.formatReport(WO_LOG, T.parseRange('today', NOW), NOW).split('\n').slice(1, 6).join('\n'), [
-    '  #  wo       start  end       dur  category  note',
-    '  1  [4471]   09:00  09:45    0:45  dev       fixing login bug',
-    '  2           09:45  10:00    0:15  mtg       standup',
-    '  3  [WO-88]  10:00  now      0:12  dev       code review',
-    '     > PR #42',
+    '       #  wo       start  end       dur  category  note',
+    '  000010  [4471]   09:00  09:45    0:45  dev       fixing login bug',
+    '  000020           09:45  10:00    0:15  mtg       standup',
+    '  000030  [WO-88]  10:00  now      0:12  dev       code review',
+    '          > PR #42',
   ].join('\n'));
   // No work orders in view: no column.
   assert.ok(!/ wo /.test(T.formatReport(LOG, T.parseRange('today', NOW), NOW)));
-  assert.match(T.formatCategoryReport(WO_LOG, T.parseRange('today', NOW), NOW), / {2}1 {2}\[4471\] {3}09:00-09:45 {4}0:45 {2}fixing login bug\n/);
+  assert.match(T.formatCategoryReport(WO_LOG, T.parseRange('today', NOW), NOW), / {2}000010 {2}\[4471\] {3}09:00-09:45 {4}0:45 {2}fixing login bug\n/);
 });
 
 test('/wolist totals time per work order', () => {
@@ -492,7 +518,7 @@ test('work orders survive backups and /edit', () => {
     assert.deepEqual(r.entries, want);
   }
   const { text, items } = T.formatEditable(WO_LOG, ALL, NOW);
-  assert.match(text, / {2}1 {2}\[4471\] {2}09:00 {2}dev fixing login bug\n/);
+  assert.match(text, / {2}000010 {2}\[4471\] {2}09:00 {2}dev fixing login bug\n/);
   assert.deepEqual(T.parseEditable(text, items, NOW).ops, []);
   const r = T.parseEditable(text.replace('  [4471]  09:00', '  [5000]  09:00').replace('[WO-88]  ', '') + '[77] 10:05 email\n', items, NOW);
   assert.deepEqual(r.errors, []);
@@ -597,11 +623,11 @@ test('/clock 12 shows times as 2:30pm; typing stays HH:MM', () => {
     assert.equal(T.hourLabel(0), '12am');
     assert.equal(T.hourLabel(13), '1pm');
     const report = T.formatCategoryReport(NOTED, T.parseRange('today', NOW), NOW);
-    assert.match(report, / {2}1 {2} 9:00am-9:45am {5}0:45 {2}fixing login bug/);
-    assert.match(report, / {2}3 {2}10:00am-now {8}0:12 {2}code review/);
+    assert.match(report, / {2}000010 {2} 9:00am-9:45am {5}0:45 {2}fixing login bug/);
+    assert.match(report, / {2}000030 {2}10:00am-now {8}0:12 {2}code review/);
     const log = T.formatReport(NOTED, T.parseRange('today', NOW), NOW);
     assert.match(log, /# {2}start {4}end {9}dur/);
-    assert.match(log, / {2}1 {2} 9:00am {2} 9:45am {4}0:45/);
+    assert.match(log, / {2}000010 {2} 9:00am {2} 9:45am {4}0:45/);
     assert.match(T.formatEditable(NOTED, T.parseRange('today', NOW), NOW).text, / 09:00 {2}dev fixing login bug/);
   } finally {
     T.setClock('24');
@@ -722,4 +748,62 @@ test('timeline colors are per range: a day\'s categories get distinct colors', (
   const wed = T.timelineDays(log, T.parseRange('2026-09-23', NOW), NOW);
   // Past 8 they cycle rather than going grey.
   assert.deepEqual(wed.days[0].blocks.filter((b) => !b.off).map((b) => b.slot), [0, 1, 2, 3, 4, 5, 6, 7, 0, 1]);
+});
+
+// ---- entry IDs ------------------------------------------------------------------
+
+test('entry IDs: a log without them is numbered by position x10; new ones get the next ten', () => {
+  const log = [
+    { id: 'b', ts: at('2026-09-24T09:00:00Z'), text: 'dev a' },
+    { id: 'a', ts: at('2026-09-24T10:00:00Z'), text: 'mtg b' },
+    { id: 'l', ts: at('2026-09-24T00:00:00Z'), text: '/wo dev', wo: '1' }, // a link: no ID
+    { id: 'c', ts: at('2026-09-24T11:00:00Z'), text: '/off' },
+  ];
+  const first = T.assignIds(log);
+  assert.deepEqual(first.changed.map((e) => [e.id, e.sid]), [['b', 10], ['a', 20], ['c', 30]]);
+  const numbered = T.applyOps(log, first.changed.map((entry) => ({ op: 'put', entry })));
+  assert.deepEqual(T.assignIds(numbered).changed, []);
+  // At the end: the next multiple of ten. In between: the next free number
+  // after the one before.
+  const more = numbered.concat(
+    { id: 'n', ts: at('2026-09-24T12:00:00Z'), text: 'dev new' },
+    { id: 'i1', ts: at('2026-09-24T09:30:00Z'), text: 'dev between' },
+    { id: 'i2', ts: at('2026-09-24T09:40:00Z'), text: 'dev between again' },
+  );
+  const r = T.assignIds(T.sortEntries(more));
+  assert.deepEqual(r.changed.map((e) => [e.id, e.sid]).sort(), [['i1', 11], ['i2', 12], ['n', 40]]);
+  assert.equal(r.renumbered, 0);
+  // Time edits don't change IDs; spans show them six digits wide.
+  const spans = T.withSpans(T.applyOps(numbered, r.changed.map((entry) => ({ op: 'put', entry }))), NOW);
+  assert.deepEqual(spans.map((s) => s.n), ['000010', '000011', '000012', '000020', '000030', '000040']);
+});
+
+test('entry IDs: no room in between means the next ten; duplicates get a new one', () => {
+  const log = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((sid, i) => ({ id: `e${i}`, ts: at('2026-09-24T09:00:00Z') + i * 60000, sid, text: 'dev x' }));
+  log.push({ id: 'new', ts: at('2026-09-24T09:05:30Z'), text: 'dev squeezed' });
+  const r = T.assignIds(T.sortEntries(log));
+  assert.deepEqual(r.changed.map((e) => e.sid), [30]);
+  // Two devices both made 000020 offline: the lower internal id keeps it.
+  const dup = [
+    { id: 'x', ts: at('2026-09-24T09:00:00Z'), sid: 10, text: 'dev a' },
+    { id: 'zz', ts: at('2026-09-24T10:00:00Z'), sid: 20, text: 'dev from laptop' },
+    { id: 'yy', ts: at('2026-09-24T10:05:00Z'), sid: 20, text: 'dev from phone' },
+  ];
+  const d = T.assignIds(dup);
+  assert.equal(d.renumbered, 1);
+  assert.deepEqual(d.changed.map((e) => [e.id, e.sid]), [['zz', 11]]); // it sits between 10 and 20
+});
+
+test('entry IDs: typed IDs, in full or by their last digits', () => {
+  const spans = [10, 20, 450, 1450, 15620].map((sid, i) => ({ n: T.idText(sid), i }));
+  assert.equal(T.findById(spans, '000450').i, 2);
+  assert.equal(T.findById(spans, '#015620').i, 4);
+  assert.equal(T.findById(spans, '450').i, 3, 'the latest ending in 450');
+  assert.equal(T.findById(spans, '20').i, 4);
+  assert.equal(T.findById(spans, '99'), null);
+  assert.equal(T.findById(spans, 'abc'), null);
+  // Kept through makeEntry and the entry card.
+  const e = T.makeEntry({ id: 'q', ts: at('2026-09-24T09:00:00Z'), text: 'dev a', sid: 450 });
+  assert.equal(T.makeEntry(e, { notes: 'n' }).sid, 450);
+  assert.equal(T.editEntry(e, { time: '08:00', text: 'dev b', notes: '' }, NOW).entry.sid, 450);
 });

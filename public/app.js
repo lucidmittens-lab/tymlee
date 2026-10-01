@@ -1,4 +1,4 @@
-(function () {
+(async function () {
   'use strict';
 
   const T = window.Tymlee;
@@ -16,14 +16,19 @@
 
   let gui = null; // the GUI view (gui.js), set up once the shell exists
 
+  // The log lives in IndexedDB (idb.js), read in before anything shows.
+  const storage = await window.TymleeIdb.createStorage();
+  window.tymleeStorage = storage; // for checking what's stored, from the browser console
+
   const store = window.TymleeStore.createStore({
+    storage,
     onChange: () => { renderStatus(); refreshTimelines(); },
     onNotice: (text, cls) => { print(text, cls); scrollToPrompt(); },
   });
 
   // Keep multiple open tabs showing the same log.
-  window.addEventListener('storage', (e) => {
-    if (e.key === store.storageKey() || e.key === store.settingsKey()) store.reloadFromStorage();
+  storage.onChange((keys) => {
+    if (keys.some((k) => store.watchedKeys().includes(k))) store.reloadFromStorage();
   });
 
   // iOS zooms the page in when an input with text under 16px gets the focus.

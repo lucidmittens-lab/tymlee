@@ -55,8 +55,10 @@
     };
   }
 
-  function createStore({ onChange, onNotice, env: givenEnv }) {
+  // `storage` replaces the browser's local storage (app.js passes IndexedDB).
+  function createStore({ onChange, onNotice, env: givenEnv, storage: givenStorage }) {
     const env = givenEnv || browserEnv();
+    if (givenStorage) env.storage = givenStorage;
     const { T, V, storage } = env;
     const config = env.config || {};
     const configured = Boolean(config.supabaseUrl && config.supabaseAnonKey);
@@ -919,6 +921,8 @@
       get configured() { return configured; },
       reloadFromStorage() { loadOwner(owner); onChange(); },
       settingsKey() { return key(owner, 'settings'); },
+      // Stored keys that, changed by another tab, mean reloading.
+      watchedKeys() { return ['entries', 'settings', 'records'].map((w) => key(owner, w)); },
       // Resolves once queued network work (sending changes, syncing) is done.
       whenIdle() { return chain; },
       get client() { return client; },

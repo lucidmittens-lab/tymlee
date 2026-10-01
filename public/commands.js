@@ -270,7 +270,8 @@
         const old = store.settings.formAnswers || {};
         return old[`${label}\n${where}`] || old[`${label}\n`] || '';
       }
-      const all = store.listRecords('answer').filter((a) => a.label === label);
+      // Blank answers don't count: they'd hide a useful earlier one.
+      const all = store.listRecords('answer').filter((a) => a.label === label && a.value);
       const exact = all.find((a) => a.where === where);
       return (exact || all[0] || {}).value || '';
     }
@@ -286,6 +287,7 @@
       for (const [k, value] of answers) {
         const [label, where] = k.split('\n');
         const existing = all.find((a) => a.label === label && a.where === where);
+        if (!value && !existing) continue;
         store.putRecord('answer', { label, where, value }, existing && existing.id);
       }
     }

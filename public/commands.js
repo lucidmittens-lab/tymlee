@@ -74,7 +74,7 @@
     function entryLabel(s) {
       const today = T.ymd(s.ts) === T.ymd(Date.now());
       const when = today ? T.clock(s.ts) : `${T.ymd(s.ts).slice(5)} ${T.clock(s.ts)}`;
-      return `#${s.n} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${s.eq ? `${T.eqTag(s.eq)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
+      return `${T.idTag(s.n)} ${s.wo ? `${T.woTag(s.wo)} ` : ''}${s.eq ? `${T.eqTag(s.eq)} ` : ''}${when} ${describe(s)}${s.notes ? '  ✎' : ''}`;
     }
 
     // Entries you can see (not /wolink's hidden links).
@@ -157,13 +157,13 @@
           },
         },
         [`${k.cmd}punch`]: {
-          usage: `/${k.cmd}punch [#] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
+          usage: `/${k.cmd}punch [ID] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
           about: `set the ${k.noun} on one entry (Tab: older, Shift+Tab: newer)`,
           async run(args) {
             if (busy()) return;
             if (!shown().some((e) => !T.isOff(e))) return print('no entries yet', 'err');
             if (!(await store.supports(k.field))) return print(needs, 'err');
-            const chosen = await chooseEntry(args, `/${k.cmd}punch [#] [${k.noun}]`, `${k.cmd}punch`);
+            const chosen = await chooseEntry(args, `/${k.cmd}punch [ID] [${k.noun}]`, `${k.cmd}punch`);
             if (!chosen) return args.length ? undefined : print(`${k.noun} cancelled`, 'dim');
             const current = store.entries.find((e) => e.id === chosen.id);
             if (!current) return print('that entry was removed in the meantime', 'err');
@@ -173,7 +173,7 @@
             if (v == null) return print(invalid(typed), 'err');
             if (v === (current[k.field] || '') && !current[k.flag]) return print(`${k.noun} unchanged`, 'dim');
             store.apply([{ op: 'put', entry: T.makeEntry(current, { [k.field]: v, [k.flag]: false }) }]);
-            print(v ? `${k.tag(v)} set on #${chosen.n} ${describe(chosen)}` : `${k.noun} removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+            print(v ? `${k.tag(v)} set on ${T.idTag(chosen.n)} ${describe(chosen)}` : `${k.noun} removed from ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
           },
         },
       };
@@ -495,7 +495,7 @@
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
       const parts = [T.clock(entry.ts)];
       if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
-      parts.push(`in #${T.idText(entry.sid || shown().length * 10)} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
+      parts.push(`in ${T.idTag(T.idText(entry.sid || shown().length * 10))} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
     }
 
@@ -632,7 +632,7 @@
         },
       },
       note: {
-        usage: '/note [text]  or  /note #n [text]',
+        usage: '/note [text]  or  /note #ID [text]',
         about: 'add a line of notes to the current entry, or pick one (Tab: older, Shift+Tab: newer)',
         async run(args) {
           if (busy()) return;
@@ -642,11 +642,11 @@
           }
           // "/note 12" or "/note #12 [text]" names an entry; any other text is
           // a new line of notes for the current entry.
-          const named = args.length && (/^#\d+$/.test(args[0]) || (args.length === 1 && /^\d+$/.test(args[0])));
+          const named = args.length && (/^(?:#|id:)\d+$/i.test(args[0]) || (args.length === 1 && /^\d+$/.test(args[0])));
           let chosen;
           let text = '';
           if (named) {
-            chosen = await chooseEntry(args.slice(0, 1), '/note #n [text]', 'note');
+            chosen = await chooseEntry(args.slice(0, 1), '/note #ID [text]', 'note');
             if (!chosen) return undefined;
             text = args.slice(1).join(' ');
           } else if (args.length) {
@@ -673,7 +673,7 @@
           if (value === initial.trim()) return print('notes unchanged', 'dim');
           if (value.length > T.MAX_NOTES) return print(`notes are limited to ${T.MAX_NOTES} characters`, 'err');
           store.apply([{ op: 'put', entry: T.makeEntry(current, { notes: value }) }]);
-          print(value ? `notes saved on #${chosen.n} ${describe(chosen)}` : `notes removed from #${chosen.n} ${describe(chosen)}`, 'ok');
+          print(value ? `notes saved on ${T.idTag(chosen.n)} ${describe(chosen)}` : `notes removed from ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
         },
       },
       timeline: {
@@ -704,7 +704,7 @@
           const now = Date.now();
           const last = T.withSpans(store.entries, now).pop();
           store.remove(last.id);
-          const msg = [`undid #${last.n} ${T.clock(last.ts)} ${describe(last)}`];
+          const msg = [`undid ${T.idTag(last.n)} ${T.clock(last.ts)} ${describe(last)}`];
           const cur = T.withSpans(store.entries, now).pop();
           if (cur) msg.push(cur.off ? 'still off' : `resumed ${describe(cur)}`);
           print(msg.join('  '), 'ok');
@@ -722,13 +722,13 @@
         },
       },
       rm: {
-        usage: '/rm <#>',
+        usage: '/rm <ID>',
         about: 'delete an entry by its ID, or the ID\'s last digits (its time goes to the one before)',
         run(args) {
           const s = T.findById(T.withSpans(store.entries, Date.now()), args[0]);
-          if (!s) return print('usage: /rm <#>   (an entry ID from /log, or its last digits)', 'err');
+          if (!s) return print('usage: /rm <ID>   (an entry ID from /log, or its last digits: /rm 650)', 'err');
           store.remove(s.id);
-          print(`removed #${s.n} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
+          print(`removed ${T.idTag(s.n)} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
         },
       },
       export: {

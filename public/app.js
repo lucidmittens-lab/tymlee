@@ -555,11 +555,11 @@
     if (!entry) return;
     const card = document.createElement('form');
     card.className = 'entry-card';
-    card.setAttribute('aria-label', `Edit entry #${b.n}`);
+    card.setAttribute('aria-label', `Edit entry ${T.idTag(b.n)}`);
 
     const title = document.createElement('div');
     title.className = 'ec-title';
-    title.textContent = `#${b.n} · ${T.ymd(entry.ts)} · ${T.formatHM(b.duration)}${b.running ? ' so far' : ''}`;
+    title.textContent = `${T.idTag(b.n)} · ${T.ymd(entry.ts)} · ${T.formatHM(b.duration)}${b.running ? ' so far' : ''}`;
 
     const time = document.createElement('input');
     time.type = 'time';
@@ -633,7 +633,7 @@
       backToPrompt();
       if (!r.changed) return;
       store.apply([{ op: 'put', entry: r.entry }]);
-      print(`updated #${b.n} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${r.entry.eq ? `${T.eqTag(r.entry.eq)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
+      print(`updated ${T.idTag(b.n)} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${r.entry.eq ? `${T.eqTag(r.entry.eq)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
     });
     cancel.addEventListener('click', () => {
       closeEntryEditor();
@@ -648,7 +648,7 @@
       closeEntryEditor();
       backToPrompt();
       store.remove(b.id);
-      print(`removed #${b.n} ${T.clock(entry.ts)} ${entry.text}`, 'ok');
+      print(`removed ${T.idTag(b.n)} ${T.clock(entry.ts)} ${entry.text}`, 'ok');
     });
     card.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {

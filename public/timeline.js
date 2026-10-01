@@ -20,7 +20,7 @@
   function blockTitle(b) {
     if (b.off) return `off ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
     const end = b.running ? 'now' : T.clock(b.start + b.duration);
-    return `#${b.n} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
+    return `${T.idTag(b.n)} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
   }
 
   const DAY_MS = 86400000;

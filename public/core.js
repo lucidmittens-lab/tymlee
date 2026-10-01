@@ -54,6 +54,8 @@
   // the one before it (015621 ... 015629) when there is room.
   const validSid = (n) => Number.isInteger(n) && n > 0;
   const idText = (n) => String(n).padStart(6, '0');
+  // How an ID is shown: labelled, so it isn't taken for a work order.
+  const idTag = (n) => `ID:${n}`;
 
   // Give entries without an ID one (and fix two entries sharing one, which
   // two devices offline can cause: the one with the lower internal id keeps
@@ -103,7 +105,7 @@
   // The entry an ID typed in a command means: all six digits for an exact
   // match; fewer for the latest entry whose ID ends with them ("450").
   function findById(spans, typed) {
-    const t = String(typed == null ? '' : typed).trim().replace(/^#/, '');
+    const t = String(typed == null ? '' : typed).trim().replace(/^(?:#|id:?)/i, '');
     if (!/^\d+$/.test(t)) return null;
     if (t.length >= 6) return spans.find((s) => Number(s.n) === Number(t)) || null;
     for (let i = spans.length - 1; i >= 0; i--) if (spans[i].n.endsWith(t)) return spans[i];
@@ -359,7 +361,7 @@
     const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
     if (!spans.length) return `no entries (${range.label})`;
 
-    const numWidth = Math.max(1, String(spans[spans.length - 1].n).length);
+    const numWidth = Math.max(...spans.map((s) => idTag(s.n).length));
     const catWidth = Math.min(16, Math.max(8, ...spans.map((s) => s.category.length)));
     // The work order column only appears when something in view has one.
     const woWidth = spans.some((s) => s.wo) ? Math.max(4, ...spans.map((s) => woTag(s.wo).length)) : 0;
@@ -379,7 +381,7 @@
         // then what it was), so nothing wraps mid-column.
         for (const s of day.spans) {
           const dur = s.off ? '-' : formatHM(s.duration);
-          out.push(`  ${String(s.n).padStart(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${woTag(s.wo)}`.trimEnd());
+          out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${woTag(s.wo)}`.trimEnd());
           out.push(`${' '.repeat(numWidth + 4)}${s.category}${s.note ? ` ${s.note}` : ''}`);
           out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
         }
@@ -389,12 +391,12 @@
         continue;
       }
       const woHead = woWidth ? `${'wo'.padEnd(woWidth)}  ` : '';
-      out.push(`  ${'#'.padStart(numWidth)}  ${woHead}${'start'.padEnd(clockWidth())}  ${'end'.padEnd(clockWidth())}  ${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
+      out.push(`  ${''.padStart(numWidth)}  ${woHead}${'start'.padEnd(clockWidth())}  ${'end'.padEnd(clockWidth())}  ${'dur'.padStart(6)}  ${'category'.padEnd(catWidth)}  note`);
       for (const s of day.spans) {
         const end = `${s.running ? nowCol() : clockCol(s.end)}  `;
         const dur = s.off ? '-' : formatHM(s.duration);
         out.push(
-          `  ${String(s.n).padStart(numWidth)}  ${woCell(s)}${clockCol(s.ts)}  ${end}${dur.padStart(6)}  ` +
+          `  ${idTag(s.n).padEnd(numWidth)}  ${woCell(s)}${clockCol(s.ts)}  ${end}${dur.padStart(6)}  ` +
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
@@ -418,7 +420,7 @@
     const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
     if (!spans.length) return `no entries (${range.label})`;
     const multiDay = ymd(spans[0].ts) !== ymd(spans[spans.length - 1].ts);
-    const numWidth = Math.max(1, String(spans[spans.length - 1].n).length);
+    const numWidth = Math.max(...spans.map((s) => idTag(s.n).length));
     const all = spans.reduce((sum, s) => sum + s.duration, 0);
     const RULE = '-'.repeat(48);
     const first = ymd(spans[0].ts);
@@ -434,7 +436,7 @@
         const inOut = `${clockCol(s.ts)}-${s.running ? nowCol() : clock(s.end).padEnd(clockWidth())}`;
         const when = multiDay ? `${DAY_NAMES[new Date(s.ts).getDay()]} ${ymd(s.ts).slice(5)} ${inOut}` : inOut;
         const wo = woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '';
-        out.push(`  ${String(s.n).padStart(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
+        out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
       }
       out.push('');
@@ -748,7 +750,7 @@
   // Entries grouped for %{each key}, in the order they were first logged;
   // time without a work order comes last.
   function formGroups(spans, key) {
-    if (key === 'entry') return spans.map((s) => ({ spans: [s], where: `#${s.n}` }));
+    if (key === 'entry') return spans.map((s) => ({ spans: [s], where: idTag(s.n) }));
     const groups = new Map();
     for (const s of spans) {
       // An entry with several pieces of equipment goes under each of them.
@@ -928,7 +930,7 @@
   const EDIT_HELP = [
     '# change a time or text',
     '# delete a line to remove it',
-    '# new line: 14:30 dev review',
+    '# new line (no ID): 14:30 dev review',
     '# notes: "> text" under an entry',
     '# work order: [4471] before the time',
   ];
@@ -939,7 +941,7 @@
       .filter((s) => s.ts >= range.from && s.ts < range.to)
       .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid }));
     const lines = EDIT_HELP.slice();
-    const numWidth = items.length ? String(items[items.length - 1].n).length : 1;
+    const numWidth = items.length ? Math.max(...items.map((it) => idTag(it.n).length)) : 1;
     let day = '';
     for (const it of items) {
       const d = ymd(it.ts);
@@ -947,7 +949,7 @@
         day = d;
         lines.push(`${DAY_NAMES[new Date(it.ts).getDay()]} ${d}`);
       }
-      lines.push(`  ${String(it.n).padStart(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
+      lines.push(`  ${idTag(it.n).padEnd(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
       lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
     }
     if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
@@ -985,7 +987,7 @@
         return;
       }
 
-      const m = line.match(/^(?:(\d+)\s+)?(?:\[([^\]]*)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/);
+      const m = line.match(/^(?:(?:ID:|#)?(\d+)\s+)?(?:\[([^\]]*)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/i);
       if (!m) {
         errors.push(`${where}: expected "HH:MM text", e.g. "14:30 dev code review"`);
         return;
@@ -1020,11 +1022,11 @@
         const n = +m[1];
         it = byN.get(n);
         if (!it) {
-          errors.push(`${where}: there is no entry #${m[1]} in this list (remove the number to add a new entry)`);
+          errors.push(`${where}: there is no entry ${idTag(m[1])} in this list (remove the ID to add a new entry)`);
           return;
         }
         if (seen.has(n)) {
-          errors.push(`${where}: entry #${it.n} appears more than once`);
+          errors.push(`${where}: entry ${idTag(it.n)} appears more than once`);
           return;
         }
         seen.add(n);
@@ -1164,7 +1166,7 @@
     // The phone layout of /log has two lines an entry (ID, start, duration,
     // work order; then what it was): join them back into one row.
     const T12 = '\\d{1,2}:\\d{2}(?:am|pm)?';
-    const phoneRow = new RegExp(`^\\s*\\d+\\s+(${T12})\\s+(-|\\d+:\\d{2})(?:\\s+(\\[[^\\]\\s]+\\]))?\\s*$`);
+    const phoneRow = new RegExp(`^\\s*(?:ID:)?\\d+\\s+(${T12})\\s+(-|\\d+:\\d{2})(?:\\s+(\\[[^\\]\\s]+\\]))?\\s*$`);
     for (let i = 0; i + 1 < lines.length; i++) {
       const m = lines[i].match(phoneRow);
       const next = lines[i + 1].trim();
@@ -1194,6 +1196,8 @@
       last = null;
       // Rules, "no entries" notes and multi-day summaries carry no entries.
       if (/^-+$/.test(line) || /^no entries \(/.test(line)) return;
+      // The report's column headings (older ones start with "#", skipped above).
+      if (/^(?:wo\s+)?start\s+(?:end\s+)?dur\s+category\s+note$/.test(line)) return;
       if (/^\S+: \d{4}-\d{2}-\d{2} \.\. \d{4}-\d{2}-\d{2}, \d+ days?$/.test(line)) return;
 
       const header = line.match(/^(?:[A-Za-z]{3}\s+)?(\d{4})-(\d{2})-(\d{2})$/);
@@ -1206,9 +1210,9 @@
 
       // Report row:  3  [4471]  09:00  09:45    0:45  dev  note
       // (work order and end columns optional)
-      const row = line.match(/^\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(?:(?:\d{1,2}:\d{2}(?:am|pm)?|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
+      const row = line.match(/^(?:ID:)?\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(?:(?:\d{1,2}:\d{2}(?:am|pm)?|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
       // /edit line:  3  [4471]  09:00  dev note   or   09:00 dev note
-      const edit = !row && line.match(/^(?:\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
+      const edit = !row && line.match(/^(?:(?:ID:)?\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
       if (!row && !edit) {
         // Per-category summary lines:  dev   0:57   79%
         if (/^\S+\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
@@ -1348,7 +1352,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

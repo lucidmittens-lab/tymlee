@@ -283,7 +283,7 @@
         return true;
       }
       if (/\b(report|key)\b/.test(cls) || text.includes('\n')) textSheet(/\bkey\b/.test(cls) ? 'Encryption' : 'tymlee', [{ text, cls }]);
-      else toast(text, cls, lastStart && /\bin #\d+/.test(text) ? { label: 'Undo', run: () => opts.run('/undo') } : null);
+      else toast(text, cls, lastStart && /\bin ID:\d+/.test(text) ? { label: 'Undo', run: () => opts.run('/undo') } : null);
       return true;
     }
     let lastStart = false;

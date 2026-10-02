@@ -523,6 +523,9 @@
       return lines.join('\n');
     }
 
+    // Deleted entries, newest deletion first (store.js keeps them 30 days).
+    const trashed = () => store.listRecords('trash').filter((t) => t.entry && t.entry.id);
+
     // ---- to-dos ------------------------------------------------------------------
 
     // A to-do is a category and text ("dev fix login bug") with its own ID,
@@ -1363,6 +1366,39 @@
           if (!run) return print('usage: /delcheck <CL>   (an ID from /checklist, or its last digits)', 'err');
           store.deleteRecords([run.id]);
           print(`deleted ${run.tag} ${run.title}`, 'ok');
+        },
+      },
+      trash: {
+        usage: '/trash',
+        about: 'entries deleted in the last 30 days; /untrash <ID> puts one back',
+        run() {
+          const list = trashed();
+          if (!list.length) return print('the trash is empty (deleted entries stay here for 30 days)', 'dim');
+          const lines = [`trash: ${plural(list.length, 'entry', 'entries')} · /untrash <ID> puts one back`];
+          for (const t of list) {
+            const e = t.entry;
+            const what = T.isMarker(e.text) ? T.withSpans([e], e.ts)[0].category : e.text;
+            lines.push(`  ${T.idTag(T.idText(e.sid || 0))}  ${T.ymd(e.ts)} ${T.clock(e.ts)}  ${what}  (deleted ${T.ymd(t.deletedAt).slice(5)})`);
+          }
+          print(lines.join('\n'), 'report');
+        },
+      },
+      untrash: {
+        usage: '/untrash <ID>',
+        about: 'put a deleted entry back (from /trash)',
+        run(args) {
+          const list = trashed();
+          // Oldest deletion first, so a short ID means the latest one deleted.
+          const found = T.findById(list.slice().reverse().map((t) => ({ n: T.idText(t.entry.sid || 0), t })), args[0]);
+          if (!found) return print('usage: /untrash <ID>   (an entry ID from /trash, or its last digits)', 'err');
+          const { t } = found;
+          if (store.entries.some((e) => e.id === t.entry.id)) {
+            store.deleteRecords([t.id]);
+            return print('that entry is already back in the log', 'dim');
+          }
+          store.apply([{ op: 'put', entry: t.entry }]);
+          store.deleteRecords([t.id]);
+          print(`put back ${T.idTag(T.idText(t.entry.sid || 0))} ${T.ymd(t.entry.ts)} ${T.clock(t.entry.ts)} ${t.entry.text}`, 'ok');
         },
       },
       todo: {

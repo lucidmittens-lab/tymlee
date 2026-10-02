@@ -133,6 +133,7 @@
       // Signed out, records stay on this device: move old forms right away.
       if (who === LOCAL) moveFormsFromSettings();
       idsReady = who === LOCAL || hasIds();
+      emptyOldTrash();
       if (who === LOCAL && idOps().length) write(key(who, 'entries'), entries);
     }
 
@@ -211,6 +212,7 @@
 
     function apply(ops) {
       if (!ops.length) return;
+      toTrash(ops);
       entries = T.applyOps(entries, ops);
       ops = ops.concat(idOps());
       for (const op of ops) queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
@@ -551,6 +553,35 @@
       } catch (_) {
         // Try again on the next sync.
       }
+    }
+
+    // ---- trash ---------------------------------------------------------------
+    // Deleted entries (/rm, /edit, /undo, the entry card) are kept as trash
+    // records for 30 days; /untrash puts one back.
+    const TRASH_DAYS = 30;
+
+    function toTrash(ops) {
+      const now = Date.now();
+      let any = false;
+      for (const op of ops) {
+        if (op.op !== 'del') continue;
+        const e = entries.find((x) => x.id === op.id);
+        if (!e || T.isLink(e)) continue;
+        const id = T.uuid();
+        records.push({ id, kind: 'trash', body: { entry: e, deletedAt: now }, at: now });
+        touchRecord(id);
+        any = true;
+      }
+      if (!any) return;
+      persistRecords();
+      if (user) schedule(syncRecords);
+    }
+
+    // Trash older than 30 days goes for good.
+    function emptyOldTrash() {
+      const cutoff = Date.now() - TRASH_DAYS * 86400000;
+      const old = records.filter((r) => !r.deleted && r.kind === 'trash' && r.at < cutoff).map((r) => r.id);
+      if (old.length) deleteRecords(old);
     }
 
     // ---- records ---------------------------------------------------------------

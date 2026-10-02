@@ -1302,7 +1302,7 @@
     if (st.state === 'idle') {
       left.append(span('what', st.text));
     } else if (st.state === 'off') {
-      left.append(span('stopped', '■ off'), span('what dim', `  since ${st.since}`));
+      left.append(span('stopped', `■ ${st.offLabel || 'off'}`), span('what dim', `  since ${st.since}`));
       today = span('today', st.today);
       if (st.todayMoney) today.append(span('money', `  ${st.todayMoney}`));
     } else {

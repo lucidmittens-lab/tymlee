@@ -107,7 +107,7 @@ function statusText() {
   let left;
   let middle = '';
   if (st.state === 'idle') left = st.text;
-  else if (st.state === 'off') { left = `${sgr('90', '■ off')}  since ${st.since}`; middle = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`; }
+  else if (st.state === 'off') { left = `${sgr('90', `■ ${st.offLabel || 'off'}`)}  since ${st.since}`; middle = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`; }
   else {
     const money = st.money ? `  ${st.ot ? sgr('33', `${st.money} OT`) : st.money}` : '';
     left = `${sgr('32', `▶ ${st.clock}`)}${money}  ${st.what}`;

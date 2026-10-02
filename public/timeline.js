@@ -17,8 +17,11 @@
   const minutesOfDay = (ts, dayStart) => (ts - dayStart) / 60000;
   const slotColor = (slot) => (slot == null ? 'var(--muted)' : slot < 0 ? 'var(--s-other)' : `var(--s${slot + 1})`);
 
+  // "off", or "unpaid break".
+  const offWord = (b) => (b.category ? b.category.replace(/[()]/g, '') : 'off');
+
   function blockTitle(b) {
-    if (b.off) return `off ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
+    if (b.off) return `${offWord(b)} ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
     const end = b.running ? 'now' : T.clock(b.start + b.duration);
     return `${T.idTag(b.n)} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
   }
@@ -154,7 +157,7 @@
           if (h >= 16) {
             const line1 = el('div', 'tl-line');
             if (b.off) {
-              line1.append(el('span', 'tl-muted', 'off'));
+              line1.append(el('span', 'tl-muted', offWord(b)));
             } else {
               if (b.wo) line1.append(el('span', 'tl-wo', T.woTag(b.wo)));
               if (b.eq) line1.append(el('span', 'tl-wo', T.eqTag(b.eq)));

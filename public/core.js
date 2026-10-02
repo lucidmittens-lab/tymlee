@@ -15,6 +15,14 @@
   // with "/" (that is a command), so it cannot clash with a real entry. Time
   // from an off marker to the next entry is not tracked.
   const OFF = '/off';
+  // Breaks: an unpaid one is time off (not counted, like /off); a paid one
+  // counts toward hours and pay, on a line of its own.
+  const BREAK_PAID = '/break-paid';
+  const BREAK_UNPAID = '/break-unpaid';
+  // Entries that are commands rather than work, and how they're shown.
+  const MARKERS = { [OFF]: '(off)', [BREAK_UNPAID]: '(unpaid break)', [BREAK_PAID]: '(paid break)' };
+  const isMarker = (text) => Object.prototype.hasOwnProperty.call(MARKERS, text);
+  const markerFor = (label) => Object.keys(MARKERS).find((k) => MARKERS[k] === label) || null;
   // Longest entry text and notes accepted (the server allows room for
   // encryption).
   const MAX_TEXT = 1000;
@@ -146,7 +154,8 @@
   function joinNotes(lines) {
     return lines.join('\n').replace(/\s+$/, '').replace(/^\s*\n/, '');
   }
-  const isOff = (e) => Boolean(e) && e.text === OFF;
+  // Time that isn't counted: /off and unpaid breaks.
+  const isOff = (e) => Boolean(e) && (e.text === OFF || e.text === BREAK_UNPAID);
 
   // /wolink stores "dev -> WO 4471 for this day" as a hidden entry with the
   // text "/wo dev", at the start of that day. It syncs like an entry but is
@@ -171,7 +180,7 @@
   function knownCategories(entries) {
     const seen = new Map();
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (isOff(entries[i])) continue;
+      if (isMarker(entries[i].text)) continue;
       const cat = isLink(entries[i]) ? linkCategory(entries[i]) : parseInput(entries[i].text).category;
       const key = cat.toLowerCase();
       if (cat && !seen.has(key)) seen.set(key, cat);
@@ -204,7 +213,7 @@
       const off = isOff(e);
       return {
         ...e,
-        ...(off ? { category: '(off)', note: '' } : parseInput(e.text)),
+        ...(isMarker(e.text) ? { category: MARKERS[e.text], note: '' } : parseInput(e.text)),
         off,
         n: idText(validSid(e.sid) ? e.sid : (i + 1) * 10),
         end,
@@ -310,6 +319,15 @@
     if (a === 'yesterday') return { from: addDays(today, -1), to: today, label: 'yesterday' };
     if (a === 'week') return lastDays(7, 'week');
     if (a === 'month') return lastDays(30, 'month');
+    // The calendar week (Sunday to Saturday) and month this is in.
+    if (a === 'calweek') {
+      const from = addDays(today, -new Date(today).getDay());
+      return { from, to: addDays(from, 7), label: 'calweek' };
+    }
+    if (a === 'calmonth') {
+      const d = new Date(today);
+      return { from: new Date(d.getFullYear(), d.getMonth(), 1).getTime(), to: new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime(), label: 'calmonth' };
+    }
     if (a === 'all') return { from: -Infinity, to: Infinity, label: 'all' };
     let m = a.match(/^(\d{1,4})d$/);
     if (m && +m[1] > 0) return lastDays(+m[1], `${+m[1]}d`);
@@ -872,7 +890,7 @@
         const want = Math.max(1, Math.round(minutes / rowMinutes));
         const rows = b.off ? Math.min(want, 2) : Math.min(want, MAX_ROWS);
         const bar = b.off ? paint(null, '┆ ') : paint(b.slot, '██');
-        const label = b.off ? 'off' : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.eq ? `${eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
+        const label = b.off ? b.category.replace(/[()]/g, '') : `${b.wo ? `${woTag(b.wo)} ` : ''}${b.eq ? `${eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` · ${b.note}` : ''}`;
         const dur = b.off ? formatHM(b.end - b.start) : `${formatHM(b.duration)}${b.running ? ' ▶' : ''}`;
         const room = Math.max(10, width - clockWidth() - 6 - dur.length - 2);
         const text = label.length > room ? `${label.slice(0, room - 1)}…` : label;
@@ -1005,8 +1023,8 @@
       }
       const { category, note } = parseInput(m[5]);
       const entryText = note ? `${category} ${note}` : category;
-      if (entryText.startsWith('/') && entryText !== OFF) {
-        errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
+      if (entryText.startsWith('/') && !isMarker(entryText)) {
+        errors.push(`${where}: entries can't start with "/" (except ${Object.keys(MARKERS).join(', ')})`);
         return;
       }
       if (entryText.length > MAX_TEXT) {
@@ -1215,7 +1233,7 @@
       const edit = !row && line.match(/^(?:(?:ID:)?\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
       if (!row && !edit) {
         // Per-category summary lines:  dev   0:57   79%
-        if (/^\S+\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
+        if (/^(?:\S+|\([a-z ]+\))\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
         errors.push(`${where}: not a tymlee log line: "${line.slice(0, 40)}"`);
         return;
       }
@@ -1225,7 +1243,10 @@
       const h = m[4] ? (+m[2] % 12) + (m[4] === 'pm' ? 12 : 0) : +m[2];
       const min = +m[3];
       let entryText;
-      if (row) entryText = row[5] === '(off)' ? OFF : [row[5], row[6]].filter(Boolean).join(' ');
+      if (row) {
+        const label = [row[5], row[6]].filter(Boolean).join(' ');
+        entryText = markerFor(label) || label;
+      }
       else entryText = edit[5];
       if (wo && !validWo(wo)) {
         errors.push(`${where}: "${wo}" is not a valid work order`);
@@ -1241,8 +1262,8 @@
         errors.push(`${where}: no date above this line (expected a line like "Thu 2026-09-24")`);
         return;
       }
-      if (entryText.startsWith('/') && entryText !== OFF) {
-        errors.push(`${where}: entries can't start with "/" (the only exception is ${OFF})`);
+      if (entryText.startsWith('/') && !isMarker(entryText)) {
+        errors.push(`${where}: entries can't start with "/" (except ${Object.keys(MARKERS).join(', ')})`);
         return;
       }
       if (entryText.length > MAX_TEXT) {
@@ -1352,7 +1373,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

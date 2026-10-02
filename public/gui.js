@@ -23,7 +23,7 @@
     return b;
   }
 
-  const RANGES = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month'], ['all', 'All']];
+  const RANGES = [['today', 'Today'], ['yesterday', 'Yesterday'], ['calweek', 'This week'], ['week', '7 days'], ['calmonth', 'This month'], ['month', '30 days'], ['all', 'All']];
 
   // opts: { T, store, shell, appEl, dockEl, run(line) -> Promise, openCli(line),
   //         setView(view), status() -> shell.status(), about: { version, build, repo } }
@@ -337,6 +337,8 @@
       return [
         ['Entries', [
           ['Undo', () => runMenu('Undo', '/undo')],
+          ['Paid break', () => runMenu('Break', '/break-paid')],
+          ['Unpaid break', () => runMenu('Break', '/break-unpaid')],
           ['Add a note', () => form('Add a note', {
             intro: 'Goes on the current entry, as a new line.',
             fields: [{ name: 'text', label: 'Note', placeholder: 'called the client back' }], submit: 'Add',

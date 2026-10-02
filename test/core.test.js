@@ -807,3 +807,49 @@ test('entry IDs: typed IDs, in full or by their last digits', () => {
   assert.equal(T.makeEntry(e, { notes: 'n' }).sid, 450);
   assert.equal(T.editEntry(e, { time: '08:00', text: 'dev b', notes: '' }, NOW).entry.sid, 450);
 });
+
+// ---- breaks and calendar ranges ----------------------------------------------------
+
+test('breaks: unpaid is not counted (like /off); paid counts, on its own line', () => {
+  const log = [
+    { id: 'a', ts: at('2026-09-24T09:00:00Z'), text: 'dev work' },
+    { id: 'b', ts: at('2026-09-24T10:00:00Z'), text: '/break-paid' },
+    { id: 'c', ts: at('2026-09-24T10:15:00Z'), text: 'dev more' },
+    { id: 'd', ts: at('2026-09-24T11:00:00Z'), text: '/break-unpaid' },
+    { id: 'e', ts: at('2026-09-24T11:30:00Z'), text: 'dev after lunch' },
+    { id: 'f', ts: at('2026-09-24T12:00:00Z'), text: '/off' },
+  ];
+  const day = T.parseRange('2026-09-24', NOW);
+  const spans = T.withSpans(log, NOW);
+  assert.deepEqual(spans.map((s) => [s.category, s.off]), [['dev', false], ['(paid break)', false], ['dev', false], ['(unpaid break)', true], ['dev', false], ['(off)', true]]);
+  const log1 = T.formatReport(log, day, NOW);
+  assert.match(log1, /ID:000020 {2}10:00 {2}10:15 {4}0:15 {2}\(paid break\)/);
+  assert.match(log1, /ID:000040 {2}11:00 {2}11:30 {7}- {2}\(unpaid break\)/);
+  assert.match(log1, /\(paid break\) +0:15 +10%\n {2}total +2:30/, 'paid counts toward the total; unpaid doesn\'t');
+  assert.deepEqual(T.knownCategories(log), ['dev'], 'breaks are not categories to suggest');
+  // Pay: the paid break is paid, the unpaid one isn't.
+  const pay = T.setPay({}, 'rate', 60, 0);
+  const earned = T.earnings(log, pay, NOW);
+  assert.equal(earned.get('b').money, 15);
+  assert.ok(!earned.get('d') || !earned.get('d').money);
+  // /edit and backups keep them.
+  const back = T.parseBackup(log1);
+  assert.deepEqual(back.errors, []);
+  assert.deepEqual(back.entries.map((e) => e.text), log.map((e) => e.text));
+  const later = at('2026-09-24T13:00:00Z');
+  const { text, items } = T.formatEditable(log, day, later);
+  assert.match(text, /ID:000020 {2}10:00 {2}\/break-paid\n/);
+  assert.deepEqual(T.parseEditable(text, items, later).errors, []);
+});
+
+test('calweek is Sunday to Saturday; calmonth the calendar month', () => {
+  // NOW is Thursday 2026-09-24.
+  const w = T.parseRange('calweek', NOW);
+  assert.equal(T.ymd(w.from), '2026-09-20');
+  assert.equal(T.ymd(T.addDays(w.to, -1)), '2026-09-26');
+  const m = T.parseRange('calmonth', NOW);
+  assert.equal(T.ymd(m.from), '2026-09-01');
+  assert.equal(T.ymd(T.addDays(m.to, -1)), '2026-09-30');
+  // week and month stay "the last 7 / 30 days".
+  assert.equal(T.ymd(T.parseRange('week', NOW).from), '2026-09-18');
+});

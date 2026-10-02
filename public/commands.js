@@ -62,7 +62,7 @@
     // ---- helpers -------------------------------------------------------------
 
     function describe(s) {
-      if (s.off) return 'off';
+      if (T.isMarker(s.text)) return s.category.replace(/[()]/g, ''); // off, paid break, unpaid break
       return s.note ? `${s.category} ${s.note}` : s.category;
     }
 
@@ -177,6 +177,21 @@
           },
         },
       };
+    }
+
+    // ---- off and breaks ----------------------------------------------------------
+
+    // /off, /break-paid, /break-unpaid: end the current entry with a marker
+    // entry that lasts until the next one.
+    function stopFor(marker, word) {
+      const before = T.withSpans(store.entries, Date.now());
+      const cur = before[before.length - 1];
+      if (!cur || (cur.off && marker === T.OFF && cur.text === T.OFF)) return print('not clocked in', 'err');
+      if (cur.text === marker) return print(`already on ${word === 'off' ? 'off' : `${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}`} since ${T.clock(cur.ts)}`, 'dim');
+      const entry = store.add(marker);
+      const was = T.isMarker(cur.text) ? `of ${cur.category.replace(/[()]/g, '')}` : cur.category;
+      const out = cur.text === T.OFF ? '' : `out ${was} (${T.formatHM(entry.ts - cur.ts)})  `;
+      print(`${T.clock(entry.ts)}  ${out}${word}${word === 'off' ? '' : ' · your next entry ends it'}`, 'ok');
     }
 
     // ---- pay settings ----------------------------------------------------------
@@ -421,8 +436,9 @@
 
     // Let the user choose an entry (newest first) unless args[0] names one.
     // Returns the chosen span, or null (after explaining why).
-    async function chooseEntry(args, usage, name) {
-      const spans = T.withSpans(store.entries, Date.now()).filter((s) => !s.off);
+    // `withOff`: /off entries and unpaid breaks can be chosen too (notes).
+    async function chooseEntry(args, usage, name, withOff = false) {
+      const spans = T.withSpans(store.entries, Date.now()).filter((s) => withOff || !s.off);
       if (!spans.length) {
         print('no entries yet', 'err');
         return null;
@@ -439,7 +455,7 @@
     function rangeFrom(args) {
       const word = args.join('');
       const range = T.parseRange(word, Date.now());
-      if (!range) print(`unknown range "${word}"; try today, yesterday, week, month, all, 3d or 2026-01-31`, 'err');
+      if (!range) print(`unknown range "${word}"; try today, yesterday, calweek (Sunday to Saturday), week (7 days), calmonth, month (30 days), all, 3d, tue or 2026-01-31`, 'err');
       return range;
     }
 
@@ -494,7 +510,7 @@
       const entry = store.add(note ? `${category} ${note}` : category, Object.keys(extra).length ? extra : undefined);
       const prev = before.length ? T.withSpans(before, entry.ts).pop() : null;
       const parts = [T.clock(entry.ts)];
-      if (prev && !prev.off) parts.push(`out ${prev.category} (${T.formatHM(prev.duration)})`);
+      if (prev && !prev.off) parts.push(`out ${T.isMarker(prev.text) ? `of ${prev.category.replace(/[()]/g, '')}` : prev.category} (${T.formatHM(prev.duration)})`);
       parts.push(`in ${T.idTag(T.idText(entry.sid || shown().length * 10))} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
     }
@@ -636,25 +652,26 @@
         about: 'add a line of notes to the current entry, or pick one (Tab: older, Shift+Tab: newer)',
         async run(args) {
           if (busy()) return;
-          if (!shown().some((e) => !T.isOff(e))) return print('no entries to add notes to', 'err');
+          if (!shown().length) return print('no entries to add notes to', 'err');
           if (!(await store.supports('notes'))) {
             return print('notes need the latest supabase/schema.sql on the server; run it, then /sync', 'err');
           }
           // "/note 12" or "/note #12 [text]" names an entry; any other text is
-          // a new line of notes for the current entry.
+          // a new line of notes for the current entry, whatever it is (a
+          // break or /off too: "/note lunch with the client").
           const named = args.length && (/^(?:#|id:)\d+$/i.test(args[0]) || (args.length === 1 && /^\d+$/.test(args[0])));
           let chosen;
           let text = '';
           if (named) {
-            chosen = await chooseEntry(args.slice(0, 1), '/note #ID [text]', 'note');
+            chosen = await chooseEntry(args.slice(0, 1), '/note #ID [text]', 'note', true);
             if (!chosen) return undefined;
             text = args.slice(1).join(' ');
           } else if (args.length) {
-            const spans = T.withSpans(store.entries, Date.now()).filter((sp) => !sp.off);
+            const spans = T.withSpans(store.entries, Date.now());
             chosen = spans[spans.length - 1];
             text = args.join(' ');
           } else {
-            chosen = await chooseEntry([], '/note [text]', 'note');
+            chosen = await chooseEntry([], '/note [text]', 'note', true);
             if (!chosen) return print('note cancelled', 'dim');
           }
           const current = store.entries.find((e) => e.id === chosen.id);
@@ -706,20 +723,24 @@
           store.remove(last.id);
           const msg = [`undid ${T.idTag(last.n)} ${T.clock(last.ts)} ${describe(last)}`];
           const cur = T.withSpans(store.entries, now).pop();
-          if (cur) msg.push(cur.off ? 'still off' : `resumed ${describe(cur)}`);
+          if (cur) msg.push(cur.text === T.OFF ? 'still off' : `resumed ${describe(cur)}`);
           print(msg.join('  '), 'ok');
         },
       },
       off: {
         usage: '/off',
         about: 'clock out without starting anything new',
-        run() {
-          const before = T.withSpans(store.entries, Date.now());
-          const cur = before[before.length - 1];
-          if (!cur || cur.off) return print('not clocked in', 'err');
-          const entry = store.add(T.OFF);
-          print(`${T.clock(entry.ts)}  out ${cur.category} (${T.formatHM(entry.ts - cur.ts)})  off`, 'ok');
-        },
+        run() { stopFor(T.OFF, 'off'); },
+      },
+      'break-paid': {
+        usage: '/break-paid',
+        about: 'start a paid break: counts toward hours and pay, until your next entry',
+        run() { stopFor(T.BREAK_PAID, 'paid break'); },
+      },
+      'break-unpaid': {
+        usage: '/break-unpaid',
+        about: 'start an unpaid break: not counted (like /off), until your next entry',
+        run() { stopFor(T.BREAK_UNPAID, 'unpaid break'); },
       },
       rm: {
         usage: '/rm <ID>',
@@ -1150,6 +1171,7 @@
       }
       return {
         state: cur.off ? 'off' : 'running',
+        offLabel: cur.off ? cur.category.replace(/[()]/g, '') : '',
         clock: T.formatClock(cur.duration),
         money,
         ot,

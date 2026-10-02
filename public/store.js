@@ -377,6 +377,7 @@
       let eq = '';
       let ql = false;
       let sid = null;
+      let files = '';
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
       if (encrypted && vault.mode !== 'ready') {
@@ -398,6 +399,7 @@
           if (opened.wo) ({ wo, wl } = { wo: opened.wo, wl: Boolean(opened.wl) });
           if (opened.eq) ({ eq, ql } = { eq: opened.eq, ql: Boolean(opened.ql) });
           if (opened.sid) sid = opened.sid;
+          if (opened.files) files = opened.files;
         }
         if (V.isEncrypted(notes)) {
           notes = await V.decryptNotes(vault.key, r.id, notes);
@@ -412,7 +414,7 @@
         return null;
       }
       if (!encrypted && vault.mode === 'ready') reseal = true;
-      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, wo, wl, eq, ql, sid }), reseal };
+      return { entry: T.makeEntry({ id: r.id, ts, text }, { notes, files, wo, wl, eq, ql, sid }), reseal };
     }
 
     // Download changes and merge them with the local log, then re-apply unsent

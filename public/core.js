@@ -123,9 +123,10 @@
   // An entry with its optional fields set only when they have a value.
   function makeEntry(base, extra) {
     const e = { id: base.id, ts: base.ts, text: base.text };
-    const x = { notes: base.notes, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, sid: base.sid, ...(extra || {}) };
+    const x = { notes: base.notes, files: base.files, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, sid: base.sid, ...(extra || {}) };
     if (validSid(x.sid)) e.sid = x.sid;
     if (x.notes) e.notes = x.notes;
+    if (x.files) e.files = x.files;
     if (x.wo) {
       e.wo = x.wo;
       if (x.wl) e.wl = true;
@@ -143,6 +144,23 @@
     if (!notes) return [];
     return String(notes).split('\n').map((l) => `${indent}> ${l}`.trimEnd());
   }
+
+  // File paths on an entry, one per line: shown under it as "@ path" lines,
+  // apart from notes so forms can use them on their own (%{files}).
+  const MAX_FILES = 8000;
+  function filesLines(files, indent) {
+    if (!files) return [];
+    return String(files).split('\n').map((l) => `${indent}@ ${l}`.trimEnd());
+  }
+
+  // "@ /a/path" -> "/a/path" (null if the line isn't a file line).
+  function filesLine(trimmed) {
+    if (!trimmed.startsWith('@')) return null;
+    return trimmed.slice(1).replace(/^ /, '');
+  }
+
+  // Paths typed or pasted, one per line: trimmed, blank lines dropped.
+  const joinFiles = (lines) => lines.map((l) => l.trim()).filter(Boolean).join('\n');
 
   // "> some text" -> "some text" (null if the line isn't a notes line).
   function notesLine(trimmed) {
@@ -402,6 +420,7 @@
           out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${woTag(s.wo)}`.trimEnd());
           out.push(`${' '.repeat(numWidth + 4)}${s.category}${s.note ? ` ${s.note}` : ''}`);
           out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
+          out.push(...filesLines(s.files, ' '.repeat(numWidth + 4)));
         }
         out.push(`  ${RULE}`);
         out.push(...summaryLines(day.spans, catWidth));
@@ -418,6 +437,7 @@
           `${s.category.padEnd(catWidth)}  ${s.note}`.trimEnd(),
         );
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
+        out.push(...filesLines(s.files, ' '.repeat(numWidth + 4)));
       }
       out.push(`  ${RULE}`);
       out.push(...summaryLines(day.spans, catWidth));
@@ -456,6 +476,7 @@
         const wo = woWidth ? `${woTag(s.wo).padEnd(woWidth)}  ` : '';
         out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${wo}${when}  ${formatHM(s.duration).padStart(6)}  ${s.note}`.trimEnd());
         out.push(...notesLines(s.notes, ' '.repeat(numWidth + 4)));
+        out.push(...filesLines(s.files, ' '.repeat(numWidth + 4)));
       }
       out.push('');
     }
@@ -535,10 +556,12 @@
     const eq = fields.eq == null ? entry.eq || '' : normalizeEq(fields.eq);
     if (eq == null) return { error: `"${String(fields.eq).trim()}" is not valid equipment (${EQ_RULES})` };
     const ql = Boolean(entry.ql && eq === (entry.eq || ''));
-    const next = makeEntry({ id: entry.id, ts, text, sid: entry.sid }, { notes, wo, wl, eq, ql });
+    const files = fields.files == null ? entry.files || '' : joinFiles(String(fields.files).split('\n'));
+    if (files.length > MAX_FILES) return { error: `file paths are limited to ${MAX_FILES} characters` };
+    const next = makeEntry({ id: entry.id, ts, text, sid: entry.sid }, { notes, files, wo, wl, eq, ql });
     const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
       (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl) &&
-      (next.eq || '') === (entry.eq || '') && Boolean(next.ql) === Boolean(entry.ql);
+      (next.eq || '') === (entry.eq || '') && Boolean(next.ql) === Boolean(entry.ql) && (next.files || '') === (entry.files || '');
     return { entry: next, changed: !same };
   }
 
@@ -583,7 +606,7 @@
       const lastEnd = worked.length ? Math.min(dayEnd, Math.max(...worked.map((s) => s.end))) : day.blocks[0].ts;
       day.blocks = day.blocks
         .map((s) => ({
-          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', wo: s.wo || '', eq: s.eq || '',
+          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', files: s.files || '', wo: s.wo || '', eq: s.eq || '',
           off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
           duration: s.duration, clipped: s.end > dayEnd,
           slot: s.off ? null : slots.get(s.category.toLowerCase()),
@@ -717,6 +740,7 @@
     ['down', 'time between in and out that was not logged here'],
     ['titles', 'the entry titles (%{title} works too)'],
     ['notes', 'the notes, one per line'],
+    ['files', 'the file paths (/file), one per line'],
     ['entries', 'how many entries'],
   ];
   const FORM_DIVIDER = '-'.repeat(40);
@@ -822,6 +846,7 @@
       down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
       titles: uniq(spans.map((s) => s.note)).join(', '),
       notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
+      files: spans.filter((s) => s.files).map((s) => s.files).join('\n'),
       entries: String(spans.length),
     };
   }
@@ -919,7 +944,7 @@
 
   // One row per entry; timestamps are ISO 8601 (UTC), running entries have no end.
   function toCSV(entries, range, now) {
-    const rows = [['n', 'wo', 'start', 'end', 'minutes', 'category', 'note', 'notes']];
+    const rows = [['n', 'wo', 'start', 'end', 'minutes', 'category', 'note', 'notes', 'files']];
     for (const s of withSpans(entries, now)) {
       if (s.off || s.ts < range.from || s.ts >= range.to) continue;
       rows.push([
@@ -931,6 +956,7 @@
         s.category,
         s.note,
         s.notes || '',
+        s.files || '',
       ]);
     }
     return rows.map((r) => r.map(csvField).join(',')).join('\n') + '\n';
@@ -949,7 +975,7 @@
     '# change a time or text',
     '# delete a line to remove it',
     '# new line (no ID): 14:30 dev review',
-    '# notes: "> text" under an entry',
+    '# notes: "> text" under an entry; file paths: "@ /a/path"',
     '# work order: [4471] before the time',
   ];
 
@@ -957,7 +983,7 @@
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid, files: s.files || '' }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? Math.max(...items.map((it) => idTag(it.n).length)) : 1;
     let day = '';
@@ -969,6 +995,7 @@
       }
       lines.push(`  ${idTag(it.n).padEnd(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
       lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
+      lines.push(...filesLines(it.files, ' '.repeat(numWidth + 11)));
     }
     if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
     return { text: lines.join('\n') + '\n', items };
@@ -993,6 +1020,12 @@
       if (notes != null) {
         if (current) current.notes.push(notes);
         else errors.push(`${where}: notes (">") must go under an entry`);
+        return;
+      }
+      const file = filesLine(line);
+      if (file != null) {
+        if (current) current.files.push(file);
+        else errors.push(`${where}: file paths ("@") must go under an entry`);
         return;
       }
       current = null;
@@ -1055,7 +1088,7 @@
         errors.push(`${where}: ${hhmm(ts)} on ${ymd(ts)} is in the future`);
         return;
       }
-      current = { where, it, ts, text: entryText, wo, notes: [] };
+      current = { where, it, ts, text: entryText, wo, notes: [], files: [] };
       records.push(current);
     });
 
@@ -1068,15 +1101,20 @@
         errors.push(`${r.where}: notes are limited to ${MAX_NOTES} characters`);
         continue;
       }
+      const files = joinFiles(r.files);
+      if (files.length > MAX_FILES) {
+        errors.push(`${r.where}: file paths are limited to ${MAX_FILES} characters`);
+        continue;
+      }
       // A work order typed here applies to this entry only, unless it is
       // the one it already had (which keeps any /wolink).
       const keepsLink = Boolean(r.it && r.it.wl && r.wo === r.it.wo);
       // Equipment isn't in the text: an entry keeps its own.
-      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text, sid: r.it ? r.it.sid : undefined }, { notes, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
+      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text, sid: r.it ? r.it.sid : undefined }, { notes, files, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
       if (!r.it) {
         ops.push({ op: 'put', entry });
         added++;
-      } else if (r.ts !== r.it.ts || r.text !== r.it.text || notes !== (r.it.notes || '') || r.wo !== (r.it.wo || '')) {
+      } else if (r.ts !== r.it.ts || r.text !== r.it.text || notes !== (r.it.notes || '') || files !== (r.it.files || '') || r.wo !== (r.it.wo || '')) {
         ops.push({ op: 'put', entry });
         changed++;
       }
@@ -1119,7 +1157,7 @@
   }
 
   // CSV headers written by /export over time (columns are found by name).
-  const isCsvHeader = (line) => /^n,(wo,)?start,end,minutes,category,note(,notes)?$/.test(line.trim());
+  const isCsvHeader = (line) => /^n,(wo,)?start,end,minutes,category,note(,notes(,files)?)?$/.test(line.trim());
 
   // The CSV leaves out off time, so an entry whose end is earlier than the
   // next start (or that ended with nothing after it) was followed by /off.
@@ -1158,7 +1196,8 @@
         errors.push(`${where}: "${wo}" is not a valid work order (no spaces or brackets, up to ${MAX_WO} characters)`);
         return;
       }
-      entries.push({ ts, end, text: entryText, notes, wo });
+      const files = joinFiles(get(r, 'files').split('\n'));
+      entries.push({ ts, end, text: markerFor(entryText) || entryText, notes, files, wo });
     });
     entries.sort((a, b) => a.ts - b.ts);
     const out = [];
@@ -1174,6 +1213,7 @@
   function stripEntry(e) {
     const out = { ts: e.ts, text: e.text };
     if (e.notes) out.notes = e.notes;
+    if (e.files) out.files = e.files;
     if (e.wo) out.wo = e.wo;
     return out;
   }
@@ -1188,7 +1228,7 @@
     for (let i = 0; i + 1 < lines.length; i++) {
       const m = lines[i].match(phoneRow);
       const next = lines[i + 1].trim();
-      if (!m || !next || notesLine(next) != null) continue;
+      if (!m || !next || notesLine(next) != null || filesLine(next) != null) continue;
       lines[i] = `  0  ${m[3] ? `${m[3]}  ` : ''}${m[1]}  ${m[2]}  ${next}`;
       lines[i + 1] = '';
     }
@@ -1209,6 +1249,12 @@
       if (notes != null) {
         if (last) last.notesLines.push(notes);
         else errors.push(`${where}: notes (">") must go under an entry`);
+        return;
+      }
+      const file = filesLine(line);
+      if (file != null) {
+        if (last) last.filesLines.push(file);
+        else errors.push(`${where}: file paths ("@") must go under an entry`);
         return;
       }
       last = null;
@@ -1272,13 +1318,13 @@
       }
       const at = new Date(day);
       at.setHours(h, min, 0, 0);
-      last = { ts: at.getTime(), text: entryText, wo, notesLines: [], where };
+      last = { ts: at.getTime(), text: entryText, wo, notesLines: [], filesLines: [], where };
       entries.push(last);
     });
-    const out = entries.map(({ ts, text: t, wo, notesLines: nl, where }) => {
+    const out = entries.map(({ ts, text: t, wo, notesLines: nl, filesLines: fl, where }) => {
       const notes = joinNotes(nl);
       if (notes.length > MAX_NOTES) errors.push(`${where}: notes are limited to ${MAX_NOTES} characters`);
-      return stripEntry({ ts, text: t, notes, wo });
+      return stripEntry({ ts, text: t, notes, files: joinFiles(fl), wo });
     });
     return { entries: out, errors };
   }
@@ -1373,7 +1419,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    MAX_FILES, joinFiles, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

@@ -20,6 +20,12 @@
   // "off", or "unpaid break".
   const offWord = (b) => (b.category ? b.category.replace(/[()]/g, '') : 'off');
 
+  // Notes, then file paths ("@ path"), for a block's lines and its tip.
+  const extraLines = (b) => [
+    ...(b.notes ? b.notes.split('\n') : []),
+    ...(b.files ? b.files.split('\n').map((f) => `@ ${f}`) : []),
+  ];
+
   function blockTitle(b) {
     if (b.off) return `${offWord(b)} ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
     const end = b.running ? 'now' : T.clock(b.start + b.duration);
@@ -94,7 +100,7 @@
         hideTip();
         if (onSelect) onSelect(b, block);
       });
-      block.addEventListener('pointerenter', (e) => showTip(e, title, b.notes));
+      block.addEventListener('pointerenter', (e) => showTip(e, title, extraLines(b).join('\n')));
       block.addEventListener('pointermove', moveTip);
       block.addEventListener('pointerleave', hideTip);
     }
@@ -169,12 +175,12 @@
           }
           if (h >= 34 && !b.off) {
             const end = b.running ? 'now' : T.clock(b.start + b.duration);
-            block.append(el('div', 'tl-line tl-muted tl-times', `${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}`));
+            block.append(el('div', 'tl-line tl-muted tl-times', `${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}${b.files ? '  @' : ''}`));
           }
-          // Notes: as many lines as the block has room for.
-          if (h >= 52 && b.notes) {
+          // Notes, then file paths: as many lines as the block has room for.
+          const lines = extraLines(b);
+          if (h >= 52 && lines.length) {
             const room = Math.floor((h - 34) / 16);
-            const lines = b.notes.split('\n');
             for (const line of lines.slice(0, room)) block.append(el('div', 'tl-line tl-notes', line || ' '));
             if (lines.length > room && room > 0) block.lastChild.textContent += ' …';
           }
@@ -260,7 +266,7 @@
 
     function showTip(e, title, notes) {
       if (e.pointerType === 'touch') return; // a tap opens the edit card instead
-      tip.replaceChildren(el('div', null, title), ...(notes ? notes.split('\n').map((l) => el('div', 'tl-muted', `> ${l}`)) : []));
+      tip.replaceChildren(el('div', null, title), ...(notes ? notes.split('\n').map((l) => el('div', 'tl-muted', l.startsWith('@ ') ? l : `> ${l}`)) : []));
       tip.hidden = false;
       moveTip(e);
     }

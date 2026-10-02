@@ -153,6 +153,7 @@
     const payload = { t: entry.ts, x: entry.text };
     if (entry.sid) payload.i = entry.sid;
     if (entry.notes) payload.n = entry.notes;
+    if (entry.files) payload.p = entry.files;
     if (entry.wo) {
       payload.w = entry.wo;
       if (entry.wl) payload.l = 1;
@@ -166,7 +167,7 @@
 
   // { ts, text } plus notes / wo / wl / eq / ql / sid when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x, n, w, l, q, k, i } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n, w, l, q, k, i, p } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
     const entry = { ts: t, text: x };
     if (typeof n === 'string' && n) entry.notes = n;
@@ -179,6 +180,7 @@
       if (k) entry.ql = true;
     }
     if (Number.isInteger(i) && i > 0) entry.sid = i;
+    if (typeof p === 'string' && p) entry.files = p;
     return entry;
   }
 

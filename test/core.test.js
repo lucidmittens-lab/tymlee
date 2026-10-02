@@ -114,9 +114,9 @@ test('empty range', () => {
 test('csv export quotes fields and leaves the running end blank', () => {
   const log = [...LOG, { ts: at('2026-09-24T10:05:00Z'), text: 'mtg sync, "roadmap"' }];
   const lines = T.toCSV(log, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
-  assert.equal(lines[0], 'n,wo,start,end,minutes,category,note,notes');
-  assert.equal(lines[1], '000030,,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,');
-  assert.equal(lines[4], '000060,,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",');
+  assert.equal(lines[0], 'n,wo,start,end,minutes,category,note,notes,files');
+  assert.equal(lines[1], '000030,,2026-09-24T09:00:00.000Z,2026-09-24T09:45:00.000Z,45.0,dev,fixing login bug,,');
+  assert.equal(lines[4], '000060,,2026-09-24T10:05:00.000Z,,7.0,mtg,"sync, ""roadmap""",,');
 });
 
 // ---- sync ------------------------------------------------------------------

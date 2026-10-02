@@ -693,6 +693,42 @@
           print(value ? `notes saved on ${T.idTag(chosen.n)} ${describe(chosen)}` : `notes removed from ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
         },
       },
+      file: {
+        usage: '/file <path>  or  /file #ID [path]',
+        about: 'add a file path to the current entry, or pick one (shown as "@ path"; %{files} in forms)',
+        async run(args) {
+          if (busy()) return;
+          if (!shown().length) return print('no entries to add a file path to', 'err');
+          const named = args.length && /^(?:#|id:)\d+$/i.test(args[0]);
+          let chosen;
+          let path = '';
+          if (named) {
+            chosen = await chooseEntry(args.slice(0, 1), '/file #ID [path]', 'file', true);
+            if (!chosen) return undefined;
+            path = args.slice(1).join(' ');
+          } else if (args.length) {
+            const spans = T.withSpans(store.entries, Date.now());
+            chosen = spans[spans.length - 1];
+            path = args.join(' ');
+          } else {
+            chosen = await chooseEntry([], '/file [path]', 'file', true);
+            if (!chosen) return print('cancelled', 'dim');
+          }
+          const current = store.entries.find((e) => e.id === chosen.id);
+          if (!current) return print('that entry was removed in the meantime', 'err');
+          if (!path) {
+            const typed = await io.ask(`file path for ${entryLabel(chosen)}`, '', 'file');
+            if (typed == null) return print('cancelled', 'dim');
+            path = typed;
+          }
+          path = path.trim();
+          if (!path) return print('no path given', 'err');
+          const files = T.joinFiles([...(current.files ? current.files.split('\n') : []), path]);
+          if (files.length > T.MAX_FILES) return print(`file paths are limited to ${T.MAX_FILES} characters`, 'err');
+          store.apply([{ op: 'put', entry: T.makeEntry(current, { files }) }]);
+          print(`@ ${path} added to ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
+        },
+      },
       timeline: {
         usage: '/timeline [range]',
         about: 'your time as blocks on a timeline (alias /tl; on the website: the GUI view)',

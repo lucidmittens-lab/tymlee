@@ -583,10 +583,15 @@
     notes.rows = 3;
     notes.value = entry.notes || '';
     notes.placeholder = 'notes';
-    for (const c of [wo, eq, text, notes]) c.setAttribute('autocapitalize', 'off');
+    const files = document.createElement('textarea');
+    files.rows = 2;
+    files.value = entry.files || '';
+    files.placeholder = 'one path per line';
+    files.spellcheck = false;
+    for (const c of [wo, eq, text, notes, files]) c.setAttribute('autocapitalize', 'off');
     // Not a login or address form: keep browser autofill bars away.
     card.setAttribute('autocomplete', 'off');
-    for (const c of [time, wo, eq, text, notes]) c.setAttribute('autocomplete', 'off');
+    for (const c of [time, wo, eq, text, notes, files]) c.setAttribute('autocomplete', 'off');
 
     const error = document.createElement('div');
     error.className = 'ec-error';
@@ -609,10 +614,10 @@
     const row = document.createElement('div');
     row.className = 'ec-row';
     row.append(field('Start', time), field('Work order', wo), field('Equipment', eq));
-    card.append(title, row, field('Entry', text), field('Notes', notes), error, buttons);
+    card.append(title, row, field('Entry', text), field('Notes', notes), field('Files', files), error, buttons);
 
     // Notes, work orders and equipment need server support when signed in.
-    for (const [name, control] of [['notes', notes], ['wo', wo], ['eq', eq]]) {
+    for (const [name, control] of [['notes', notes], ['notes', files], ['wo', wo], ['eq', eq]]) {
       store.supports(name).then((ok) => {
         if (ok) return;
         control.disabled = true;
@@ -624,7 +629,7 @@
       e.preventDefault();
       const current = store.entries.find((x) => x.id === b.id);
       if (!current) return closeEntryEditor();
-      const r = T.editEntry(current, { time: time.value, wo: wo.value, eq: eq.value, text: text.value, notes: notes.value }, Date.now());
+      const r = T.editEntry(current, { time: time.value, wo: wo.value, eq: eq.value, text: text.value, notes: notes.value, files: files.value }, Date.now());
       if (r.error) {
         error.textContent = r.error;
         return;

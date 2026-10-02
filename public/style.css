@@ -812,8 +812,8 @@ button.gui-day {
 
 .startbar {
   display: grid;
-  grid-template-columns: auto minmax(8em, 13em) 1fr auto auto;
-  grid-template-areas: "menu cat title start off";
+  grid-template-columns: auto minmax(8em, 13em) 1fr auto auto auto;
+  grid-template-areas: "menu cat title start breaks off";
   gap: 8px;
   align-items: center;
   max-width: 1200px;
@@ -827,6 +827,7 @@ button.gui-day {
 .sb-title { grid-area: title; }
 .sb-start { grid-area: start; }
 .sb-off { grid-area: off; }
+.sb-breaks { grid-area: breaks; display: flex; gap: 8px; }
 .startbar input {
   width: 100%;
   font: inherit;
@@ -842,7 +843,7 @@ button.gui-day {
   font: inherit;
   cursor: pointer;
 }
-.sb-menu, .sb-off, .sb-start {
+.sb-menu, .sb-off, .sb-start, .sb-break {
   border-radius: 8px;
   padding: 8px 14px;
   border: 1px solid var(--line);
@@ -852,7 +853,7 @@ button.gui-day {
 }
 .sb-menu { font-size: 18px; line-height: 1; padding: 7px 11px; }
 .sb-start { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
-.sb-off:disabled { opacity: 0.4; cursor: default; }
+.sb-off:disabled, .sb-break:disabled { opacity: 0.4; cursor: default; }
 .sb-suggest {
   position: absolute;
   left: 0;
@@ -991,13 +992,16 @@ button.gui-day {
     grid-template-columns: 44px minmax(0, 0.8fr) minmax(0, 1.2fr);
     grid-template-areas:
       "cat cat title"
-      "menu off start";
+      "menu off start"
+      "breaks breaks breaks";
     padding: 8px 12px;
     gap: 6px;
   }
   .sb-menu { padding: 9px 0; }
   .startbar input, .gform-field input { font-size: 15px; }
-  .sb-start, .sb-off { padding: 10px 14px; }
+  .sb-start, .sb-off, .sb-break { padding: 10px 14px; }
+  .sb-breaks { gap: 6px; }
+  .sb-break { flex: 1; }
   .gsheet-wrap { align-items: flex-end; padding: 0; }
   .gsheet { width: 100%; max-height: 88%; border-radius: 16px 16px 0 0; animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
   .gsheet-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }

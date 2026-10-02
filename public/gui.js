@@ -61,7 +61,12 @@
     catWrap.append(cat, suggest);
     const startBtn = button('▶ Start', 'sb-start', () => start(), 'Start this entry (clocks out of the current one)');
     const offBtn = button('■ Off', 'sb-off', () => off(), 'Clock out (/off)');
-    bar.append(menuBtn, catWrap, title, startBtn, offBtn);
+    // Breaks: each ends when the next entry starts.
+    const paidBtn = button('Paid break', 'sb-break', () => opts.run('/break-paid'), 'Paid break: counts toward hours and pay (/break-paid)');
+    const unpaidBtn = button('Unpaid break', 'sb-break', () => opts.run('/break-unpaid'), 'Unpaid break: not counted, like Off (/break-unpaid)');
+    const breaks = el('div', 'sb-breaks');
+    breaks.append(paidBtn, unpaidBtn);
+    bar.append(menuBtn, catWrap, title, startBtn, breaks, offBtn);
     dockEl.insertBefore(bar, dockEl.querySelector('#status'));
 
     // Category suggestions: known categories, most recent first, matching
@@ -135,7 +140,12 @@
     // Called every second with the status line's state.
     function update(st) {
       if (!active) return;
-      offBtn.disabled = st.state !== 'running';
+      // Working, or on a break of the other kind.
+      const onPaid = st.state === 'running' && st.what === 'paid break';
+      const onUnpaid = st.state === 'off' && st.offLabel === 'unpaid break';
+      offBtn.disabled = !(st.state === 'running' || onUnpaid);
+      paidBtn.disabled = !((st.state === 'running' && !onPaid) || onUnpaid);
+      unpaidBtn.disabled = st.state !== 'running';
     }
 
     // ---- toasts --------------------------------------------------------------

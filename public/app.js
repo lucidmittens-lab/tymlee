@@ -369,9 +369,9 @@
       const noun = guiUnit;
       const label = guiButton([span2('gui-period', periodLabel(range)), span2('tl-muted gui-total', total ? `  ${T.formatHM(total)}` : '')],
         () => showUnit(guiUnit), { cls: 'gui-day', title: guiBack ? `Back to this ${noun}` : `This ${noun}` });
-      const next = guiButton('›', () => step(1), { title: `Next ${noun}`, cls: 'gui-step' });
+      const next = guiButton([window.TymleeGui.icon('right')], () => step(1), { title: `Next ${noun}`, cls: 'gui-step' });
       next.disabled = guiBack === 0;
-      steps.append(guiButton('‹', () => step(-1), { title: `Previous ${noun}`, cls: 'gui-step' }), label, next);
+      steps.append(guiButton([window.TymleeGui.icon('left')], () => step(-1), { title: `Previous ${noun}`, cls: 'gui-step' }), label, next);
     } else {
       steps.append(span2('gui-day gui-range', range.label), span2('tl-muted gui-total', total ? `  ${T.formatHM(total)}` : ''));
     }

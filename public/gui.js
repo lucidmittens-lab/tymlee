@@ -25,6 +25,29 @@
     return b;
   }
 
+  // Line icons, drawn here so they look the same on every device.
+  const ICONS = {
+    play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    cup: '<path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5zM16 10h1.5a2.5 2.5 0 0 1 0 5H16M8 3v3M11 3v3"/>',
+    pause: '<path d="M8 5v14M16 5v14" stroke-width="2.4"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5" stroke-width="2.4"/>',
+    swap: '<path d="M5 9h13l-3.5-3.5M19 15H6l3.5 3.5"/>',
+    back: '<path d="M9 7L4 12l5 5M4 12h10a5 5 0 0 1 5 5v2"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    down: '<path d="M7 10l5 5 5-5"/>',
+    left: '<path d="M15 6l-6 6 6 6"/>',
+    right: '<path d="M9 6l6 6-6 6"/>',
+  };
+  function icon(name) {
+    const span = document.createElement('span');
+    span.className = 'icon';
+    span.setAttribute('aria-hidden', 'true');
+    span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+    return span;
+  }
+
   const RANGES = [['today', 'Today'], ['yesterday', 'Yesterday'], ['calweek', 'This week'], ['week', '7 days'], ['calmonth', 'This month'], ['month', '30 days'], ['all', 'All']];
 
   // opts: { T, store, shell, appEl, dockEl, run(line) -> Promise, openCli(line),
@@ -35,11 +58,31 @@
     let capture = null; // lines printed while a menu command runs
 
     // ---- start bar -------------------------------------------------------------
+    // Changes with what's going on (bar.dataset.mode):
+    //   idle     nothing running: the fields, Resume and Start
+    //   running  a card with the running entry and its timer; Done (for a
+    //            to-do started with /do), the breaks, Off and New task
+    //   break    on a break: the card counts it; Back to work
+    //   compose  New task while something runs: the fields, Cancel and Switch
 
     const bar = el('div', 'startbar');
     bar.id = 'startbar';
     bar.hidden = true;
-    const menuBtn = button('☰', 'sb-menu', () => openMenu(), 'Menu');
+    bar.dataset.mode = 'idle';
+    let composing = false;
+    let state = null; // the last status from update()
+
+    const menuBtn = button('', 'sb-menu', () => openMenu(), 'Menu');
+    menuBtn.append(icon('menu'));
+    // The card: what's running and for how long.
+    const card = el('div', 'sb-card');
+    const dot = el('span', 'sb-dot');
+    const cardWords = el('div', 'sb-card-words');
+    const clock = el('span', 'sb-clock');
+    const what = el('span', 'sb-what');
+    cardWords.append(clock, what);
+    const tdTag = el('span', 'sb-td');
+    card.append(dot, cardWords, tdTag);
     const catWrap = el('div', 'sb-cat');
     const cat = el('input');
     cat.type = 'text';
@@ -61,15 +104,72 @@
     suggest.setAttribute('role', 'listbox');
     suggest.hidden = true;
     catWrap.append(cat, suggest);
-    const startBtn = button('▶ Start', 'sb-start', () => start(), 'Start this entry (clocks out of the current one)');
-    const offBtn = button('■ Off', 'sb-off', () => off(), 'Clock out (/off)');
-    // Breaks: each ends when the next entry starts.
-    const paidBtn = button('Paid break', 'sb-break', () => opts.run('/break-paid'), 'Paid break: counts toward hours and pay (/break-paid)');
-    const unpaidBtn = button('Unpaid break', 'sb-break', () => opts.run('/break-unpaid'), 'Unpaid break: not counted, like Off (/break-unpaid)');
-    const breaks = el('div', 'sb-breaks');
-    breaks.append(paidBtn, unpaidBtn);
-    bar.append(menuBtn, catWrap, title, startBtn, breaks, offBtn);
+
+    const withIcon = (name, label, cls, run, tip) => {
+      const b = button('', cls, run, tip);
+      b.append(icon(name), el('span', 'sb-label', label));
+      return b;
+    };
+    const startBtn = withIcon('play', 'Start', 'sb-start', () => start(), 'Start this entry (Enter)');
+    const cancelBtn = withIcon('x', 'Cancel', 'sb-cancel', () => setComposing(false), 'Keep what is running (Esc)');
+    const resumeBtn = withIcon('back', 'Resume', 'sb-resume', () => resume(), 'Start the last task again');
+    const backBtn = withIcon('back', 'Back to work', 'sb-back', () => resume(), 'End the break and start the last task again');
+    const newBtn = withIcon('swap', 'New task', 'sb-new', () => setComposing(true), 'Start something else (ends what is running)');
+    const doneBtn = withIcon('check', 'Done', 'sb-done', () => opts.run('/done'), 'Mark the to-do done (the timer keeps going)');
+    const offBtn = withIcon('stop', 'Off', 'sb-off', () => off(), 'Clock out (/off)');
+    // Breaks: each ends when the next entry starts. Phones show both; wide
+    // screens one Break button (the kind used last) with ▾ for the other.
+    const paidBtn = withIcon('cup', 'Paid', 'sb-break sb-paid', () => takeBreak('paid'), 'Paid break: counts toward hours and pay (/break-paid)');
+    const unpaidBtn = withIcon('pause', 'Unpaid', 'sb-break sb-unpaid', () => takeBreak('unpaid'), 'Unpaid break: not counted, like Off (/break-unpaid)');
+    const breakSplit = el('div', 'sb-split');
+    const breakBtn = withIcon('cup', 'Break', 'sb-break sb-break-main', () => takeBreak(lastBreak()), 'Take a break');
+    const breakMore = button('', 'sb-break sb-break-more', () => toggleBreakMenu(), 'Paid or unpaid break');
+    breakMore.append(icon('down'));
+    breakMore.setAttribute('aria-haspopup', 'menu');
+    const breakMenu = el('div', 'sb-popup');
+    breakMenu.hidden = true;
+    breakMenu.setAttribute('role', 'menu');
+    for (const [kind, label, ico] of [['paid', 'Paid break', 'cup'], ['unpaid', 'Unpaid break', 'pause']]) {
+      const b = button('', 'sb-popup-item', () => { breakMenu.hidden = true; takeBreak(kind); });
+      b.dataset.kind = kind;
+      b.setAttribute('role', 'menuitem');
+      b.append(icon(ico), el('span', null, label), el('span', 'sb-popup-hint', kind === 'paid' ? 'counts as time' : 'not counted'));
+      breakMenu.append(b);
+    }
+    breakSplit.append(breakBtn, breakMore, breakMenu);
+    bar.append(card, catWrap, title, doneBtn, paidBtn, unpaidBtn, breakSplit, offBtn, cancelBtn, resumeBtn, backBtn, newBtn, startBtn, menuBtn);
     dockEl.insertBefore(bar, dockEl.querySelector('#status'));
+
+    const BREAK_KEY = 'tymlee.lastBreak';
+    function lastBreak() {
+      try { return localStorage.getItem(BREAK_KEY) === 'unpaid' ? 'unpaid' : 'paid'; } catch (_) { return 'paid'; }
+    }
+    function takeBreak(kind) {
+      try { localStorage.setItem(BREAK_KEY, kind); } catch (_) { /* fine */ }
+      return opts.run(kind === 'paid' ? '/break-paid' : '/break-unpaid');
+    }
+    function toggleBreakMenu(show = breakMenu.hidden) {
+      breakMenu.hidden = !show;
+      breakMore.setAttribute('aria-expanded', String(show));
+    }
+    document.addEventListener('mousedown', (e) => { if (!breakSplit.contains(e.target)) toggleBreakMenu(false); });
+
+    function setComposing(on) {
+      composing = on;
+      if (!on) {
+        cat.value = '';
+        title.value = '';
+        suggest.hidden = true;
+      }
+      if (state) update(state);
+      if (on) cat.focus();
+    }
+    for (const f of [cat, title]) f.addEventListener('keydown', (e) => { if (e.key === 'Escape' && composing) setComposing(false); });
+
+    async function resume() {
+      if (!state || !state.last) return;
+      await opts.run(state.last, { undo: true });
+    }
 
     // Category suggestions: known categories, most recent first, matching
     // what's typed. Tap, or arrows and Enter.
@@ -131,23 +231,59 @@
       cat.value = '';
       title.value = '';
       suggest.hidden = true;
+      composing = false;
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); // phones: keyboard away
       await opts.run(t ? `${c} ${t}` : c, { undo: true });
     }
 
     function off() {
+      composing = false;
       return opts.run('/off');
     }
 
     // Called every second with the status line's state.
     function update(st) {
+      state = st;
       if (!active) return;
-      // Working, or on a break of the other kind.
-      const onPaid = st.state === 'running' && st.what === 'paid break';
-      const onUnpaid = st.state === 'off' && st.offLabel === 'unpaid break';
-      offBtn.disabled = !(st.state === 'running' || onUnpaid);
-      paidBtn.disabled = !((st.state === 'running' && !onPaid) || onUnpaid);
-      unpaidBtn.disabled = st.state !== 'running';
+      const onBreak = Boolean(st.brk);
+      const running = st.state === 'running' && !onBreak;
+      if (!running && !onBreak) composing = false;
+      const mode = composing ? 'compose' : onBreak ? 'break' : running ? 'running' : 'idle';
+      if (bar.dataset.mode !== mode) bar.dataset.mode = mode;
+      bar.dataset.todo = st.todo ? '1' : '0';
+      // The card.
+      if (mode === 'idle') {
+        clock.textContent = st.state === 'idle' ? 'Nothing logged yet' : `Off since ${st.since}`;
+        what.textContent = st.state === 'idle' ? 'type a category and what you are doing, then Start' : `${st.today}${st.last ? ` · last: ${st.last}` : ''}`;
+      } else if (mode === 'break') {
+        clock.textContent = st.clock;
+        what.textContent = `${st.brk} break${st.last ? ` · was: ${st.last}` : ''}`;
+      } else {
+        clock.textContent = mode === 'compose' ? `now ${st.clock}` : st.clock;
+        what.replaceChildren();
+        if (st.wo) what.append(el('span', 'sb-wo', T.woTag(st.wo)), ' ');
+        what.append(el('b', null, st.category), st.note ? ` ${st.note}` : '');
+      }
+      tdTag.textContent = mode === 'running' && st.todo ? st.todo.tag : '';
+      // Buttons.
+      doneBtn.disabled = !st.todo;
+      paidBtn.classList.toggle('on', st.brk === 'paid');
+      unpaidBtn.classList.toggle('on', st.brk === 'unpaid');
+      paidBtn.disabled = st.brk === 'paid';
+      unpaidBtn.disabled = st.brk === 'unpaid';
+      const next = lastBreak();
+      breakBtn.querySelector('.sb-label').textContent = onBreak ? `${st.brk === 'paid' ? 'Paid' : 'Unpaid'} break` : 'Break';
+      breakBtn.disabled = onBreak;
+      breakBtn.title = onBreak ? 'On a break' : `${next === 'paid' ? 'Paid' : 'Unpaid'} break (▾ for the other kind)`;
+      breakBtn.replaceChild(icon(onBreak ? (st.brk === 'paid' ? 'cup' : 'pause') : next === 'paid' ? 'cup' : 'pause'), breakBtn.firstChild);
+      for (const b of breakMenu.children) b.disabled = b.dataset.kind === st.brk;
+      resumeBtn.disabled = !st.last;
+      resumeBtn.title = st.last ? `Start again: ${st.last}` : 'Nothing to resume yet';
+      backBtn.title = st.last ? `Back to: ${st.last}` : 'End the break';
+      startBtn.querySelector('.sb-label').textContent = mode === 'compose' ? 'Switch' : 'Start';
+      startBtn.replaceChild(icon(mode === 'compose' ? 'swap' : 'play'), startBtn.firstChild);
+      const dockH = `${dockEl.offsetHeight}px`;
+      if (appEl.style.getPropertyValue('--dock-h') !== dockH) appEl.style.setProperty('--dock-h', dockH);
     }
 
     // ---- toasts --------------------------------------------------------------
@@ -185,7 +321,9 @@
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-label', heading);
       const head = el('div', 'gsheet-head');
-      head.append(el('span', 'gsheet-title', heading), button('✕', 'gsheet-close', closeSheet, 'Close'));
+      const close = button('', 'gsheet-close', closeSheet, 'Close');
+      close.append(icon('x'));
+      head.append(el('span', 'gsheet-title', heading), close);
       const body = el('div', 'gsheet-body');
       body.append(...content);
       panel.append(head, body);
@@ -223,7 +361,8 @@
           if (r.sub) words.append(el('span', 'gtick-sub', r.sub));
           row.append(box, words);
           if (r.play) {
-            const go = button('▶', 'gtick-play', (e) => { e.preventDefault(); r.play(); render(); });
+            const go = button('', 'gtick-play', (e) => { e.preventDefault(); r.play(); render(); });
+            go.append(icon('play'));
             go.setAttribute('aria-label', `Start: ${r.label}`);
             go.title = 'Start a timer for this';
             row.append(go);
@@ -610,6 +749,7 @@
       show() {
         active = true;
         bar.hidden = false;
+        if (state) update(state);
       },
       hide() {
         active = false;
@@ -624,5 +764,5 @@
     };
   }
 
-  root.TymleeGui = { createGui };
+  root.TymleeGui = { createGui, icon };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

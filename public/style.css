@@ -37,7 +37,8 @@
   --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.18);
   --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --radius: 10px;
+  --radius: 6px;      /* buttons and inputs: crisp */
+  --radius-card: 10px; /* bars, cards, sheets */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -659,10 +660,14 @@ button.gui-day {
 .tl-mblock:hover { outline: 2px solid var(--fg); outline-offset: -1px; }
 .tl-mnow { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); pointer-events: none; }
 .gui-bar .gui-step {
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 9px 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
 }
+.gui-step .icon svg { width: 15px; height: 15px; }
 .gui-bar button:disabled { opacity: 0.35; cursor: default; }
 
 /* Moving between days slides the timeline. */
@@ -706,7 +711,7 @@ button.gui-day {
   }
   .gui-steps { flex: 1; min-width: 0; justify-content: space-between; margin: 0; }
   .gui-day, button.gui-day { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 2px; }
-  .gui-bar .gui-step { width: 34px; height: 32px; padding: 0; font-size: 18px; border-radius: 10px; }
+  .gui-bar .gui-step { width: 34px; height: 32px; padding: 0; font-size: 18px; border-radius: var(--radius); }
   /* Week: seven narrow columns, category names only. */
   .tl-mode-week { --axis: 1.6em; }
   .tl-mode-week .tl-grid { column-gap: 2px; }
@@ -760,7 +765,7 @@ button.gui-day {
   gap: 8px;
   padding: 10px 12px 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--shadow-lg);
   font-size: 12px;
@@ -849,7 +854,7 @@ button.gui-day {
    One system for every button: primary (the one main action: filled accent),
    secondary (a card with a hairline), and danger. All share the same
    hover, press and keyboard-focus behavior. */
-.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button,
+.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button,
 .gform-range, .gform-go, .gtick-play {
   font: inherit;
   font-weight: 500;
@@ -862,19 +867,19 @@ button.gui-day {
   transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.08s, opacity 0.12s;
   -webkit-tap-highlight-color: transparent;
 }
-:is(.sb-menu, .sb-off, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gtick-play):not(:disabled):hover {
+:is(.sb-menu, .sb-off, .sb-break, .sb-done, .sb-resume, .editor-buttons button, .ec-buttons button, .gform-range, .gtick-play):not(:disabled):hover {
   background: color-mix(in srgb, var(--fg) 4%, var(--card));
   border-color: color-mix(in srgb, var(--fg) 18%, var(--line));
 }
 /* Primary. */
-.sb-start, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gform-range[aria-pressed="true"] {
+.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gform-range[aria-pressed="true"] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-:is(.sb-start, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go):not(:disabled):hover {
+:is(.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go):not(:disabled):hover {
   background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 /* Danger: red text that fills on hover; solid when it is the action. */
@@ -882,16 +887,16 @@ button.gui-day {
 .ec-buttons .ec-delete:not(:disabled):hover { background: color-mix(in srgb, var(--warn) 10%, var(--card)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
 .gform-go.danger { background: var(--warn); border-color: var(--warn); color: #fff; }
 /* Press, keyboard focus, disabled. */
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
     .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):not(:disabled):active { transform: scale(0.97); }
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
     .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .tl-date, .tl-block):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring), 0 0 0 1px var(--accent);
 }
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .gform-go, .gtick-play):disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-resume, .gform-go, .gtick-play):disabled { opacity: 0.4; cursor: default; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
-  :is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+  :is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
       .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):active { transform: none; }
 }
 
@@ -902,10 +907,10 @@ button.gui-day {
 #app.pure-mode #about { display: none !important; }
 #app.pure-mode #gui { padding-bottom: 12px; }
 
+/* The start bar: a card at the bottom whose layout follows bar.dataset.mode
+   (gui.js): idle, running, break or compose. Wide screens: one row. */
 .startbar {
   display: grid;
-  grid-template-columns: auto minmax(8em, 13em) 1fr auto auto auto;
-  grid-template-areas: "menu cat title start breaks off";
   gap: 8px;
   align-items: center;
   max-width: 1200px;
@@ -913,25 +918,102 @@ button.gui-day {
   padding: 10px;
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
 }
 .startbar[hidden] { display: none; }
 #app.pure-mode #dock { padding: 0 14px; }
+.startbar > * { min-width: 0; }
 .sb-menu { grid-area: menu; }
+.sb-card { grid-area: card; }
 .sb-cat { grid-area: cat; position: relative; }
 .sb-title { grid-area: title; }
 .sb-start { grid-area: start; }
 .sb-off { grid-area: off; }
-.sb-breaks { grid-area: breaks; display: flex; gap: 8px; }
+.sb-done { grid-area: done; }
+.sb-paid { grid-area: paid; }
+.sb-unpaid { grid-area: unpaid; }
+.sb-split { grid-area: brk; position: relative; display: flex; }
+.sb-cancel { grid-area: cancel; }
+.sb-resume { grid-area: resume; }
+.sb-back { grid-area: back; }
+.sb-new { grid-area: new; }
+/* Everything is hidden unless its mode shows it. */
+.startbar > :is(.sb-card, .sb-cat, .sb-title, .sb-start, .sb-off, .sb-done, .sb-paid, .sb-unpaid, .sb-split, .sb-cancel, .sb-resume, .sb-back, .sb-new) { display: none; }
+.startbar[data-mode="idle"] > :is(.sb-cat, .sb-title, .sb-resume, .sb-start),
+.startbar[data-mode="running"] > :is(.sb-card, .sb-done, .sb-split, .sb-off, .sb-new),
+.startbar[data-mode="break"] > :is(.sb-card, .sb-split, .sb-off, .sb-back),
+.startbar[data-mode="compose"] > :is(.sb-cat, .sb-title, .sb-cancel, .sb-start) { display: flex; }
+.startbar[data-mode="running"][data-todo="0"] > .sb-done { display: none; }
+.startbar[data-mode="idle"] { grid-template-columns: auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu cat title resume start"; }
+.startbar[data-mode="compose"] { grid-template-columns: auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu cat title cancel start"; }
+.startbar[data-mode="running"] { grid-template-columns: auto 1fr auto auto auto auto; grid-template-areas: "menu card done brk off new"; }
+.startbar[data-mode="running"][data-todo="0"] { grid-template-areas: "menu card brk brk off new"; grid-template-columns: auto 1fr auto auto auto auto; }
+.startbar[data-mode="break"] { grid-template-columns: auto 1fr auto auto auto; grid-template-areas: "menu card brk off back"; }
+
+/* The card: what's running and its timer. */
+.sb-card {
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  overflow: hidden;
+}
+.sb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); animation: sb-pulse 2s ease-in-out infinite; }
+@keyframes sb-pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
+.sb-card-words { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.sb-clock { flex: none; font-weight: 700; color: var(--accent); }
+.sb-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-what b { font-weight: 600; }
+.sb-wo { color: var(--muted); }
+.sb-td { flex: none; font: 600 11px var(--mono); color: var(--accent); background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+.sb-td:empty { display: none; }
+.startbar[data-mode="break"] .sb-card { --accent: var(--s3); background: color-mix(in srgb, var(--s3) 13%, var(--card)); }
+.startbar[data-mode="break"] .sb-clock { color: color-mix(in srgb, var(--s3) 72%, var(--fg)); }
+.startbar[data-mode="idle"] .sb-card { background: var(--bg); }
+.startbar[data-mode="idle"] .sb-dot { background: var(--muted); box-shadow: none; animation: none; }
+.startbar[data-mode="idle"] .sb-clock { color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { .sb-dot { animation: none; } }
+
+/* Buttons with an icon. */
+.icon { display: inline-flex; flex: none; }
+.icon svg { width: 16px; height: 16px; }
+.startbar button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; }
+.sb-menu { width: 38px; padding: 0 !important; }
+.sb-cancel { background: transparent !important; border-color: transparent !important; box-shadow: none !important; color: var(--muted) !important; }
+.sb-cancel:hover { color: var(--fg) !important; }
+.sb-break.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); opacity: 1; }
+.startbar[data-mode="break"] .sb-break.on { --accent: color-mix(in srgb, var(--s3) 75%, var(--fg)); }
+.sb-split .sb-break-main { border-radius: var(--radius) 0 0 var(--radius); }
+.sb-split .sb-break-more { border-radius: 0 var(--radius) var(--radius) 0; border-left: 0; width: 30px; padding: 0 !important; }
+.sb-popup {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 16; /* over toasts */
+  width: 220px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lg);
+}
+.sb-popup[hidden] { display: none; }
+.startbar .sb-popup-item { display: flex; justify-content: flex-start; width: 100%; height: auto; gap: 10px; padding: 9px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--fg); text-align: left; }
+.sb-popup-item:hover:not(:disabled) { background: var(--accent-bg); color: var(--accent); }
+.sb-popup-item:disabled { opacity: 0.4; cursor: default; }
+.sb-popup-hint { margin-left: auto; color: var(--muted); font-size: 12px; }
 .startbar input {
   width: 100%;
   font: inherit;
   color: var(--fg);
   background: var(--bg);
+  height: 38px;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 0 12px;
   outline: none;
   transition: border-color 0.12s, box-shadow 0.12s, background-color 0.12s;
 }
@@ -940,8 +1022,7 @@ button.gui-day {
   font: inherit;
   cursor: pointer;
 }
-.sb-menu, .sb-off, .sb-start, .sb-break { padding: 8px 14px; white-space: nowrap; }
-.sb-menu { font-size: 18px; line-height: 1; padding: 7px 11px; }
+.startbar button { padding: 0 14px; white-space: nowrap; }
 .sb-suggest {
   position: absolute;
   left: 0;
@@ -1011,7 +1092,7 @@ button.gui-day {
   max-height: 85%;
   display: flex;
   flex-direction: column;
-  border-radius: 18px;
+  border-radius: var(--radius-card);
   background: var(--card);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
@@ -1077,25 +1158,40 @@ button.gui-day {
 .gtick-words { flex: 1; }
 .gtick-row.late .gtick-sub { color: var(--warn); }
 .gtick-row.now .gtick-sub { color: var(--accent); }
-.gtick-play { flex-shrink: 0; width: 32px; height: 28px; margin: -3px 0; padding: 0; color: var(--accent); font-size: 12px; }
+.gtick-play { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 28px; margin: -3px 0; padding: 0; color: var(--accent); }
+.gtick-play .icon svg { width: 13px; height: 13px; }
+.gsheet-close { display: inline-flex; align-items: center; border-radius: var(--radius); }
+.gsheet-close:hover { color: var(--fg); background: var(--bg); }
 
 @media (max-width: 600px) {
-  .startbar {
-    grid-template-columns: 44px minmax(0, 0.8fr) minmax(0, 1.2fr);
-    grid-template-areas:
-      "cat cat title"
-      "menu off start"
-      "breaks breaks breaks";
-    padding: 8px;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
+  /* Phones: the card on its own row, bigger buttons, the menu at the right
+     end of the middle row. */
+  .startbar { padding: 8px; gap: 6px; margin-bottom: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)) 44px; }
   #app.pure-mode #dock { padding: 0 8px; }
-  .sb-menu { padding: 9px 0; }
+  .startbar button { height: 44px; }
+  .startbar input { height: 44px; }
+  .sb-menu { width: 44px; }
+  .startbar[data-mode="running"] > :is(.sb-paid, .sb-unpaid),
+  .startbar[data-mode="break"] > :is(.sb-paid, .sb-unpaid),
+  .startbar[data-mode="idle"] > .sb-card,
+  .startbar[data-mode="compose"] > .sb-card,
+  .startbar[data-mode="running"][data-todo="0"] > .sb-done { display: flex; }
+  .startbar > .sb-split { display: none !important; }
+  .startbar[data-mode="running"], .startbar[data-mode="running"][data-todo="0"] { grid-template-columns: repeat(6, minmax(0, 1fr)) 44px; grid-template-areas: "card card card card card card card" "done done paid paid unpaid unpaid menu" "off off new new new new new"; }
+  .startbar[data-mode="break"] { grid-template-areas: "card card card card card card card" "paid paid paid unpaid unpaid unpaid menu" "off off back back back back back"; }
+  .startbar[data-mode="compose"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "cancel cancel start start start start menu"; }
+  .startbar[data-mode="idle"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "resume resume start start start start menu"; }
+  .sb-card { height: auto; min-height: 54px; padding: 8px 12px; }
+  .sb-card-words { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .sb-clock { font-size: 19px; line-height: 1.15; }
+  .sb-what { font-size: 13px; max-width: 100%; }
+  .startbar[data-mode="idle"] .sb-clock { font-size: 16px; }
+  .startbar[data-mode="compose"] .sb-card { min-height: 0; padding: 6px 10px; }
+  .startbar[data-mode="compose"] .sb-card-words { flex-direction: row; align-items: baseline; gap: 8px; }
+  .startbar[data-mode="compose"] .sb-clock { font-size: 13px; }
+  .startbar :is(.sb-done, .sb-paid, .sb-unpaid) { height: 40px; font-size: 13.5px; padding: 0 6px; gap: 5px; }
+  .sb-start, .sb-new, .sb-back, .sb-off, .sb-resume, .sb-cancel { font-size: 15px; }
   .startbar input, .gform-field input { font-size: 15px; }
-  .sb-start, .sb-off, .sb-break { padding: 10px 14px; }
-  .sb-breaks { gap: 6px; }
-  .sb-break { flex: 1; }
   .gsheet-wrap { align-items: flex-end; padding: 0; }
   .gsheet { width: 100%; max-height: 88%; border-radius: 20px 20px 0 0; border-width: 1px 0 0; animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
   .gsheet-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }

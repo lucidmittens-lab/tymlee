@@ -632,6 +632,13 @@
       return cur && !cur.off && !T.isMarker(cur.text) ? cur : null;
     }
 
+    // The latest entry that's a task (not off or a break), for Resume.
+    function lastTask() {
+      const list = shown();
+      for (let i = list.length - 1; i >= 0; i--) if (!T.isMarker(list[i].text)) return list[i];
+      return null;
+    }
+
     // The open to-do started with /do that's running now.
     function runningTodo() {
       const cur = runningEntry();
@@ -1684,9 +1691,20 @@
         }
         if (any) todayMoney = T.formatMoney(sum);
       }
+      const linked = runningTodo();
+      const last = lastTask();
       return {
         state: cur.off ? 'off' : 'running',
         offLabel: cur.off ? cur.category.replace(/[()]/g, '') : '',
+        // For the GUI's start bar: which break this is (if any), the to-do
+        // started with /do, the last task (for Resume / Back to work), and
+        // what's running, split into category and note.
+        brk: cur.text === T.BREAK_PAID ? 'paid' : cur.text === T.BREAK_UNPAID ? 'unpaid' : '',
+        todo: linked ? { id: linked.id, tag: linked.tag } : null,
+        last: last ? last.text : '',
+        category: T.isMarker(cur.text) ? '' : cur.category,
+        note: T.isMarker(cur.text) ? '' : cur.note,
+        wo: cur.wo || '',
         clock: T.formatClock(cur.duration),
         money,
         ot,
@@ -1730,6 +1748,10 @@
         if (t) doTodo(t.n);
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
+      dueCount() {
+        const today = T.ymd(Date.now());
+        return todos().filter((t) => !t.done && t.due && t.due <= today).length;
+      },
       formQuestions,
       presetAnswers,
       commandWords,

@@ -1,25 +1,60 @@
+/* Fonts, served from here so the site works offline: Inter for the
+   interface, JetBrains Mono where columns must line up (the console,
+   reports). Both are under the SIL Open Font License (fonts/*-OFL.txt). */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(fonts/inter.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(fonts/jetbrains-mono.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Colors. Everything accent-colored comes from --accent (and --on-accent,
+   the text on it), so a chosen accent only has to set those two. */
 :root {
-  --bg: #fbfaf7;
-  --fg: #1d1d1b;
-  --muted: #8a877f;
-  --line: #e4e1d8;
-  --accent: #2f6f5e;
-  --accent-bg: #e3efe9;
-  --warn: #b0413e;
-  --panel: #f2f0ea;
-  --font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --bg: #f6f7f9;       /* the canvas */
+  --card: #ffffff;     /* bars, sheets, cards on it */
+  --fg: #16181d;
+  --muted: #6b7280;
+  --line: #e4e7ec;
+  --accent: #4f46e5;
+  --on-accent: #ffffff;
+  --warn: #dc2626;
+  --panel: #ffffff;    /* the console tray */
+  --accent-bg: color-mix(in srgb, var(--accent) 10%, var(--card));
+  --accent-ring: color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.18);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #141412;
-    --fg: #e3e1db;
-    --muted: #7d7a73;
-    --line: #2a2926;
-    --accent: #7cc4ad;
-    --accent-bg: #1d2e28;
-    --warn: #e0716d;
-    --panel: #1c1c1a;
+    --bg: #0f1115;
+    --card: #171a21;
+    --fg: #e7e9ee;
+    --muted: #8b93a3;
+    --line: #262b35;
+    --accent: #8b8cf8;
+    --on-accent: #0f1115;
+    --warn: #f87171;
+    --panel: #13161c;
+    --accent-bg: color-mix(in srgb, var(--accent) 14%, var(--card));
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -36,6 +71,8 @@ body {
   background: var(--bg);
   color: var(--fg);
   font: 14px/1.45 var(--font);
+  font-feature-settings: "tnum", "cv11"; /* even-width digits, a plain 1 */
+  -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -72,6 +109,14 @@ body {
 
 #dock { flex-shrink: 0; position: relative; }
 
+/* The console (scrollback, prompt, completions) and printed reports stay
+   monospaced, so their columns line up. */
+#out, #dock .col, .gsheet-text, .tl-tip {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-feature-settings: normal;
+}
+
 /* Version and a link to the code: a small island just above the CLI | GUI
    switch, at the right end of the status bar. */
 #about {
@@ -82,7 +127,7 @@ body {
   padding: 1px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--bg);
+  background: var(--card);
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
@@ -126,9 +171,10 @@ body {
   padding: 8px 10px;
   font: inherit;
   color: var(--fg);
-  background: var(--accent-bg);
+  background: var(--card);
   border: 1px solid var(--accent);
-  border-radius: 4px;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  border-radius: 8px;
   outline: none;
   resize: none;
   overflow-x: auto;
@@ -139,16 +185,7 @@ body {
 
 /* Save / Cancel under the /edit and /restore text box. */
 .editor-buttons { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
-.editor-buttons button {
-  font: inherit;
-  padding: 6px 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-}
-.editor-buttons .editor-save { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.editor-buttons button { padding: 6px 16px; }
 .editor-hint { color: var(--muted); font-size: 12px; }
 @media (pointer: coarse) { .editor-hint { display: none; } .editor-buttons button { padding: 9px 20px; } }
 
@@ -218,8 +255,11 @@ body {
   display: flex;
   gap: 2ch;
   justify-content: space-between;
-  background: var(--accent-bg);
+  align-items: center;
+  background: var(--card);
+  border-top: 1px solid var(--line);
   color: var(--fg);
+  font-size: 13px;
   padding: 4px max(16px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   white-space: pre;
 }
@@ -233,7 +273,7 @@ body {
 #status .sync { color: var(--muted); flex-shrink: 0; }
 #status .sync-synced { color: var(--accent); }
 #status .sync-error, #status .sync-offline, #status .sync-locked { color: var(--warn); }
-#status .run { color: var(--accent); }
+#status .run { color: var(--accent); font-weight: 600; }
 #status .money { color: var(--fg); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 #status .money.ot { color: var(--warn); }
 #status .stopped { color: var(--muted); }
@@ -242,13 +282,12 @@ body {
 /* Touch screens: completions get larger tap targets. (iOS would zoom in on
    inputs under 16px; app.js turns that zoom off there instead.) */
 @media (pointer: coarse) {
-  #prompt, #out .editor { font-size: 14px; }
-  #matches { font-size: 14px; }
+  #dock .col, #out .editor { font-size: 14px; }
   #matches span { display: inline-block; padding: 6px 0; margin-right: 3ch; }
 }
 
 @media (max-width: 600px) {
-  body { font-size: 13px; }
+  body, #out, #dock .col { font-size: 13px; }
   #out .editor { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
   #status { gap: 1.5ch; }
   #status .since { display: none; }
@@ -334,14 +373,15 @@ body {
   right: 3px;
   box-sizing: border-box;
   overflow: hidden;
-  padding: 2px 6px 2px 8px;
-  border-radius: 4px;
-  border-left: 4px solid var(--c);
-  background: color-mix(in srgb, var(--c) 16%, var(--bg));
+  padding: 3px 8px 2px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--c) 16%, var(--card));
+  box-shadow: inset 3px 0 0 var(--c);
   color: var(--fg);
   cursor: pointer;
+  transition: background-color 0.12s;
 }
-.tl-block:hover { background: color-mix(in srgb, var(--c) 26%, var(--bg)); }
+.tl-block:hover { background: color-mix(in srgb, var(--c) 26%, var(--card)); }
 .tl-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-line b { font-weight: 600; margin-right: 0.5ch; }
 .tl-wo {
@@ -354,7 +394,7 @@ body {
 /* Off time: a quiet hatched gap, not a category. */
 .tl-offblock {
   cursor: default;
-  border-left-color: transparent;
+  box-shadow: none;
   background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--muted) 18%, transparent) 5px 6px);
 }
 .tl-offblock:hover { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--muted) 18%, transparent) 5px 6px); }
@@ -367,6 +407,7 @@ body {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 8px), rgba(0, 0, 0, 0.35));
 }
 .tl-clipped { border-bottom: 2px dashed var(--c); }
+.tl-now { z-index: 2; }
 
 .tl-now {
   position: absolute;
@@ -382,8 +423,10 @@ body {
   top: -8px;
   padding: 0 3px;
   font-size: 10px;
-  color: var(--accent);
-  background: var(--bg);
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: 4px;
 }
 
 .tl-tip {
@@ -392,9 +435,9 @@ body {
   max-width: 320px;
   padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: var(--shadow);
   pointer-events: none;
   white-space: pre-wrap;
 }
@@ -403,25 +446,35 @@ body {
 .view-toggle {
   display: inline-flex;
   flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 5px;
-  overflow: hidden;
 }
 .view-toggle button,
 .gui-bar button {
   font: inherit;
   font-size: 11px;
-  line-height: 1.4;
-  padding: 0 6px;
+  font-weight: 500;
+  line-height: 1.5;
+  padding: 0 7px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
 }
-.view-toggle button[aria-pressed="true"],
+.view-toggle button:hover { color: var(--fg); }
+.view-toggle button[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
 .gui-bar button[aria-pressed="true"] {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 #gui {
@@ -440,10 +493,12 @@ body {
 }
 .gui-bar button {
   font-size: 12px;
-  padding: 2px 10px;
+  padding: 3px 11px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
+  background: var(--card);
 }
+.gui-bar button:not(:disabled):hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); color: var(--fg); }
 .gui-range { color: var(--muted); }
 
 /* GUI view: the timeline scrolls above the console tray (the same
@@ -518,21 +573,23 @@ body {
   top: 0;
   z-index: 4;
   background: var(--bg);
-  padding: 12px 0 8px;
+  padding: 14px 0 10px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--line);
 }
 .tl-top .tl-legend { margin-bottom: 0; }
 .tl-top .tl-heads { margin-top: 8px; }
 .tl-top .tl-heads .tl-head { padding-bottom: 0; }
-.gui-presets { display: flex; gap: 6px; }
+.gui-presets { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.gui-presets button { border: 0; background: transparent; }
 .gui-steps { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
 .gui-day { padding: 0 6px; white-space: nowrap; }
 /* One day: the date is in the bar, so the column header is not needed. */
 .tl-one-day .tl-head { display: none; }
 button.gui-day {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   border: 0;
   background: transparent;
   color: var(--fg);
@@ -559,11 +616,12 @@ button.gui-day {
   min-width: 0;
   padding: 3px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--card);
 }
 .tl-cell.tl-out { visibility: hidden; }
 .tl-cell.tl-future { opacity: 0.5; }
-.tl-cell.tl-today { border-color: var(--accent); }
+.tl-cell.tl-today { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 .tl-date {
   display: flex;
   flex-wrap: wrap;
@@ -638,13 +696,7 @@ button.gui-day {
   .tl-long { display: none; }
   .tl-short { display: inline; }
   .tl-top .tl-legend { display: none; } /* room for the timeline; tap a block for what it is */
-  .gui-presets {
-    flex: none;
-    gap: 0;
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-  }
+  .gui-presets { flex: none; gap: 0; }
   .gui-bar .gui-presets button {
     width: 34px;
     border: 0;
@@ -654,7 +706,7 @@ button.gui-day {
   }
   .gui-steps { flex: 1; min-width: 0; justify-content: space-between; margin: 0; }
   .gui-day, button.gui-day { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 2px; }
-  .gui-bar .gui-step { width: 34px; height: 30px; padding: 0; font-size: 18px; border-radius: 9px; }
+  .gui-bar .gui-step { width: 34px; height: 32px; padding: 0; font-size: 18px; border-radius: 10px; }
   /* Week: seven narrow columns, category names only. */
   .tl-mode-week { --axis: 1.6em; }
   .tl-mode-week .tl-grid { column-gap: 2px; }
@@ -708,9 +760,9 @@ button.gui-day {
   gap: 8px;
   padding: 10px 12px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
   font-size: 12px;
 }
 .ec-title { color: var(--muted); }
@@ -722,33 +774,23 @@ button.gui-day {
   font: inherit;
   font-size: 13px;
   color: var(--fg);
-  background: transparent;
+  background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 4px 6px;
+  border-radius: 8px;
+  padding: 6px 8px;
   width: 100%;
   box-sizing: border-box;
 }
 .entry-card textarea { resize: vertical; min-height: 3.6em; }
 .entry-card input:focus,
-.entry-card textarea:focus { outline: none; border-color: var(--accent); }
+.entry-card textarea:focus { outline: none; border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px var(--accent-ring); }
 .entry-card input:disabled,
 .entry-card textarea:disabled { opacity: 0.6; }
 .ec-error { color: var(--warn); min-height: 0; }
 .ec-error:empty { display: none; }
 .ec-buttons { display: flex; gap: 8px; }
-.ec-buttons button {
-  font: inherit;
-  font-size: 12px;
-  padding: 3px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-}
-.ec-buttons button[type="submit"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.ec-buttons .ec-delete { margin-left: auto; color: var(--warn); }
+.ec-buttons button { font-size: 12px; padding: 5px 14px; }
+.ec-buttons .ec-delete { margin-left: auto; }
 @media (pointer: coarse) {
   .entry-card input,
   .entry-card textarea { font-size: 15px; }
@@ -773,7 +815,7 @@ button.gui-day {
   gap: 12px;
   padding: 6px 16px calc(16px + env(safe-area-inset-bottom));
   border: 0;
-  border-radius: 16px 16px 0 0;
+  border-radius: 20px 20px 0 0;
   box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.25);
   font-size: 14px;
   transition: transform 0.15s ease;
@@ -803,6 +845,56 @@ button.gui-day {
 /* Out of the way while typing notes too. */
 #app:has(#notes-box:not([hidden])) #about { display: none; }
 
+/* ---- buttons -------------------------------------------------------------------
+   One system for every button: primary (the one main action: filled accent),
+   secondary (a card with a hairline), and danger. All share the same
+   hover, press and keyboard-focus behavior. */
+.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button,
+.gform-range, .gform-go, .gtick-play {
+  font: inherit;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.08s, opacity 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+:is(.sb-menu, .sb-off, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gtick-play):not(:disabled):hover {
+  background: color-mix(in srgb, var(--fg) 4%, var(--card));
+  border-color: color-mix(in srgb, var(--fg) 18%, var(--line));
+}
+/* Primary. */
+.sb-start, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gform-range[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+:is(.sb-start, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go):not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
+}
+/* Danger: red text that fills on hover; solid when it is the action. */
+.ec-buttons .ec-delete { color: var(--warn); }
+.ec-buttons .ec-delete:not(:disabled):hover { background: color-mix(in srgb, var(--warn) 10%, var(--card)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.gform-go.danger { background: var(--warn); border-color: var(--warn); color: #fff; }
+/* Press, keyboard focus, disabled. */
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+    .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):not(:disabled):active { transform: scale(0.97); }
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+    .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .tl-date, .tl-block):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring), 0 0 0 1px var(--accent);
+}
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .gform-go, .gtick-play):disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.sb-menu, .sb-off, .sb-start, .sb-break, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+      .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):active { transform: none; }
+}
+
 /* ---- GUI view (gui.js): timeline and a start bar, no console ------------------ */
 #app.pure-mode #divider,
 #app.pure-mode #out,
@@ -817,11 +909,15 @@ button.gui-day {
   gap: 8px;
   align-items: center;
   max-width: 1200px;
-  margin: 0 auto;
-  padding: 10px 16px;
+  margin: 0 auto 10px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
 }
 .startbar[hidden] { display: none; }
-#app.pure-mode #dock { background: var(--panel); border-top: 1px solid var(--line); }
+#app.pure-mode #dock { padding: 0 14px; }
 .sb-menu { grid-area: menu; }
 .sb-cat { grid-area: cat; position: relative; }
 .sb-title { grid-area: title; }
@@ -833,27 +929,19 @@ button.gui-day {
   font: inherit;
   color: var(--fg);
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 8px 12px;
   outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s, background-color 0.12s;
 }
-.startbar input:focus { border-color: var(--accent); }
+.startbar input:focus { border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px var(--accent-ring); }
 .startbar button, .gsheet button, .toast button {
   font: inherit;
   cursor: pointer;
 }
-.sb-menu, .sb-off, .sb-start, .sb-break {
-  border-radius: 8px;
-  padding: 8px 14px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
-  white-space: nowrap;
-}
+.sb-menu, .sb-off, .sb-start, .sb-break { padding: 8px 14px; white-space: nowrap; }
 .sb-menu { font-size: 18px; line-height: 1; padding: 7px 11px; }
-.sb-start { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
-.sb-off:disabled, .sb-break:disabled { opacity: 0.4; cursor: default; }
 .sb-suggest {
   position: absolute;
   left: 0;
@@ -864,9 +952,9 @@ button.gui-day {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
 }
 .sb-suggest[hidden] { display: none; }
 .sb-opt { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
@@ -892,10 +980,11 @@ button.gui-day {
   align-items: center;
   max-width: min(560px, 100%);
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--fg);
   color: var(--bg);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
   pointer-events: auto;
   animation: toast-in 0.18s ease;
   white-space: pre-wrap;
@@ -922,9 +1011,10 @@ button.gui-day {
   max-height: 85%;
   display: flex;
   flex-direction: column;
-  border-radius: 14px;
-  background: var(--bg);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 .gsheet-head {
@@ -934,7 +1024,7 @@ button.gui-day {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
-.gsheet-title { font-weight: 600; }
+.gsheet-title { font-weight: 600; font-size: 15px; }
 .gsheet-close { border: 0; background: transparent; color: var(--muted); font-size: 16px; padding: 2px 6px; }
 .gsheet-body { overflow-y: auto; padding: 12px 16px 16px; }
 .gsheet-text { margin: 0 0 10px; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -945,7 +1035,7 @@ button.gui-day {
 .gsheet-wrap.out { opacity: 0; transition: opacity 0.15s; }
 
 .gmenu { display: flex; flex-direction: column; }
-.gmenu-section { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; margin: 12px 0 4px; }
+.gmenu-section { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin: 14px 0 4px; padding: 0 10px; }
 .gmenu-section:first-child { margin-top: 0; }
 .gmenu-item {
   text-align: left;
@@ -955,7 +1045,7 @@ button.gui-day {
   background: transparent;
   color: var(--fg);
 }
-.gmenu-item:hover { background: var(--accent-bg); }
+.gmenu-item:hover { background: var(--accent-bg); color: var(--accent); }
 .gmenu-about { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .gmenu-about a { color: var(--muted); }
 
@@ -968,16 +1058,14 @@ button.gui-day {
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: var(--radius);
+  padding: 8px 12px;
   outline: none;
 }
-.gform-field input:focus { border-color: var(--accent); }
+.gform-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .gform-ranges { display: flex; flex-wrap: wrap; gap: 6px; }
-.gform-range { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; background: transparent; color: var(--muted); }
-.gform-range[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.gform-go { align-self: flex-start; border: 0; border-radius: 8px; padding: 9px 18px; background: var(--accent); color: var(--bg); font-weight: 600; }
-.gform-go.danger { background: var(--warn); color: #fff; }
+.gform-range { padding: 4px 12px; color: var(--muted); }
+.gform-go { align-self: flex-start; padding: 9px 18px; }
 /* Tick lists (to-dos, checklists). */
 .gtick { display: flex; flex-direction: column; }
 .gtick-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 2px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -989,8 +1077,7 @@ button.gui-day {
 .gtick-words { flex: 1; }
 .gtick-row.late .gtick-sub { color: var(--warn); }
 .gtick-row.now .gtick-sub { color: var(--accent); }
-.gtick-play { flex-shrink: 0; width: 32px; height: 28px; margin: -3px 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
-.gtick-play:hover { border-color: var(--accent); }
+.gtick-play { flex-shrink: 0; width: 32px; height: 28px; margin: -3px 0; padding: 0; color: var(--accent); font-size: 12px; }
 
 @media (max-width: 600px) {
   .startbar {
@@ -999,16 +1086,18 @@ button.gui-day {
       "cat cat title"
       "menu off start"
       "breaks breaks breaks";
-    padding: 8px 12px;
+    padding: 8px;
     gap: 6px;
+    margin-bottom: 8px;
   }
+  #app.pure-mode #dock { padding: 0 8px; }
   .sb-menu { padding: 9px 0; }
   .startbar input, .gform-field input { font-size: 15px; }
   .sb-start, .sb-off, .sb-break { padding: 10px 14px; }
   .sb-breaks { gap: 6px; }
   .sb-break { flex: 1; }
   .gsheet-wrap { align-items: flex-end; padding: 0; }
-  .gsheet { width: 100%; max-height: 88%; border-radius: 16px 16px 0 0; animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .gsheet { width: 100%; max-height: 88%; border-radius: 20px 20px 0 0; border-width: 1px 0 0; animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
   .gsheet-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
   .gmenu-item { padding: 12px 10px; }
 }

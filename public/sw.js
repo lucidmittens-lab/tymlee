@@ -9,6 +9,7 @@ const CACHE = 'tymlee-shell';
 const FILES = [
   './', 'index.html', 'style.css', 'config.js', 'build.js', 'core.js', 'vault.js', 'idb.js',
   'store.js', 'commands.js', 'timeline.js', 'gui.js', 'app.js', 'vendor/supabase.js',
+  'fonts/inter.woff2', 'fonts/jetbrains-mono.woff2',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',
 ];
 const WAIT_MS = 4000; // a weak signal falls back to the saved copy after this

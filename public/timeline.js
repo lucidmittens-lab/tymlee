@@ -6,6 +6,10 @@
 
   const T = root.Tymlee;
   const MIN_PX = 1.2; // pixels per minute (72px per hour: 15 minutes fits a line of text)
+  // Fitted to the screen (the GUI): never squeezed below this, so a long day
+  // scrolls rather than turning into slivers, nor stretched above the other.
+  const FIT_MIN_PX = 0.4;
+  const FIT_MAX_PX = 6;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -56,7 +60,10 @@
   //             timeline scrolls; called on every redraw with the days drawn
   //   onSelect(b, el)  a block was clicked
   //   onDay(key)       a calendar day was clicked
-  function render({ store, range, mode = 'day', onSelect, onDay, header }) {
+  //   fit(top)  the height (px) the hours may take below `top`, the bar; set,
+  //             a day or week is scaled to it: from its first entry to its
+  //             last moment plus 10%, rather than whole hours at a fixed size
+  function render({ store, range, mode = 'day', onSelect, onDay, header, fit }) {
     const rootEl = el('div', `tl tl-mode-${mode}`);
     rootEl.setAttribute('role', 'group');
     const tip = el('div', 'tl-tip');
@@ -72,6 +79,17 @@
       if (header) top.append(header(days));
       rootEl.append(top);
       if (!days.length) {
+        if (fit && !T.visible(store.entries).length) {
+          // A first visit: what to do, instead of an empty day.
+          const hello = el('div', 'tl-welcome');
+          hello.append(
+            el('h2', null, 'Track your first task'),
+            el('p', null, 'Type a category (one word, like dev or ACME) and what you are working on below, then Start. Starting the next task ends this one.'),
+            el('p', 'tl-muted', 'Breaks and Off stop the clock. Your log stays on this device; sign in from the menu to sync it, encrypted, across devices.'),
+          );
+          rootEl.append(hello);
+          return;
+        }
         rootEl.append(el('div', 'tl-empty', `no entries (${range.label})`));
         return;
       }
@@ -110,7 +128,21 @@
     // Several days: their names go in the bar on top (`top`), so they stay
     // in view while the hours scroll.
     function drawGrid(days, axisFrom, axisTo, now, top) {
-      const height = (axisTo - axisFrom) * MIN_PX;
+      let px = MIN_PX;
+      const room = fit ? fit(top) : 0;
+      const blocks = days.flatMap((d) => d.blocks.map((b) => [minutesOfDay(b.start, d.start), minutesOfDay(b.end, d.start)]));
+      if (room > 0 && blocks.length) {
+        const first = Math.min(...blocks.map((b) => b[0]));
+        const last = Math.max(...blocks.map((b) => b[1]));
+        const span = Math.max(30, last - first);
+        axisFrom = first;
+        axisTo = first + span * 1.1;
+        px = Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, room / (axisTo - axisFrom)));
+        if (px * (axisTo - axisFrom) < room) axisTo = axisFrom + room / px; // stretched to the max: fill the rest
+      }
+      const height = (axisTo - axisFrom) * px;
+      // An hour label every hour, or every 2 or 3 when hours are short.
+      const every = px * 60 >= 22 ? 60 : px * 60 >= 11 ? 120 : 180;
       const scroll = el('div', 'tl-scroll');
       const grid = el('div', 'tl-grid');
       const columns = `var(--axis, 3.2em) repeat(${days.length}, minmax(0, 1fr))`;
@@ -135,13 +167,14 @@
       // Hour axis.
       const axis = el('div', 'tl-axis');
       axis.style.height = `${height}px`;
-      for (let m = axisFrom; m <= axisTo; m += 60) {
+      for (let m = Math.ceil(axisFrom / every) * every; m <= axisTo; m += every) {
+        if ((m - axisFrom) * px < 7) continue; // too close to the top to show
         const tick = el('span', 'tl-hour');
         // "14:00" or "2pm"; narrow week columns drop the dimmed part ("14", "2p").
         const label = T.hourLabel(Math.floor(m / 60));
         const cut = T.clockMode() === '12' ? label.length - 1 : 2;
         tick.append(label.slice(0, cut), el('span', 'tl-min', label.slice(cut)));
-        tick.style.top = `${(m - axisFrom) * MIN_PX}px`;
+        tick.style.top = `${(m - axisFrom) * px}px`;
         axis.append(tick);
       }
       grid.append(axis);
@@ -149,11 +182,11 @@
       for (const day of days) {
         const col = el('div', `tl-day${day.start > now ? ' tl-future' : ''}`);
         col.style.height = `${height}px`;
-        col.style.setProperty('--hour', `${60 * MIN_PX}px`);
-        col.style.setProperty('--offset', `${(60 - (axisFrom % 60)) % 60 * MIN_PX}px`);
+        col.style.setProperty('--hour', `${60 * px}px`);
+        col.style.setProperty('--offset', `${(((60 - (axisFrom % 60)) % 60) * px)}px`);
         for (const b of day.blocks) {
-          const top = (minutesOfDay(b.start, day.start) - axisFrom) * MIN_PX;
-          const full = (b.end - b.start) / 60000 * MIN_PX;
+          const top = (minutesOfDay(b.start, day.start) - axisFrom) * px;
+          const full = (b.end - b.start) / 60000 * px;
           const h = Math.max(2, full - 2); // 2px gap between blocks
           const block = el('div', `tl-block${b.off ? ' tl-offblock' : ''}${b.running ? ' tl-running' : ''}${b.clipped ? ' tl-clipped' : ''}`);
           block.style.top = `${top + 1}px`;
@@ -193,7 +226,7 @@
           const m = minutesOfDay(now, day.start);
           if (m >= axisFrom && m <= axisTo) {
             const line = el('div', 'tl-now');
-            line.style.top = `${(m - axisFrom) * MIN_PX}px`;
+            line.style.top = `${(m - axisFrom) * px}px`;
             line.append(el('span', null, T.clock(now)));
             col.append(line);
           }

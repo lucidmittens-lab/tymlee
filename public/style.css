@@ -338,6 +338,19 @@ body {
 }
 .tl-muted { color: var(--muted); }
 .tl-empty { color: var(--muted); }
+.tl-welcome {
+  max-width: 460px;
+  margin: 48px auto 0;
+  padding: 22px 24px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: var(--radius-card);
+  background: var(--card);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.tl-welcome h2 { margin: 0 0 8px; font-size: 17px; }
+.tl-welcome p { margin: 0 0 8px; }
+.tl-welcome p:last-child { margin: 0; font-size: 13px; }
 
 .tl-legend {
   display: flex;
@@ -1090,6 +1103,8 @@ button.gui-day {
   white-space: pre-wrap;
 }
 .toast.err { background: var(--warn); color: #fff; }
+/* With a sheet open, toasts show at the top, over it. */
+#app:has(.gsheet-wrap) .toasts { bottom: auto; top: calc(env(safe-area-inset-top) + 12px); z-index: 40; }
 .toast.out { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
 .toast-action { border: 0; background: transparent; color: inherit; text-decoration: underline; padding: 0; font-weight: 600; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
@@ -1135,8 +1150,49 @@ button.gui-day {
 .gsheet-wrap.out { opacity: 0; transition: opacity 0.15s; }
 
 .gmenu { display: flex; flex-direction: column; }
-.gmenu-section { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin: 14px 0 4px; padding: 0 10px; }
-.gmenu-section:first-child { margin-top: 0; }
+/* Most used, on top: big tiles. */
+.gmenu-quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.gmenu-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.gmenu-tile .icon svg { width: 20px; height: 20px; color: var(--accent); }
+.gmenu-tile:hover { border-color: var(--accent); background: var(--accent-bg); }
+.gmenu-badge { position: absolute; top: 6px; right: 6px; font-size: 10.5px; font-weight: 600; color: #fff; background: var(--warn); border-radius: 999px; padding: 0 6px; }
+/* Sections open and close. */
+.gmenu-group { border-top: 1px solid var(--line); }
+.gmenu-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 11px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.gmenu-section:hover { color: var(--fg); }
+.gmenu-section .icon { transition: transform 0.15s; }
+.gmenu-group.open .gmenu-section .icon { transform: rotate(180deg); }
+.gmenu-items { display: none; flex-direction: column; padding-bottom: 8px; }
+.gmenu-group.open .gmenu-items { display: flex; }
 .gmenu-item {
   text-align: left;
   padding: 9px 10px;

@@ -39,6 +39,7 @@
     down: '<path d="M7 10l5 5 5-5"/>',
     left: '<path d="M15 6l-6 6 6 6"/>',
     right: '<path d="M9 6l6 6-6 6"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   };
   function icon(name) {
     const span = document.createElement('span');
@@ -593,7 +594,6 @@
       const show = (heading, cmd) => form(heading, { range: true, submit: 'Show' }, (v) => runMenu(heading, `${cmd} ${v.range}`));
       return [
         ['Entries', [
-          ['Undo', () => runMenu('Undo', '/undo')],
           ['Paid break', () => runMenu('Break', '/break-paid')],
           ['Unpaid break', () => runMenu('Break', '/break-unpaid')],
           ['Add a note', () => form('Add a note', {
@@ -726,13 +726,45 @@
       });
     }
 
+    // The menu: a few things used most often on top, then sections that
+    // open and close (which ones are open is remembered on this device).
+    const OPEN_KEY = 'tymlee.menuOpen';
+    function openSections() {
+      try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY)) || ['To-do']); } catch (_) { return new Set(['To-do']); }
+    }
     function openMenu() {
       const list = el('div', 'gmenu');
+      const quick = el('div', 'gmenu-quick');
+      const due = shell.dueCount();
+      const go = (fn) => () => { closeSheet(); setTimeout(fn, 170); };
+      for (const [label, ico, fn, badge] of [
+        ['To-do', 'check', () => todoSheet(), due ? `${due} due` : ''],
+        ['Find', 'search', () => menuItems().find(([n]) => n === 'Search')[1][0][1](), ''],
+        ['Undo', 'back', () => runMenu('Undo', '/undo'), ''],
+      ]) {
+        const b = button('', 'gmenu-tile', go(fn), label);
+        b.append(icon(ico), el('span', null, label));
+        if (badge) b.append(el('span', 'gmenu-badge', badge));
+        quick.append(b);
+      }
+      list.append(quick);
+      const open = openSections();
       for (const [section, items] of menuItems()) {
-        list.append(el('div', 'gmenu-section', section));
-        for (const [label, action] of items) {
-          list.append(button(label, 'gmenu-item', () => { closeSheet(); setTimeout(action, 170); }));
-        }
+        const head = button('', 'gmenu-section', () => {
+          const now = !wrap.classList.contains('open');
+          wrap.classList.toggle('open', now);
+          head.setAttribute('aria-expanded', String(now));
+          const set = openSections();
+          if (now) set.add(section); else set.delete(section);
+          try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch (_) { /* fine */ }
+        });
+        head.append(el('span', null, section), icon('down'));
+        const wrap = el('div', `gmenu-group${open.has(section) ? ' open' : ''}`);
+        head.setAttribute('aria-expanded', String(open.has(section)));
+        const body = el('div', 'gmenu-items');
+        for (const [label, action] of items) body.append(button(label, 'gmenu-item', go(action)));
+        wrap.append(head, body);
+        list.append(wrap);
       }
       const about = el('div', 'gmenu-about');
       const { version, build, repo } = opts.about;

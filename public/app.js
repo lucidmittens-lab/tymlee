@@ -390,9 +390,21 @@
       onSelect: openEntryEditor,
       onDay: (key) => showUnit('day', daysBack(T.parseRange(key, Date.now()).from)),
       header: (days) => guiBar(range, days),
+      // A day or week fills the space between the bar and the controls.
+      fit: mode === 'month' ? null : fitTimeline,
     });
     if (slide) guiTimeline.el.classList.add(`tl-slide-${slide}`);
     guiEl.replaceChildren(guiTimeline.el);
+    if (mode !== 'month') guiTimeline.refresh(); // measured now that it's on the page
+  }
+
+  // The height the hours can take: from below the bar to the bottom of the
+  // GUI's area, less its padding. 0 when it isn't on screen to measure.
+  function fitTimeline(top) {
+    if (!top.isConnected || !guiEl.clientHeight) return 0;
+    const pad = parseFloat(getComputedStyle(guiEl).paddingBottom) || 0;
+    const room = guiEl.getBoundingClientRect().bottom - pad - top.getBoundingClientRect().bottom - 8;
+    return room > 120 ? room : 0; // too short to be worth fitting: scroll instead
   }
 
   // Swipe sideways on the timeline to step through days, weeks or months.
@@ -459,6 +471,17 @@
     scrollToPrompt();
   }
 
+  // Refit the timeline when its area changes size (the window, the console
+  // being dragged, the keyboard).
+  if (window.ResizeObserver) {
+    let lastH = 0;
+    new ResizeObserver(() => {
+      const h = guiEl.clientHeight;
+      if (Math.abs(h - lastH) < 2) return;
+      lastH = h;
+      if (guiTimeline && onTimeline()) guiTimeline.refresh();
+    }).observe(guiEl);
+  }
   if (window.ResizeObserver) {
     new ResizeObserver(() => { if (view === 'gui') applyConsole(); }).observe(dockEl);
   }

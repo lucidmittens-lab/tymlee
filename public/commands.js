@@ -1415,6 +1415,23 @@
           print(`deleted ${run.tag} ${run.title}`, 'ok');
         },
       },
+      find: {
+        usage: '/find <words>',
+        about: 'search entries (text, notes, file paths, work orders, equipment) and to-dos',
+        run(args) {
+          if (!args.length) return print('usage: /find <words>, e.g. /find stems label', 'err');
+          const query = args.join(' ');
+          const r = T.formatSearch(store.entries, query, Date.now());
+          const words = query.toLowerCase().split(/\s+/);
+          const todosFound = todos().filter((t) => words.every((w) => t.text.toLowerCase().includes(w)));
+          const lines = [r.text];
+          if (todosFound.length) {
+            lines.push('', `to-dos: ${todosFound.length}`);
+            for (const t of todosFound) lines.push(`  [${t.done ? 'x' : ' '}] ${t.tag}  ${t.text}`);
+          }
+          print(lines.join('\n'), 'report');
+        },
+      },
       backup: {
         usage: '/backup',
         about: 'save everything in one file: entries, forms, to-dos, checklists, settings (/restore reads it)',

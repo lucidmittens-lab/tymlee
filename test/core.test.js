@@ -853,3 +853,26 @@ test('calweek is Sunday to Saturday; calmonth the calendar month', () => {
   // week and month stay "the last 7 / 30 days".
   assert.equal(T.ymd(T.parseRange('week', NOW).from), '2026-09-18');
 });
+
+test('/find: every word, in text, notes, file paths or work orders; newest first', () => {
+  const log = [
+    { id: 'a', ts: at('2026-09-23T09:00:00Z'), text: 'dev stems for the label', wo: '4471', files: '/Work/stems.zip\n/Work/other.wav' },
+    { id: 'b', ts: at('2026-09-24T09:00:00Z'), text: 'mtg standup', notes: 'talked about the label\nlunch plans' },
+    { id: 'c', ts: at('2026-09-24T09:30:00Z'), text: 'dev other' },
+  ];
+  const r = T.formatSearch(log, 'LABEL', NOW);
+  assert.equal(r.count, 2);
+  assert.equal(r.text, [
+    'found "LABEL": 2 entries',
+    '',
+    'Thu 2026-09-24',
+    '  ID:000020  09:00   0:30  mtg standup',
+    '             > talked about the label',
+    '',
+    'Wed 2026-09-23',
+    '  ID:000010  09:00  24:00  [4471] dev stems for the label',
+  ].join('\n'));
+  assert.match(T.formatSearch(log, 'stems.zip', NOW).text, /@ \/Work\/stems\.zip/);
+  assert.equal(T.formatSearch(log, '4471 label', NOW).count, 1);
+  assert.equal(T.formatSearch(log, 'nope', NOW).text, 'nothing found for "nope"');
+});

@@ -443,6 +443,12 @@
           }, (v) => v.text && runMenu('Note', `/note ${v.text}`))],
           ['Edit entries', () => opts.openCli('/edit')],
         ]],
+        ['Search', [
+          ['Find', () => form('Find', {
+            intro: 'Searches entry text, notes, file paths, work orders, equipment and to-dos.',
+            fields: [{ name: 'q', label: 'Words', placeholder: 'stems label' }], submit: 'Find',
+          }, (v) => v.q && runMenu('Find', `/find ${v.q}`))],
+        ]],
         ['Reports', [
           ['Log', () => show('Log', '/log')],
           ['Categories', () => show('Categories', '/report')],

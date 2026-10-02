@@ -1329,6 +1329,37 @@
     return { entries: out, errors };
   }
 
+  // ---- search ---------------------------------------------------------------------
+
+  // Entries where every word appears (any case) in the text, notes, file
+  // paths, work order or equipment: newest first, grouped by day, with the
+  // matching notes and path lines under each. At most `limit` entries.
+  function formatSearch(entries, query, now, limit = 100) {
+    const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return null;
+    const hay = (s) => [s.text, s.notes, s.files, s.wo, s.eq].filter(Boolean).join('\n').toLowerCase();
+    const hits = withSpans(entries, now).filter((s) => words.every((w) => hay(s).includes(w)));
+    if (!hits.length) return { count: 0, text: `nothing found for "${query}"` };
+    const shown = hits.slice(-limit).reverse();
+    const numWidth = Math.max(...shown.map((s) => idTag(s.n).length));
+    const has = (line) => words.some((w) => line.toLowerCase().includes(w));
+    const out = [`found "${query}": ${plural(hits.length, 'entry', 'entries')}${hits.length > limit ? ` (the latest ${limit})` : ''}`];
+    let day = '';
+    for (const s of shown) {
+      const d = ymd(s.ts);
+      if (d !== day) {
+        day = d;
+        out.push('', `${DAY_NAMES[new Date(s.ts).getDay()]} ${d}`);
+      }
+      const dur = s.off ? '-' : formatHM(s.duration);
+      const tags = `${s.wo ? `${woTag(s.wo)} ` : ''}${s.eq ? `${eqTag(s.eq)} ` : ''}`;
+      out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${tags}${s.category}${s.note ? ` ${s.note}` : ''}`);
+      const indent = ' '.repeat(numWidth + 4);
+      out.push(...notesLines(s.notes, indent).filter(has), ...filesLines(s.files, indent).filter(has));
+    }
+    return { count: hits.length, text: out.join('\n') };
+  }
+
   // ---- full backups ------------------------------------------------------------
   // Everything in one JSON file: entries (with their IDs), records (forms,
   // answers, to-dos, checklists, trash) and settings. Restoring adds what's
@@ -1447,7 +1478,7 @@
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
     MAX_FILES, joinFiles, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
-    parseBackup, mergeBackup, makeFullBackup, readFullBackup,
+    parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

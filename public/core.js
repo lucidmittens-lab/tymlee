@@ -374,6 +374,48 @@
     return null;
   }
 
+  // A day something is due, as "YYYY-MM-DD", or null if not understood:
+  //   today | tomorrow | a day name (the next one, today included) |
+  //   +N (in N days) | YYYY-MM-DD | MM-DD (this year's, unless that was more
+  //   than two months ago: then next year's)
+  function parseDue(arg, now) {
+    const a = String(arg || '').toLowerCase().trim();
+    const today = startOfDay(now);
+    if (a === 'today') return ymd(today);
+    if (a === 'tomorrow' || a === 'tmrw' || a === 'tom') return ymd(addDays(today, 1));
+    let m = a.match(/^\+(\d{1,3})d?$/);
+    if (m) return ymd(addDays(today, +m[1]));
+    m = a.match(/^(?:(\d{4})-)?(\d{1,2})-(\d{1,2})$/);
+    if (m) {
+      const at = (y) => new Date(y, +m[2] - 1, +m[3]).getTime();
+      const y = m[1] ? +m[1] : new Date(today).getFullYear();
+      let d = at(y);
+      if (new Date(d).getMonth() !== +m[2] - 1) return null;
+      if (!m[1] && d < addDays(today, -60)) d = at(y + 1);
+      return ymd(d);
+    }
+    const wd = a.length >= 3 ? FULL_DAY_NAMES.findIndex((n) => n.startsWith(a)) : -1;
+    if (wd >= 0) {
+      let day = today;
+      while (new Date(day).getDay() !== wd) day = addDays(day, 1);
+      return ymd(day);
+    }
+    return null;
+  }
+
+  // How a due day reads next to a to-do: "due today", "due tomorrow",
+  // "due Fri 10-09", "overdue, was due Wed 09-30". `late` is whether it's past.
+  function dueLabel(due, now) {
+    const today = ymd(startOfDay(now));
+    const p = due.split('-').map(Number);
+    const d = new Date(p[0], p[1] - 1, p[2]).getTime();
+    const day = `${DAY_NAMES[new Date(d).getDay()]} ${due.slice(0, 4) === today.slice(0, 4) ? due.slice(5) : due}`;
+    if (due < today) return { text: `overdue, was due ${day}`, late: true, soon: true };
+    if (due === today) return { text: 'due today', late: false, soon: true };
+    if (due === ymd(addDays(startOfDay(now), 1))) return { text: 'due tomorrow', late: false, soon: false };
+    return { text: `due ${day}`, late: false, soon: false };
+  }
+
   // ---- report --------------------------------------------------------------
 
   function summaryLines(spans, catWidth) {
@@ -1471,7 +1513,7 @@
   const api = {
     parseInput, knownCategories, suggest, withSpans, summarize,
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
-    parseRange, formatReport, toCSV,
+    parseRange, parseDue, dueLabel, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
     VERSION, REPO_URL,

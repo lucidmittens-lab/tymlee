@@ -8,6 +8,8 @@
 (function (root) {
   'use strict';
 
+  const T = root.Tymlee;
+
   function el(tag, cls, text) {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -211,7 +213,7 @@
         list.replaceChildren();
         const shown = rows();
         for (const r of shown) {
-          const row = el('label', `gtick-row${r.done ? ' done' : ''}`);
+          const row = el('label', `gtick-row${r.done ? ' done' : ''}${r.now ? ' now' : ''}${r.late ? ' late' : ''}`);
           const box = document.createElement('input');
           box.type = 'checkbox';
           box.checked = Boolean(r.done);
@@ -220,6 +222,12 @@
           words.append(el('span', 'gtick-text', r.label));
           if (r.sub) words.append(el('span', 'gtick-sub', r.sub));
           row.append(box, words);
+          if (r.play) {
+            const go = button('▶', 'gtick-play', (e) => { e.preventDefault(); r.play(); render(); });
+            go.setAttribute('aria-label', `Start: ${r.label}`);
+            go.title = 'Start a timer for this';
+            row.append(go);
+          }
           list.append(row);
         }
         if (!shown.length) list.append(el('p', 'gform-intro', 'Nothing here yet.'));
@@ -229,11 +237,22 @@
       render();
     }
 
-    // The to-do list: open ones first, then done ones.
+    // The to-do list: open ones first (the soonest due first), then done
+    // ones. ▶ starts a timer for one; ticking it off leaves the timer running.
     function todoSheet() {
-      tickSheet('To-do', () => shell.todoList()
-        .sort((a, b) => Boolean(a.done) - Boolean(b.done) || a.sid - b.sid)
-        .map((t) => ({ id: t.id, label: t.note || t.category, sub: `${t.tag} · ${t.category}`, done: t.done })),
+      tickSheet('To-do', () => {
+        const now = Date.now();
+        const running = shell.runningTodoId();
+        const order = (t) => (t.done ? 2 : t.due ? 0 : 1);
+        return shell.todoList()
+          .sort((a, b) => order(a) - order(b) || (!a.done && a.due && b.due ? a.due.localeCompare(b.due) : 0) || a.sid - b.sid)
+          .map((t) => {
+            const due = !t.done && t.due ? T.dueLabel(t.due, now) : null;
+            const sub = [t.tag, t.category, due && due.text, t.id === running && 'working on it now'].filter(Boolean).join(' · ');
+            return { id: t.id, label: t.note || t.category, sub, done: t.done, now: t.id === running, late: Boolean(due && due.late),
+              play: t.done || t.id === running ? null : () => shell.doTodo(t.id) };
+          });
+      },
       (r, done) => shell.setTodoDone(r.id, done),
       [['Add a to-do', () => addTodoForm()]]);
     }
@@ -243,11 +262,12 @@
         fields: [
           { name: 'category', label: 'Category', placeholder: 'dev' },
           { name: 'text', label: 'What to do', placeholder: 'fix the login bug' },
+          { name: 'due', label: 'Due (optional)', type: 'date' },
         ],
         submit: 'Add',
       }, async (v) => {
         if (!v.category) return;
-        await opts.run(`/todo ${v.category.trim().replace(/\s+/g, '-')} ${v.text || ''}`);
+        await opts.run(`/todo ${v.category.trim().replace(/\s+/g, '-')} ${v.text || ''}${v.due ? ` due:${v.due}` : ''}`);
         todoSheet();
       });
     }

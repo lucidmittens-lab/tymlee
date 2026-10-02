@@ -20,6 +20,11 @@
   const storage = await window.TymleeIdb.createStorage();
   window.tymleeStorage = storage; // for checking what's stored, from the browser console
 
+  // Keep a copy of the site's files so it opens with no signal (sw.js).
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
   const store = window.TymleeStore.createStore({
     storage,
     onChange: () => { renderStatus(); refreshTimelines(); },

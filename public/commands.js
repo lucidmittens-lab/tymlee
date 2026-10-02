@@ -564,6 +564,12 @@
       if (shown().length >= 20 && days > BACKUP_EVERY_DAYS) {
         out.push(lastBackup() ? `your last full backup was ${Math.floor(days)} days ago · /backup saves one` : 'no full backup on this device yet · /backup saves one (entries, forms, to-dos, checklists, settings)');
       }
+      if (store.recordsReady()) {
+        const today = T.ymd(Date.now());
+        const due = todos().filter((t) => !t.done && t.due && t.due <= today);
+        const late = due.filter((t) => t.due < today).length;
+        if (due.length) out.push(`${due.length} to-do${due.length === 1 ? '' : 's'} due today${late ? ` (${late} overdue)` : ''} · /todos today`);
+      }
       return out;
     }
 
@@ -596,32 +602,85 @@
     }
 
     function addTodo(text) {
+      let due = null;
+      const dm = text.match(/\s+due:(\S+)\s*$/i);
+      if (dm) {
+        due = T.parseDue(dm[1], Date.now());
+        if (!due) return print(`not a day: ${dm[1]} · try today, tomorrow, fri, +3 or 10-09`, 'err');
+        text = text.slice(0, dm.index);
+      }
       const { category, note } = T.parseInput(text);
       if (!category || category.startsWith('/')) return print('usage: /todo <category> <what to do>, e.g. /todo dev fix the login bug', 'err');
       const clean = note ? `${category} ${note}` : category;
       if (clean.length > T.MAX_TEXT) return print(`to-dos are limited to ${T.MAX_TEXT} characters`, 'err');
       const max = Math.max(0, ...todos().map((t) => t.sid));
       const sid = Math.floor(max / 10) * 10 + 10;
-      store.putRecord('todo', { sid, text: clean, done: false, made: Date.now() });
-      print(`to-do ${todoTag(sid)} ${clean} · /done ${String(sid).replace(/^0+/, '')} when it's done`, 'ok');
+      store.putRecord('todo', { sid, text: clean, done: false, made: Date.now(), ...(due ? { due } : {}) });
+      const short = String(sid).replace(/^0+/, '');
+      print(`to-do ${todoTag(sid)} ${clean}${due ? ` · ${T.dueLabel(due, Date.now()).text}` : ''} · /do ${short} starts it, /done ${short} when it's done`, 'ok');
     }
 
-    function formatTodos(all) {
-      const list = todos().filter((t) => all || !t.done);
-      const open = todos().filter((t) => !t.done).length;
-      if (!list.length) return all ? 'no to-dos yet · /todo <category> <what to do> adds one' : `nothing to do${open ? '' : ' · /todo <category> <what to do> adds one'}`;
+    // Saves a to-do's changed fields.
+    function saveTodo(t, changes) {
+      const { id, at, n, tag, category, note, ...body } = t;
+      store.putRecord('todo', { ...body, ...changes }, id);
+    }
+
+    // The entry running now, if it's a task (not off or a break).
+    function runningEntry() {
+      const cur = T.withSpans(shown(), Date.now()).pop();
+      return cur && !cur.off && !T.isMarker(cur.text) ? cur : null;
+    }
+
+    // The open to-do started with /do that's running now.
+    function runningTodo() {
+      const cur = runningEntry();
+      return cur ? todos().find((t) => !t.done && t.entryId === cur.id) || null : null;
+    }
+
+    // /do: start an entry with the to-do's category and text, linked to it so
+    // a bare /done marks it done (the entry keeps running).
+    function doTodo(arg) {
+      const t = T.findById(todos(), String(arg || '').replace(/^td:/i, ''));
+      if (!t) return print('usage: /do <TD>   (a to-do ID from /todos, or its last digits)', 'err');
+      if (t.done) return print(`${t.tag} is done · /undone ${t.n.replace(/^0+/, '')} opens it again`, 'err');
+      const now = runningTodo();
+      if (now && now.id === t.id) return print(`already working on ${t.tag} ${t.text}`, 'dim');
+      const entry = add(t.text);
+      if (!entry) return;
+      saveTodo(t, { entryId: entry.id });
+      print(`working on ${t.tag} · /done marks it done (the timer keeps going until /off, a break or your next entry)`, 'dim');
+    }
+
+    // which: 'open' (the default), 'all', or 'today' (open and due today or
+    // earlier).
+    function formatTodos(which = 'open') {
+      const now = Date.now();
+      const today = T.ymd(now);
+      const all = todos();
+      const list = all.filter((t) => (which === 'all' || !t.done) && (which !== 'today' || (t.due && t.due <= today)));
+      const open = all.filter((t) => !t.done).length;
+      if (which === 'today' && !list.length) return 'nothing due today';
+      if (!list.length) return which === 'all' ? 'no to-dos yet · /todo <category> <what to do> adds one' : `nothing to do${open ? '' : ' · /todo <category> <what to do> adds one'}`;
       const catWidth = Math.min(16, Math.max(...list.map((t) => t.category.length)));
-      const lines = [`to-do: ${open} open${all ? `, ${todos().length - open} done` : ''}`];
+      const running = runningTodo();
+      const late = all.filter((t) => !t.done && t.due && t.due < today).length;
+      const lines = [which === 'today' ? `due today: ${list.length}` : `to-do: ${open} open${which === 'all' ? `, ${all.length - open} done` : ''}${late ? `, ${late} overdue` : ''}`];
       for (const t of list) {
-        const when = t.done && t.doneAt ? `  (done ${T.ymd(t.doneAt).slice(5)})` : '';
-        lines.push(`  [${t.done ? 'x' : ' '}] ${t.tag}  ${t.category.padEnd(catWidth)}  ${t.note}${when}`.trimEnd());
+        const tail = [];
+        if (t.done && t.doneAt) tail.push(`done ${T.ymd(t.doneAt).slice(5)}`);
+        else if (t.due) tail.push(T.dueLabel(t.due, now).text);
+        if (running && running.id === t.id) tail.push('working on it now');
+        const mark = t.done ? 'x' : running && running.id === t.id ? '>' : ' ';
+        lines.push(`  [${mark}] ${t.tag}  ${t.category.padEnd(catWidth)}  ${t.note}${tail.length ? `  (${tail.join(', ')})` : ''}`.trimEnd());
       }
       return lines.join('\n');
     }
 
     // /done and /undone: mark to-dos (by ID or its last digits) done or not.
     function markTodos(args, done) {
-      if (!args.length) return print(`usage: /${done ? 'done' : 'undone'} <TD> [more]   (a to-do ID from /todos, or its last digits)`, 'err');
+      if (!args.length && done && runningTodo()) args = [runningTodo().n];
+      if (!args.length) return print(`usage: /${done ? 'done' : 'undone'} <TD> [more]   (a to-do ID from /todos, or its last digits)${done ? ' · /done alone marks the to-do you started with /do' : ''}`, 'err');
       const list = todos();
       for (const a of args) {
         const t = T.findById(list, String(a).replace(/^td:/i, ''));
@@ -633,8 +692,7 @@
           print(`${t.tag} is already ${done ? 'done' : 'open'}`, 'dim');
           continue;
         }
-        const { id, at, n, tag, category, note, ...body } = t;
-        store.putRecord('todo', { ...body, done, doneAt: done ? Date.now() : null }, id);
+        saveTodo(t, { done, doneAt: done ? Date.now() : null });
         print(`${done ? '[x]' : '[ ]'} ${t.tag} ${t.text}`, 'ok');
       }
     }
@@ -752,6 +810,7 @@
       if (prev && !prev.off) parts.push(`out ${T.isMarker(prev.text) ? `of ${prev.category.replace(/[()]/g, '')}` : prev.category} (${T.formatHM(prev.duration)})`);
       parts.push(`in ${T.idTag(T.idText(entry.sid || shown().length * 10))} ${entry.wo ? `${T.woTag(entry.wo)} ` : ''}${entry.eq ? `${T.eqTag(entry.eq)} ` : ''}${describe(T.parseInput(entry.text))}`);
       print(parts.join('  '), 'ok');
+      return entry;
     }
 
     // ---- editing and restoring -------------------------------------------------
@@ -1474,18 +1533,43 @@
         usage: '/todo <category> <what to do>',
         about: 'add a to-do (no times; open until /done). /todo alone lists them',
         run(args) {
-          if (!args.length) return print(formatTodos(false), 'report');
+          if (!args.length) return print(formatTodos(), 'report');
           addTodo(args.join(' '));
         },
       },
       todos: {
-        usage: '/todos [all]',
-        about: 'the open to-dos (all: the done ones too)',
-        run(args) { print(formatTodos(/^all$/i.test(args[0] || '')), 'report'); },
+        usage: '/todos [all|today]',
+        about: 'the open to-dos (all: the done ones too; today: due today or overdue)',
+        run(args) {
+          const a = (args[0] || '').toLowerCase();
+          print(formatTodos(a === 'all' ? 'all' : a === 'today' ? 'today' : 'open'), 'report');
+        },
+      },
+      due: {
+        usage: '/due <TD> [day]',
+        about: 'set when a to-do is due (today, tomorrow, fri, +3, 10-09); no day clears it',
+        run(args) {
+          const t = T.findById(todos(), String(args[0] || '').replace(/^td:/i, ''));
+          if (!t) return print('usage: /due <TD> [day]   e.g. /due 20 fri, /due 20 10-09, /due 20 (clears it)', 'err');
+          if (args.length < 2) {
+            if (!t.due) return print(`${t.tag} has no due day`, 'dim');
+            saveTodo(t, { due: null });
+            return print(`${t.tag} ${t.text} · no due day`, 'ok');
+          }
+          const due = T.parseDue(args[1], Date.now());
+          if (!due) return print(`not a day: ${args[1]} · try today, tomorrow, fri, +3 or 10-09`, 'err');
+          saveTodo(t, { due });
+          print(`${t.tag} ${t.text} · ${T.dueLabel(due, Date.now()).text}`, 'ok');
+        },
+      },
+      do: {
+        usage: '/do <TD>',
+        about: 'start working on a to-do: an entry with its category and text; /done alone then marks it done',
+        run(args) { doTodo(args[0]); },
       },
       done: {
-        usage: '/done <TD> [more]',
-        about: 'mark to-dos done, by ID or its last digits: /done 20',
+        usage: '/done [TD] [more]',
+        about: 'mark to-dos done, by ID or its last digits: /done 20 (alone: the one started with /do)',
         run(args) { markTodos(args, true); },
       },
       undone: {
@@ -1639,10 +1723,13 @@
       todoList: () => todos(),
       setTodoDone(id, done) {
         const t = todos().find((x) => x.id === id);
-        if (!t) return;
-        const { id: _i, at, n, tag, category, note, ...body } = t;
-        store.putRecord('todo', { ...body, done, doneAt: done ? Date.now() : null }, id);
+        if (t) saveTodo(t, { done, doneAt: done ? Date.now() : null });
       },
+      doTodo(id) {
+        const t = todos().find((x) => x.id === id);
+        if (t) doTodo(t.n);
+      },
+      runningTodoId: () => (runningTodo() || {}).id || null,
       formQuestions,
       presetAnswers,
       commandWords,

@@ -986,6 +986,11 @@ button.gui-day {
 .gtick-sub { color: var(--muted); font-size: 12px; }
 .gtick-row.done .gtick-text { color: var(--muted); text-decoration: line-through; }
 .gtick-more { display: flex; gap: 8px; margin-top: 12px; }
+.gtick-words { flex: 1; }
+.gtick-row.late .gtick-sub { color: var(--warn); }
+.gtick-row.now .gtick-sub { color: var(--accent); }
+.gtick-play { flex-shrink: 0; width: 32px; height: 28px; margin: -3px 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.gtick-play:hover { border-color: var(--accent); }
 
 @media (max-width: 600px) {
   .startbar {

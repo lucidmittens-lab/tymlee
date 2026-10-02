@@ -876,3 +876,22 @@ test('/find: every word, in text, notes, file paths or work orders; newest first
   assert.equal(T.formatSearch(log, '4471 label', NOW).count, 1);
   assert.equal(T.formatSearch(log, 'nope', NOW).text, 'nothing found for "nope"');
 });
+
+test('due days: today, tomorrow, the next day name, +N, dates; labels say overdue', () => {
+  const now = new Date(2026, 9, 2, 10).getTime(); // a Friday
+  assert.equal(T.parseDue('today', now), '2026-10-02');
+  assert.equal(T.parseDue('tomorrow', now), '2026-10-03');
+  assert.equal(T.parseDue('fri', now), '2026-10-02');
+  assert.equal(T.parseDue('Monday', now), '2026-10-05');
+  assert.equal(T.parseDue('+3', now), '2026-10-05');
+  assert.equal(T.parseDue('10-09', now), '2026-10-09');
+  assert.equal(T.parseDue('01-05', now), '2027-01-05');
+  assert.equal(T.parseDue('09-29', now), '2026-09-29');
+  assert.equal(T.dueLabel('2027-01-05', now).text, 'due Tue 2027-01-05');
+  assert.equal(T.parseDue('2026-02-30', now), null);
+  assert.equal(T.parseDue('soon', now), null);
+  assert.deepEqual(T.dueLabel('2026-09-30', now), { text: 'overdue, was due Wed 09-30', late: true, soon: true });
+  assert.equal(T.dueLabel('2026-10-02', now).text, 'due today');
+  assert.equal(T.dueLabel('2026-10-03', now).text, 'due tomorrow');
+  assert.equal(T.dueLabel('2026-10-09', now).text, 'due Fri 10-09');
+});

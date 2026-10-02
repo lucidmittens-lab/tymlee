@@ -263,7 +263,7 @@
   // old one also saved switches made by commands, so it starts over at GUI.
   const VIEW_KEY = 'tymlee.view2';
   let view = 'cli';
-  // What the GUI shows: a day, a (Monday to Sunday) week or a calendar month,
+  // What the GUI shows: a day, a (Sunday to Saturday, like calweek) week or a calendar month,
   // `back` of them before the current one; or, with unit null, `guiRange`
   // (from /timeline <range>).
   const UNITS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
@@ -282,8 +282,8 @@
       return { from, to: T.addDays(from, 1), label: T.ymd(from) };
     }
     if (unit === 'week') {
-      const monday = T.addDays(today, -((new Date(today).getDay() + 6) % 7));
-      const from = T.addDays(monday, -7 * back);
+      const sunday = T.addDays(today, -new Date(today).getDay());
+      const from = T.addDays(sunday, -7 * back);
       return { from, to: T.addDays(from, 7), label: `week of ${T.ymd(from)}` };
     }
     const d = new Date(today);

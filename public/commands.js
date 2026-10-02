@@ -122,7 +122,7 @@
             let dayTs = Date.now();
             if (rest[0] && /^\d{4}-\d{2}-\d{2}$/.test(rest[0])) {
               const range = T.parseRange(rest[0], Date.now());
-              if (!range) return print(`"${rest[0]}" is not a real date`, 'err');
+              if (!range) return print(`"${rest[0]}" is not a day · use YYYY-MM-DD`, 'err');
               dayTs = range.from;
               rest = rest.slice(1);
             }
@@ -383,7 +383,7 @@
       const now = Date.now();
       const template = forms()[found];
       if (!T.withSpans(store.entries, now).some((s) => !s.off && s.ts >= range.from && s.ts < range.to)) {
-        return print(`no entries (${range.label}); nothing to fill ${found} in from`, 'dim');
+        return print(`no entries (${range.label}) · nothing to fill ${found} in from`, 'dim');
       }
       const questions = T.formQuestions(template, store.entries, range, now);
       const answers = new Map();
@@ -606,7 +606,7 @@
       const dm = text.match(/\s+due:(\S+)\s*$/i);
       if (dm) {
         due = T.parseDue(dm[1], Date.now());
-        if (!due) return print(`not a day: ${dm[1]} · try today, tomorrow, fri, +3 or 10-09`, 'err');
+        if (!due) return print(`"${dm[1]}" is not a day · try today, tomorrow, fri, +3 or 10-09`, 'err');
         text = text.slice(0, dm.index);
       }
       const { category, note } = T.parseInput(text);
@@ -759,7 +759,7 @@
     function rangeFrom(args) {
       const word = args.join('');
       const range = T.parseRange(word, Date.now());
-      if (!range) print(`unknown range "${word}"; try today, yesterday, calweek (Sunday to Saturday), week (7 days), calmonth, month (30 days), all, 3d, tue or 2026-01-31`, 'err');
+      if (!range) print(`unknown range "${word}" · try today, yesterday, calweek (Sunday to Saturday), week (7 days), calmonth, month (30 days), all, 3d, tue or 2026-01-31`, 'err');
       return range;
     }
 
@@ -890,12 +890,12 @@
       for (;;) {
         const edited = await io.editor.edit(current);
         if (edited == null || !hasContent(edited)) {
-          print(`${mode} cancelled; nothing was changed`, 'ok');
+          print(`${mode} cancelled · nothing changed`, 'ok');
           return;
         }
         if (apply(edited)) return;
         if (!(await io.editor.confirm('open the editor again to fix it?'))) {
-          print(`${mode} cancelled; nothing was changed`, 'ok');
+          print(`${mode} cancelled · nothing changed`, 'ok');
           return;
         }
         current = edited;
@@ -904,7 +904,7 @@
 
     function busy() {
       if (inline && io.editor.isOpen()) {
-        print('already editing; /save or /cancel first', 'err');
+        print('already editing · /save or /cancel first', 'err');
         return true;
       }
       return false;
@@ -914,9 +914,19 @@
 
     const COMMANDS = {
       help: {
-        usage: '/help',
-        about: 'show this help',
-        run() {
+        usage: '/help [topic|command]',
+        about: 'show this help; /help todo shows one topic, /help log one command',
+        run(args) {
+          const want = (args[0] || '').toLowerCase().replace(/^\//, '');
+          const line = (name) => `  ${`${COMMANDS[name].usage}  `.padEnd(30)}${COMMANDS[name].about}`;
+          const groups = helpGroups();
+          if (want) {
+            const g = groups.find((x) => x.key === want || x.words.includes(want));
+            if (g) return print([`${g.title}:`, ...g.names.map(line)].join('\n'), 'report dim');
+            const name = ALIASES[want] || want;
+            if (COMMANDS[name]) return print(line(name).trim(), 'report dim');
+            return print(`no help topic "${want}" · topics: ${groups.map((x) => x.key).join(', ')}${closest(want) ? ` · did you mean /help ${closest(want).slice(1)}?` : ''}`, 'err');
+          }
           print([
             'Type what you are starting and press Enter. That clocks you in to the new',
             'entry and out of the previous one. The first word is the category.',
@@ -924,11 +934,9 @@
             '  dev fixing the login bug',
             '  mtg standup',
             '',
-            'Commands:',
-            ...Object.values(COMMANDS).map((c) => `  ${`${c.usage}  `.padEnd(28)}${c.about}`),
-            '',
-            'Ranges: today (default), yesterday, week, month, all, Nd (last N days),',
-            '        YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
+            ...groups.flatMap((g) => [`${g.title}  (/help ${g.key})`, ...g.names.map(line), '']),
+            'Ranges: today (default), yesterday, week, month, calweek, calmonth, all,',
+            '        Nd (last N days), a day name, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
             ...(io.keys && io.keys.length ? ['', ...io.keys] : []),
             ...(io.helpFooter || []),
             '',
@@ -1118,7 +1126,7 @@
           try {
             await io.copy(T.formatReport(store.entries, range, Date.now()));
           } catch (err) {
-            return print(`${(err && err.message) || 'could not copy'}; use /export`, 'err');
+            return print(`${(err && err.message) || 'could not copy'} · /export saves a file instead`, 'err');
           }
           print(`copied ${range.label} to clipboard`, 'ok');
         },
@@ -1129,7 +1137,7 @@
         async run(args) {
           const email = (args[0] || '').trim();
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return print('usage: /login you@example.com', 'err');
-          if (store.user) return print(`already signed in as ${store.user.email}; /logout first`, 'err');
+          if (store.user) return print(`already signed in as ${store.user.email} · /logout first`, 'err');
           await store.login(email);
           rememberLoginEmail(email);
           print(io.linkSignIn
@@ -1144,7 +1152,7 @@
           const code = (args[0] || '').trim();
           const email = loginEmail();
           if (store.user) return print(`already signed in as ${store.user.email}`, 'err');
-          if (!email) return print('run /login <email> first', 'err');
+          if (!email) return print('not signed in · /login you@example.com', 'err');
           if (!/^\d{6,10}$/.test(code)) return print('usage: /code 123456  (the number from the sign-in email)', 'err');
           await store.verify(email, code);
           rememberLoginEmail('');
@@ -1156,7 +1164,7 @@
         async run(args) {
           if (!store.user) return print('not signed in', 'err');
           if (store.pending && args[0] !== 'force') {
-            return print(`${store.pending} change(s) have not synced yet. Try /sync, or /logout force to discard them.`, 'err');
+            return print(`${plural(store.pending, 'change has', 'changes have')} not synced yet · /sync, or /logout force to discard ${store.pending === 1 ? 'it' : 'them'}`, 'err');
           }
           const email = store.user.email;
           await store.logout();
@@ -1215,8 +1223,8 @@
         usage: '/reset-encryption',
         about: 'lost every device with the key and the recovery key? start over (deletes the synced log)',
         async run(args) {
-          if (!store.user) return print('sign in first: /login you@example.com', 'err');
-          if (store.encryption === 'ready') return print('this device has the key, so there is nothing to reset. /recovery makes a new recovery key', 'err');
+          if (!store.user) return print('not signed in · /login you@example.com', 'err');
+          if (store.encryption === 'ready') return print('this device has the key, so there is nothing to reset · /recovery makes a new recovery key', 'err');
           if (store.encryption !== 'locked') return print("this account's log isn't locked, so there is nothing to reset", 'err');
           print([
             'This starts over with a new encryption key, for when no device has the key and the recovery key is lost.',
@@ -1227,7 +1235,7 @@
             '  - You get a new recovery key.',
           ].join('\n'), 'key');
           const typed = args[0] === 'DELETE' ? 'DELETE' : await io.ask('type DELETE to start over', '', 'confirm');
-          if (typed == null || typed.trim() !== 'DELETE') return print('reset cancelled; nothing was changed', 'dim');
+          if (typed == null || typed.trim() !== 'DELETE') return print('reset cancelled · nothing changed', 'dim');
           print('deleting the synced log and making a new key…', 'dim');
           await store.resetEncryption();
           print('encryption reset: this device has the new key', 'ok');
@@ -1237,9 +1245,9 @@
         usage: '/whoami',
         about: 'show the account and sync state',
         run() {
-          if (!store.configured) return print(`local only: entries are kept on ${io.place} (sync not configured)`, 'dim');
-          if (!store.user) return print(`signed out: entries are kept on ${io.place}. /login <email> to sync`, 'dim');
-          const state = store.pending ? `${store.pending} change(s) waiting to sync` : 'all changes synced';
+          if (!store.configured) return print(`local only · entries are kept on ${io.place} (sync is not configured)`, 'dim');
+          if (!store.user) return print(`signed out · entries are kept on ${io.place} · /login you@example.com to sync`, 'dim');
+          const state = store.pending ? `${plural(store.pending, 'change', 'changes')} waiting to sync` : 'all changes synced';
           const err = store.lastError ? `\nlast error: ${store.lastError}` : '';
           const crypt = {
             ready: store.timesSealed ? 'encrypted (text and times): this device has the key' : 'encrypted (text): this device has the key',
@@ -1255,7 +1263,7 @@
         usage: '/sync',
         about: 'send and fetch changes now',
         async run() {
-          if (!store.user) return print('not signed in; /login <email> to sync', 'err');
+          if (!store.user) return print('not signed in · /login you@example.com to sync', 'err');
           await store.sync({ full: true });
           if (store.status === 'synced') print(`synced · ${shown().length} entries`, 'ok');
           else print(`sync failed: ${store.lastError || store.status}`, 'err');
@@ -1310,7 +1318,7 @@
           usage: '/save',
           about: 'save /edit changes, /restore entries or a form (Ctrl+Enter)',
           run() {
-            if (!io.editor.isOpen()) return print('nothing to save; start with /edit, /restore or /newform', 'err');
+            if (!io.editor.isOpen()) return print('nothing to save · start with /edit, /restore or /newform', 'err');
             const text = io.editor.value();
             const mode = io.editor.mode();
             const ok = applyText(mode, text, io.editor.items());
@@ -1324,7 +1332,7 @@
             if (!io.editor.isOpen()) return print('nothing to cancel', 'err');
             const what = { restore: 'restore', form: 'form', checklist: 'checklist', checkrun: 'checklist' }[io.editor.mode()] || 'edit';
             io.editor.close();
-            print(`${what} cancelled; nothing was changed`, 'ok');
+            print(`${what} cancelled · nothing changed`, 'ok');
           },
         },
       } : {}),
@@ -1393,7 +1401,7 @@
         async run(args) {
           const name = args[0];
           if (!validFormName(name)) return print('usage: /newform <name>   (letters, numbers, - and _)', 'err');
-          if (formName(name)) return print(`there is already a form called ${formName(name)}; /editform ${formName(name)} changes it`, 'err');
+          if (formName(name)) return print(`there is already a form called ${formName(name)} · /editform ${formName(name)} changes it`, 'err');
           await openForm(name, FORM_STARTER);
         },
       },
@@ -1427,7 +1435,7 @@
         async run(args) {
           const name = args[0];
           if (!validFormName(name)) return print('usage: /newchecklist <name>   (letters, numbers, - and _)', 'err');
-          if (templateFor(name)) return print(`there is already a checklist called ${templateFor(name).name}; /editchecklist ${templateFor(name).name} changes it`, 'err');
+          if (templateFor(name)) return print(`there is already a checklist called ${templateFor(name).name} · /editchecklist ${templateFor(name).name} changes it`, 'err');
           print(inline ? `writing checklist ${name} · /save to keep it, /cancel to discard` : `writing checklist ${name} in your editor…`, 'dim');
           await openText({ text: `${CHECK_HELP.join('\n')}\n\n`, items: { checklist: name }, mode: 'checklist', label: `Checklist ${name}` });
         },
@@ -1564,7 +1572,7 @@
             return print(`${t.tag} ${t.text} · no due day`, 'ok');
           }
           const due = T.parseDue(args[1], Date.now());
-          if (!due) return print(`not a day: ${args[1]} · try today, tomorrow, fri, +3 or 10-09`, 'err');
+          if (!due) return print(`"${args[1]}" is not a day · try today, tomorrow, fri, +3 or 10-09`, 'err');
           saveTodo(t, { due });
           print(`${t.tag} ${t.text} · ${T.dueLabel(due, Date.now()).text}`, 'ok');
         },
@@ -1615,6 +1623,55 @@
     const ALIASES = { ls: 'log', h: 'help', '?': 'help', z: 'undo', tl: 'timeline' };
     const commandWords = Object.keys(COMMANDS).map((c) => '/' + c);
 
+    // /help's topics, in order. A command not listed lands in the last one.
+    const HELP_TOPICS = [
+      ['entries', 'Entries', ['entry', 'entries'], ['off', 'break-paid', 'break-unpaid', 'undo', 'note', 'file', 'edit', 'rm', 'trash', 'untrash']],
+      ['links', 'Work orders and equipment', ['wo', 'eq', 'equipment', 'workorders'], ['wolink', 'wopunch', 'eqlink', 'eqpunch', 'wolist']],
+      ['reports', 'Reports and search', ['report', 'search', 'find'], ['log', 'report', 'timeline', 'find', 'export', 'copy']],
+      ['todo', 'To-dos and checklists', ['todos', 'to-do', 'checklist', 'checklists'], ['todo', 'todos', 'do', 'done', 'undone', 'due', 'deltodo', 'checklist', 'check', 'newchecklist', 'editchecklist', 'delchecklist', 'delcheck']],
+      ['forms', 'Forms', ['form'], ['form', 'newform', 'editform', 'delform']],
+      ['pay', 'Pay', ['rate', 'overtime'], ['rate', 'otmin', 'otrate']],
+      ['backup', 'Backup', ['restore', 'import'], ['backup', 'restore', 'import', 'save']],
+      ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
+      ['more', 'More', ['other', 'display', 'view'], []],
+    ];
+    function helpGroups() {
+      const placed = new Set();
+      const groups = HELP_TOPICS.map(([key, title, words, names]) => {
+        const here = names.filter((n) => COMMANDS[n] && !placed.has(n));
+        here.forEach((n) => placed.add(n));
+        return { key, title, words, names: here };
+      });
+      groups[groups.length - 1].names.push(...Object.keys(COMMANDS).filter((n) => !placed.has(n)));
+      return groups.filter((g) => g.names.length);
+    }
+
+    // The commands closest to a mistyped one ("/tods" -> "/todo or /todos"),
+    // or '' when nothing is close.
+    function closest(word) {
+      const w = word.toLowerCase();
+      const scored = [...Object.keys(COMMANDS), ...Object.keys(ALIASES)]
+        .map((c) => ({ c: ALIASES[c] || c, d: editDistance(w, c) }));
+      const best = Math.min(...scored.map((x) => x.d));
+      if (best > Math.max(1, Math.min(2, Math.floor(w.length / 3)))) return '';
+      const near = [...new Set(scored.filter((x) => x.d === best).map((x) => `/${x.c}`))].slice(0, 3);
+      return near.join(' or ');
+    }
+
+    // Typing distance between two words: letters added, removed, changed,
+    // or two neighbors swapped, each counting one.
+    function editDistance(a, b) {
+      const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+      for (let j = 1; j <= b.length; j++) d[0][j] = j;
+      for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+          d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+          if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+      return d[a.length][b.length];
+    }
+
     // ---- running lines ---------------------------------------------------------
 
     // What a typed line should run as (cleaned; sign-in codes caught).
@@ -1635,7 +1692,8 @@
       const name = ALIASES[word.toLowerCase()] || word.toLowerCase();
       const cmd = COMMANDS[name];
       if (!cmd) {
-        print(`unknown command "/${word}"; type /help`, 'err');
+        const near = closest(word);
+        print(`unknown command "/${word}"${near ? ` · did you mean ${near}?` : ''} · /help lists them`, 'err');
         return;
       }
       try {

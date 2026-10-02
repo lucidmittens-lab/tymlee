@@ -813,7 +813,7 @@
     // itself for accounts that don't have it (encryption is required).
     async function enableEncryption() {
       requireClient();
-      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (!user) throw new Error('not signed in · /login you@example.com');
       if (vault.mode === 'pending' || vault.mode === 'plain' || vault.mode === 'none') await schedule(prepareVault);
       if (vault.mode === 'ready') throw new Error('encryption is already on, and this device has the key');
       if (vault.mode === 'locked') throw new Error("encryption is already on for this account; this device doesn't have the key yet (/link or /recover)");
@@ -875,7 +875,7 @@
     // key. Entries typed on this device and not yet sent are kept.
     async function resetEncryption() {
       requireClient();
-      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (!user) throw new Error('not signed in · /login you@example.com');
       if (vault.mode === 'pending') await schedule(prepareVault);
       if (vault.mode === 'ready') throw new Error('this device has the key, so there is nothing to reset. /recovery makes a new recovery key');
       if (vault.mode !== 'locked') throw new Error("this account's log isn't locked, so there is nothing to reset");
@@ -952,7 +952,7 @@
 
     function requireKey() {
       requireClient();
-      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (!user) throw new Error('not signed in · /login you@example.com');
       if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet (run supabase/schema.sql)');
       if (vault.mode === 'none') throw new Error("encryption isn't turned on for this account yet: /encrypt");
       if (vault.mode !== 'ready') throw new Error("this device doesn't have the key yet: /link <code> or /recover <key>");
@@ -980,7 +980,7 @@
     // Unlock this device with a /link code or the recovery key.
     async function unlockWith(kind, code) {
       requireClient();
-      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (!user) throw new Error('not signed in · /login you@example.com');
       if (vault.mode === 'ready') throw new Error('this device already has the key');
       if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet');
       const { data, error } = await fetchKeyring();
@@ -1117,7 +1117,7 @@
 
     // Move entries logged while signed out into the signed-in account.
     function importLocal() {
-      if (!user) throw new Error('sign in first: /login you@example.com');
+      if (!user) throw new Error('not signed in · /login you@example.com');
       const local = read(key(LOCAL, 'entries'), []).filter(valid);
       const have = new Set(entries.map((e) => e.id));
       const fresh = local.filter((e) => !have.has(e.id));

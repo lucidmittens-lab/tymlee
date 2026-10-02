@@ -33,7 +33,7 @@
   }
 
   const DAY_MS = 86400000;
-  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Every day of a (finite) range, with the days that have entries filled in.
   function allDays(range, days) {
@@ -127,7 +127,7 @@
       for (const day of days) {
         const head = el('div', `tl-head${T.ymd(now) === day.key ? ' tl-today' : ''}`);
         const d = new Date(day.start);
-        const name = mode === 'week' ? `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}` : `${WEEKDAYS[(d.getDay() + 6) % 7]} ${day.key}`;
+        const name = mode === 'week' ? `${WEEKDAYS[d.getDay()]} ${d.getDate()}` : `${WEEKDAYS[d.getDay()]} ${day.key}`;
         head.append(el('span', 'tl-head-name', name), el('span', 'tl-muted tl-head-total', day.totalMs ? T.formatHM(day.totalMs) : ''));
         heads.append(head);
       }
@@ -204,14 +204,14 @@
       return scroll;
     }
 
-    // A month as a calendar: a row per week (Monday first), each day a small
+    // A month as a calendar: a row per week (Sunday first), each day a small
     // timeline on the month's shared hours, top to bottom.
     function drawCalendar(days, axisFrom, axisTo, now) {
       const byKey = new Map(days.map((d) => [d.key, d]));
       const first = Number.isFinite(range.from) ? range.from : days[0].start;
       const last = Number.isFinite(range.to) ? T.addDays(range.to, -1) : days[days.length - 1].start;
       let start = first;
-      while (new Date(start).getDay() !== 1) start = T.addDays(start, -1);
+      while (new Date(start).getDay() !== 0) start = T.addDays(start, -1);
       const span = Math.max(60, axisTo - axisFrom);
       const hh = (m) => T.hourLabel(Math.floor(m / 60));
 

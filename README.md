@@ -67,7 +67,7 @@ The `.txt` export is exactly what `/log` prints. It groups entries by the day th
 
 ## Pay
 
-`/rate 32.50` sets your hourly rate. The status bar then shows what the running entry has earned next to its clock, and what today has earned next to today's time. `/otmin 40` starts overtime after 40 hours in a week (Monday to Sunday), paid at 1.5× your rate, or at the factor `/otrate` sets (`/otrate 2`). With no argument, each command shows its setting, and `off` turns it off. Changes apply from then on, so earlier time keeps the rate it had; an entry is paid at the rate in effect when it started.
+`/rate 32.50` sets your hourly rate. The status bar then shows what the running entry has earned next to its clock, and what today has earned next to today's time. `/otmin 40` starts overtime after 40 hours in a week (Sunday to Saturday), paid at 1.5× your rate, or at the factor `/otrate` sets (`/otrate 2`). With no argument, each command shows its setting, and `off` turns it off. Changes apply from then on, so earlier time keeps the rate it had; an entry is paid at the rate in effect when it started.
 
 The settings sync across your devices with your account (encrypted like your entries once encryption is on). They need the `settings` table from the latest `supabase/schema.sql`; until that has been run, they stay on the device where you set them and upload once it has.
 

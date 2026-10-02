@@ -530,7 +530,7 @@
         ]],
         ['Pay', [
           ['Rate and overtime', () => form('Pay', {
-            intro: 'Overtime counts per week, Monday to Sunday. Clear a field to turn it off.',
+            intro: 'Overtime counts per week, Sunday to Saturday. Clear a field to turn it off.',
             fields: [
               { name: 'rate', label: 'Hourly rate ($)', value: money('rate'), type: 'number', step: '0.01' },
               { name: 'otmin', label: 'Overtime after (hours a week)', value: money('otmin'), type: 'number', step: '0.5' },

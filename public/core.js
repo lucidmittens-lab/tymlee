@@ -712,10 +712,11 @@
 
   const hasPay = (settings) => Boolean(settings && (settings.rate || []).some((s) => s.value != null));
 
-  // Monday 00:00 of the week `ts` falls in (overtime counts per week).
+  // Sunday 00:00 of the week `ts` falls in (overtime counts per week, Sunday
+  // to Saturday, like calweek).
   function weekStart(ts) {
     const day = startOfDay(ts);
-    return addDays(day, -((new Date(day).getDay() + 6) % 7));
+    return addDays(day, -new Date(day).getDay());
   }
 
   // Pay for each worked span: its rate (the one in effect when it started),

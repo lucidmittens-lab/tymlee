@@ -1334,10 +1334,10 @@
       },
       otmin: {
         usage: '/otmin [hours|off]',
-        about: 'hours in a week (Monday to Sunday) before overtime, e.g. /otmin 40',
+        about: 'hours in a week (Sunday to Saturday) before overtime, e.g. /otmin 40',
         run(args) {
           paySetting('otmin', args.join(''), {
-            show: (n) => `overtime after ${n} hours a week (Monday to Sunday)`,
+            show: (n) => `overtime after ${n} hours a week (Sunday to Saturday)`,
             check: (n) => (n > 0 && n <= 168 ? '' : 'that should be between 0 and 168 hours'),
             unit: (pay) => {
               const f = T.payValue(pay, 'otrate', Date.now());

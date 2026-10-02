@@ -576,6 +576,11 @@ test('earnings: rate, weekly overtime, and settings that change over time', () =
   assert.equal(e.get('w3').ot, false);
   assert.equal(e.get('next').money, 40); // a new week starts regular again
 
+  // Weeks run Sunday to Saturday: a Sunday starts a new one.
+  assert.equal(T.ymd(T.weekStart(day(0, 9))), '2026-09-20');
+  assert.equal(T.ymd(T.weekStart(day(6, 9))), '2026-09-27');
+  assert.equal(T.ymd(T.weekStart(day(5, 23))), '2026-09-20');
+
   pay = T.setPay(pay, 'otrate', 2, day(2, 12));
   assert.equal(T.earnings(entries, pay, now).get('w4').money, 4 * 20 + 5 * 20 * 2);
 

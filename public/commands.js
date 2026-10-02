@@ -400,6 +400,198 @@
       print(result.text.replace(/\s+$/, ''), 'report');
     }
 
+    // What the editor's text is saved as, by mode.
+    function applyText(mode, text, items) {
+      if (mode === 'restore') return applyRestore(text);
+      if (mode === 'form') return applyForm(text, items);
+      if (mode === 'checklist') return applyChecklist(text, items);
+      if (mode === 'checkrun') return applyCheckRun(text, items);
+      return applyEdit(text, items);
+    }
+
+    // ---- checklists --------------------------------------------------------------
+
+    // A checklist template (/newchecklist) is a list of things to check, one
+    // per line. /check <name> starts one: a copy with its own ID (CL:000010)
+    // whose items you tick, as [x], in the editor (or the GUI's boxes).
+    // Templates and started checklists are records, like forms.
+    const CHECK_HELP = [
+      '# one thing to check per line',
+      '# lines starting with # are left out',
+    ];
+    const RUN_HELP = '# tick an item by putting an x in its brackets: [x] · save to keep it';
+    const runTag = (sid) => `CL:${T.idText(sid)}`;
+
+    function templates() {
+      const out = {};
+      for (const c of store.listRecords('checklist')) if (!Object.keys(out).some((n) => n.toLowerCase() === c.name.toLowerCase())) out[c.name] = c;
+      return out;
+    }
+    const templateFor = (name) => Object.values(templates()).find((c) => c.name.toLowerCase() === String(name || '').toLowerCase()) || null;
+
+    // Started checklists, oldest ID first; duplicate IDs from two devices
+    // offline are fixed like to-dos.
+    function runs() {
+      const list = store.listRecords('checkrun').sort((a, b) => a.made - b.made || (a.id < b.id ? -1 : 1));
+      const used = new Set();
+      let max = Math.max(0, ...list.map((r) => r.sid || 0));
+      for (const r of list) {
+        if (!r.sid || used.has(r.sid)) {
+          max = Math.floor(max / 10) * 10 + 10;
+          r.sid = max;
+          const { id, at, ...body } = r;
+          store.putRecord('checkrun', body, id);
+        }
+        used.add(r.sid);
+      }
+      return list.sort((a, b) => a.sid - b.sid).map((r) => ({
+        ...r, n: T.idText(r.sid), tag: runTag(r.sid),
+        ticked: r.items.filter((it) => it.done).length,
+        title: `${r.name}${r.label ? ` · ${r.label}` : ''}`,
+      }));
+    }
+
+    const itemsFrom = (text) => text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+    function applyChecklist(text, items) {
+      const name = items && items.checklist;
+      const list = itemsFrom(text);
+      if (!list.length) {
+        print(inline ? 'the checklist is empty; type an item per line, or /cancel' : 'the checklist is empty', 'err');
+        return false;
+      }
+      const body = { name, text: list.join('\n') };
+      const old = store.listRecords('checklist').filter((c) => c.name.toLowerCase() === name.toLowerCase());
+      store.putRecord('checklist', body, old[0] && old[0].id);
+      store.deleteRecords(old.slice(1).map((c) => c.id));
+      print(`checklist ${name} saved (${plural(list.length, 'item', 'items')}) · /check ${name} starts one`, 'ok');
+      return true;
+    }
+
+    // The editor's "[x] item" lines back into the started checklist; other
+    // lines become new, unticked items.
+    function applyCheckRun(text, items) {
+      const run = runs().find((r) => r.id === (items && items.run));
+      if (!run) {
+        print('that checklist was deleted in the meantime', 'err');
+        return true;
+      }
+      const next = [];
+      for (const line of text.split('\n').map((l) => l.trim())) {
+        if (!line || line.startsWith('#')) continue;
+        const m = line.match(/^\[([ xX✓]?)\]\s*(.*)$/);
+        if (m && !m[2]) continue;
+        next.push(m ? { text: m[2], done: Boolean(m[1].trim()) } : { text: line, done: false });
+      }
+      saveRun(run, next);
+      const ticked = next.filter((it) => it.done).length;
+      print(`${run.tag} ${run.title}: ${ticked}/${next.length} checked${ticked === next.length && next.length ? ' · all done' : ''}`, 'ok');
+      return true;
+    }
+
+    function saveRun(run, items) {
+      const { id, at, n, tag, ticked, title, ...body } = run;
+      const all = items.length && items.every((it) => it.done);
+      store.putRecord('checkrun', { ...body, items, doneAt: all ? body.doneAt || Date.now() : null }, id);
+    }
+
+    function startRun(template, label) {
+      const max = Math.max(0, ...runs().map((r) => r.sid));
+      const sid = Math.floor(max / 10) * 10 + 10;
+      const body = { sid, name: template.name, label: label.trim(), items: itemsFrom(template.text).map((text) => ({ text, done: false })), made: Date.now() };
+      const id = store.putRecord('checkrun', body);
+      return runs().find((r) => r.id === id);
+    }
+
+    async function openRun(run) {
+      const lines = [RUN_HELP, `# ${run.tag} ${run.title}`, ...run.items.map((it) => `[${it.done ? 'x' : ' '}] ${it.text}`)];
+      print(inline ? `checking ${run.tag} ${run.title} · /save to keep it, /cancel to discard` : `checking ${run.tag} ${run.title} in your editor…`, 'dim');
+      await openText({ text: `${lines.join('\n')}\n`, items: { run: run.id }, mode: 'checkrun', label: `Checklist ${run.title}` });
+    }
+
+    function formatChecklists() {
+      const names = Object.keys(templates()).sort();
+      const list = runs();
+      const open = list.filter((r) => r.ticked < r.items.length);
+      const lines = [`checklists: ${names.length ? names.join(', ') : 'none yet'}`];
+      lines.push('/newchecklist <name>  /editchecklist <name>  /delchecklist <name>');
+      lines.push('/check <name> [label] starts one; /check <CL> opens one to tick');
+      if (list.length) {
+        lines.push('', `started: ${open.length} open, ${list.length - open.length} done`);
+        for (const r of list.slice().reverse()) lines.push(`  ${r.tag}  ${String(`${r.ticked}/${r.items.length}`).padStart(5)}  ${r.title}${r.ticked === r.items.length ? '  ✓' : ''}`);
+      }
+      return lines.join('\n');
+    }
+
+    // ---- to-dos ------------------------------------------------------------------
+
+    // A to-do is a category and text ("dev fix login bug") with its own ID,
+    // shown as TD:000010, open until /done. They're records (store.js): kept
+    // encrypted, synced, and on this device offline.
+    const todoTag = (sid) => `TD:${T.idText(sid)}`;
+
+    // All to-dos, oldest ID first, each with an ID. Two devices that gave out
+    // the same ID offline: the later one gets the next free ten.
+    function todos() {
+      const list = store.listRecords('todo').sort((a, b) => a.made - b.made || (a.id < b.id ? -1 : 1));
+      const used = new Set();
+      let max = Math.max(0, ...list.map((t) => t.sid || 0));
+      for (const t of list) {
+        if (!t.sid || used.has(t.sid)) {
+          max = Math.floor(max / 10) * 10 + 10;
+          t.sid = max;
+          const { id, at, ...body } = t;
+          store.putRecord('todo', body, id);
+        }
+        used.add(t.sid);
+      }
+      return list.sort((a, b) => a.sid - b.sid).map((t) => ({ ...t, n: T.idText(t.sid), tag: todoTag(t.sid), ...T.parseInput(t.text) }));
+    }
+
+    function addTodo(text) {
+      const { category, note } = T.parseInput(text);
+      if (!category || category.startsWith('/')) return print('usage: /todo <category> <what to do>, e.g. /todo dev fix the login bug', 'err');
+      const clean = note ? `${category} ${note}` : category;
+      if (clean.length > T.MAX_TEXT) return print(`to-dos are limited to ${T.MAX_TEXT} characters`, 'err');
+      const max = Math.max(0, ...todos().map((t) => t.sid));
+      const sid = Math.floor(max / 10) * 10 + 10;
+      store.putRecord('todo', { sid, text: clean, done: false, made: Date.now() });
+      print(`to-do ${todoTag(sid)} ${clean} · /done ${String(sid).replace(/^0+/, '')} when it's done`, 'ok');
+    }
+
+    function formatTodos(all) {
+      const list = todos().filter((t) => all || !t.done);
+      const open = todos().filter((t) => !t.done).length;
+      if (!list.length) return all ? 'no to-dos yet · /todo <category> <what to do> adds one' : `nothing to do${open ? '' : ' · /todo <category> <what to do> adds one'}`;
+      const catWidth = Math.min(16, Math.max(...list.map((t) => t.category.length)));
+      const lines = [`to-do: ${open} open${all ? `, ${todos().length - open} done` : ''}`];
+      for (const t of list) {
+        const when = t.done && t.doneAt ? `  (done ${T.ymd(t.doneAt).slice(5)})` : '';
+        lines.push(`  [${t.done ? 'x' : ' '}] ${t.tag}  ${t.category.padEnd(catWidth)}  ${t.note}${when}`.trimEnd());
+      }
+      return lines.join('\n');
+    }
+
+    // /done and /undone: mark to-dos (by ID or its last digits) done or not.
+    function markTodos(args, done) {
+      if (!args.length) return print(`usage: /${done ? 'done' : 'undone'} <TD> [more]   (a to-do ID from /todos, or its last digits)`, 'err');
+      const list = todos();
+      for (const a of args) {
+        const t = T.findById(list, String(a).replace(/^td:/i, ''));
+        if (!t) {
+          print(`no to-do ${a} · /todos lists them`, 'err');
+          continue;
+        }
+        if (Boolean(t.done) === done) {
+          print(`${t.tag} is already ${done ? 'done' : 'open'}`, 'dim');
+          continue;
+        }
+        const { id, at, n, tag, category, note, ...body } = t;
+        store.putRecord('todo', { ...body, done, doneAt: done ? Date.now() : null }, id);
+        print(`${done ? '[x]' : '[ ]'} ${t.tag} ${t.text}`, 'ok');
+      }
+    }
+
     // ---- the clock ---------------------------------------------------------------
 
     // 12- or 24-hour times, kept with the account's settings like pay.
@@ -576,7 +768,7 @@
     // Open text for editing: in the inline box (finished with /save), or in an
     // external editor, reopening it to fix mistakes.
     async function openText({ text, items, mode, label }) {
-      const apply = (t) => (mode === 'restore' ? applyRestore(t) : mode === 'form' ? applyForm(t, items) : applyEdit(t, items));
+      const apply = (t) => applyText(mode, t, items);
       if (inline) {
         io.editor.open({ text, items, mode, label });
         return;
@@ -1005,7 +1197,7 @@
             if (!io.editor.isOpen()) return print('nothing to save; start with /edit, /restore or /newform', 'err');
             const text = io.editor.value();
             const mode = io.editor.mode();
-            const ok = mode === 'restore' ? applyRestore(text) : mode === 'form' ? applyForm(text, io.editor.items()) : applyEdit(text, io.editor.items());
+            const ok = applyText(mode, text, io.editor.items());
             if (ok) io.editor.close();
           },
         },
@@ -1014,7 +1206,7 @@
           about: 'close /edit, /restore or a form without changing anything',
           run() {
             if (!io.editor.isOpen()) return print('nothing to cancel', 'err');
-            const what = { restore: 'restore', form: 'form' }[io.editor.mode()] || 'edit';
+            const what = { restore: 'restore', form: 'form', checklist: 'checklist', checkrun: 'checklist' }[io.editor.mode()] || 'edit';
             io.editor.close();
             print(`${what} cancelled; nothing was changed`, 'ok');
           },
@@ -1106,6 +1298,104 @@
           if (!found) return print(args[0] ? `no form called "${args[0]}" · your forms: ${formList()}` : `usage: /delform <name> · your forms: ${formList()}`, 'err');
           deleteForm(found);
           print(`form ${found} deleted`, 'ok');
+        },
+      },
+      checklist: {
+        usage: '/checklist',
+        about: 'your checklist templates, and the checklists you started',
+        run() { print(formatChecklists(), 'report'); },
+      },
+      newchecklist: {
+        usage: '/newchecklist <name>',
+        about: 'write a checklist: one thing to check per line',
+        async run(args) {
+          const name = args[0];
+          if (!validFormName(name)) return print('usage: /newchecklist <name>   (letters, numbers, - and _)', 'err');
+          if (templateFor(name)) return print(`there is already a checklist called ${templateFor(name).name}; /editchecklist ${templateFor(name).name} changes it`, 'err');
+          print(inline ? `writing checklist ${name} · /save to keep it, /cancel to discard` : `writing checklist ${name} in your editor…`, 'dim');
+          await openText({ text: `${CHECK_HELP.join('\n')}\n\n`, items: { checklist: name }, mode: 'checklist', label: `Checklist ${name}` });
+        },
+      },
+      editchecklist: {
+        usage: '/editchecklist <name>',
+        about: 'change a checklist template (started ones keep their items)',
+        async run(args) {
+          const c = templateFor(args[0]);
+          if (!c) return print(`usage: /editchecklist <name> · your checklists: ${Object.keys(templates()).sort().join(', ') || 'none yet'}`, 'err');
+          print(inline ? `editing checklist ${c.name} · /save to keep it, /cancel to discard` : `editing checklist ${c.name} in your editor…`, 'dim');
+          await openText({ text: `${CHECK_HELP.join('\n')}\n\n${c.text}\n`, items: { checklist: c.name }, mode: 'checklist', label: `Checklist ${c.name}` });
+        },
+      },
+      delchecklist: {
+        usage: '/delchecklist <name>',
+        about: 'delete a checklist template (started ones are kept)',
+        run(args) {
+          const name = String(args[0] || '').toLowerCase();
+          const ids = store.listRecords('checklist').filter((c) => c.name.toLowerCase() === name).map((c) => c.id);
+          if (!ids.length) return print(`usage: /delchecklist <name> · your checklists: ${Object.keys(templates()).sort().join(', ') || 'none yet'}`, 'err');
+          store.deleteRecords(ids);
+          print(`checklist ${args[0]} deleted`, 'ok');
+        },
+      },
+      check: {
+        usage: '/check <name> [label]  or  /check <CL>',
+        about: 'start a checklist from a template (and tick its items), or open one you started',
+        async run(args) {
+          if (busy()) return;
+          if (!args.length) return print(formatChecklists(), 'report');
+          if (/^(?:cl:|#)?\d+$/i.test(args[0])) {
+            const run = T.findById(runs(), args[0].replace(/^(?:cl:|#)/i, ''));
+            if (!run) return print(`no checklist ${args[0]} · /checklist lists them`, 'err');
+            return openRun(run);
+          }
+          const c = templateFor(args[0]);
+          if (!c) return print(`no checklist called "${args[0]}" · your checklists: ${Object.keys(templates()).sort().join(', ') || 'none yet'} · /newchecklist ${args[0]} makes it`, 'err');
+          const run = startRun(c, args.slice(1).join(' '));
+          print(`started ${run.tag} ${run.title} (${plural(run.items.length, 'item', 'items')})`, 'ok');
+          await openRun(run);
+        },
+      },
+      delcheck: {
+        usage: '/delcheck <CL>',
+        about: 'delete a checklist you started',
+        run(args) {
+          const run = T.findById(runs(), String(args[0] || '').replace(/^(?:cl:|#)/i, ''));
+          if (!run) return print('usage: /delcheck <CL>   (an ID from /checklist, or its last digits)', 'err');
+          store.deleteRecords([run.id]);
+          print(`deleted ${run.tag} ${run.title}`, 'ok');
+        },
+      },
+      todo: {
+        usage: '/todo <category> <what to do>',
+        about: 'add a to-do (no times; open until /done). /todo alone lists them',
+        run(args) {
+          if (!args.length) return print(formatTodos(false), 'report');
+          addTodo(args.join(' '));
+        },
+      },
+      todos: {
+        usage: '/todos [all]',
+        about: 'the open to-dos (all: the done ones too)',
+        run(args) { print(formatTodos(/^all$/i.test(args[0] || '')), 'report'); },
+      },
+      done: {
+        usage: '/done <TD> [more]',
+        about: 'mark to-dos done, by ID or its last digits: /done 20',
+        run(args) { markTodos(args, true); },
+      },
+      undone: {
+        usage: '/undone <TD> [more]',
+        about: 'open a done to-do again',
+        run(args) { markTodos(args, false); },
+      },
+      deltodo: {
+        usage: '/deltodo <TD>',
+        about: 'delete a to-do',
+        run(args) {
+          const t = T.findById(todos(), String(args[0] || '').replace(/^td:/i, ''));
+          if (!t) return print('usage: /deltodo <TD>   (a to-do ID from /todos, or its last digits)', 'err');
+          store.deleteRecords([t.id]);
+          print(`deleted ${t.tag} ${t.text}`, 'ok');
         },
       },
       clock: {
@@ -1227,6 +1517,26 @@
       applyClock,
       setClock,
       formNames: () => Object.keys(forms()).sort(),
+      // For the GUI's checklists.
+      checklistNames: () => Object.keys(templates()).sort(),
+      checkRuns: () => runs(),
+      startCheckRun(name, label) {
+        const c = templateFor(name);
+        return c ? startRun(c, label) : null;
+      },
+      setCheckItem(id, i, done) {
+        const run = runs().find((r) => r.id === id);
+        if (!run || !run.items[i]) return;
+        saveRun(run, run.items.map((it, j) => (j === i ? { ...it, done } : it)));
+      },
+      // For the GUI's to-do list.
+      todoList: () => todos(),
+      setTodoDone(id, done) {
+        const t = todos().find((x) => x.id === id);
+        if (!t) return;
+        const { id: _i, at, n, tag, category, note, ...body } = t;
+        store.putRecord('todo', { ...body, done, doneAt: done ? Date.now() : null }, id);
+      },
       formQuestions,
       presetAnswers,
       commandWords,

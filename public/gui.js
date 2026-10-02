@@ -191,6 +191,94 @@
       items.forEach((it, i) => { if (/\breport\b/.test(it.cls || '')) opts.formatReport(pres[i], it.text); });
     }
 
+    // A list of tick boxes. rows() -> [{ label, sub, done }]; onToggle(row,
+    // done) saves a tick, and the list is shown again. `more` adds buttons.
+    function tickSheet(heading, rows, onToggle, more = []) {
+      const list = el('div', 'gtick');
+      const panel = sheet(heading, list, ...(more.length ? [el('div', 'gtick-more')] : []));
+      if (more.length) panel.querySelector('.gtick-more').append(...more.map(([label, run]) => button(label, 'gform-range', run)));
+      const render = () => {
+        list.replaceChildren();
+        const shown = rows();
+        for (const r of shown) {
+          const row = el('label', `gtick-row${r.done ? ' done' : ''}`);
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.checked = Boolean(r.done);
+          box.addEventListener('change', () => { onToggle(r, box.checked); render(); });
+          const words = el('span', 'gtick-words');
+          words.append(el('span', 'gtick-text', r.label));
+          if (r.sub) words.append(el('span', 'gtick-sub', r.sub));
+          row.append(box, words);
+          list.append(row);
+        }
+        if (!shown.length) list.append(el('p', 'gform-intro', 'Nothing here yet.'));
+        const done = shown.filter((r) => r.done).length;
+        panel.querySelector('.gsheet-title').textContent = shown.length ? `${heading} · ${done}/${shown.length}` : heading;
+      };
+      render();
+    }
+
+    // The to-do list: open ones first, then done ones.
+    function todoSheet() {
+      tickSheet('To-do', () => shell.todoList()
+        .sort((a, b) => Boolean(a.done) - Boolean(b.done) || a.sid - b.sid)
+        .map((t) => ({ id: t.id, label: t.note || t.category, sub: `${t.tag} · ${t.category}`, done: t.done })),
+      (r, done) => shell.setTodoDone(r.id, done),
+      [['Add a to-do', () => addTodoForm()]]);
+    }
+
+    function addTodoForm() {
+      form('Add a to-do', {
+        fields: [
+          { name: 'category', label: 'Category', placeholder: 'dev' },
+          { name: 'text', label: 'What to do', placeholder: 'fix the login bug' },
+        ],
+        submit: 'Add',
+      }, async (v) => {
+        if (!v.category) return;
+        await opts.run(`/todo ${v.category.trim().replace(/\s+/g, '-')} ${v.text || ''}`);
+        todoSheet();
+      });
+    }
+
+    function runSheet(id) {
+      const run = () => shell.checkRuns().find((r) => r.id === id);
+      const r0 = run();
+      if (!r0) return toast('That checklist was deleted.', 'dim');
+      tickSheet(`${r0.tag} ${r0.title}`, () => (run() ? run().items.map((it, i) => ({ i, label: it.text, done: it.done })) : []),
+        (r, done) => shell.setCheckItem(id, r.i, done));
+    }
+
+    function startChecklistForm() {
+      const names = shell.checklistNames();
+      if (!names.length) return toast('No checklists yet. Choose New checklist to make one.', 'dim');
+      form('Start a checklist', {
+        fields: [
+          { name: 'name', label: 'Checklist', choices: names.map((n) => [n, n]) },
+          { name: 'label', label: 'For (optional)', placeholder: 'Project X' },
+        ],
+        submit: 'Start',
+      }, (v) => {
+        const run = shell.startCheckRun(v.name, v.label || '');
+        if (run) runSheet(run.id);
+      });
+    }
+
+    function openChecklists() {
+      const list = shell.checkRuns().slice().reverse();
+      if (!list.length) return toast('No checklists started yet.', 'dim');
+      const f = el('div', 'gtick');
+      for (const r of list) {
+        const b = button('', 'gtick-row gtick-open', () => runSheet(r.id));
+        const words = el('span', 'gtick-words');
+        words.append(el('span', 'gtick-text', r.title), el('span', 'gtick-sub', `${r.tag} · ${r.ticked}/${r.items.length}${r.ticked === r.items.length ? ' · done' : ''}`));
+        b.append(words);
+        f.append(b);
+      }
+      sheet('Checklists', f);
+    }
+
     // A small form: fields [{ name, label, value, type, placeholder }], then
     // onSubmit(values). A range picker when `range` is set.
     function form(heading, { intro, fields = [], range, submit, danger }, onSubmit) {
@@ -388,6 +476,21 @@
             ['Delete a form', () => pickForm('Delete a form', 'Delete', (name) => runMenu('Form', `/delform ${name}`), true)],
           ] : []),
           ['Tokens', () => runMenu('Form tokens', '/form')],
+        ]],
+        ['To-do', [
+          ['To-do list', () => todoSheet()],
+          ['Add a to-do', () => addTodoForm()],
+        ]],
+        ['Checklists', [
+          ['Start a checklist', () => startChecklistForm()],
+          ['Open checklists', () => openChecklists()],
+          ['New checklist', () => form('New checklist', {
+            intro: 'Opens the text editor: one thing to check per line.',
+            fields: [{ name: 'name', label: 'Name', placeholder: 'upload' }], submit: 'Write it',
+          }, (v) => v.name && opts.openCli(`/newchecklist ${v.name.trim().replace(/\s+/g, '-')}`))],
+          ...(shell.checklistNames().length ? [['Edit a checklist', () => form('Edit a checklist', {
+            fields: [{ name: 'name', label: 'Checklist', choices: shell.checklistNames().map((n) => [n, n]) }], submit: 'Edit',
+          }, (v) => opts.openCli(`/editchecklist ${v.name}`))]] : []),
         ]],
         ['Pay', [
           ['Rate and overtime', () => form('Pay', {

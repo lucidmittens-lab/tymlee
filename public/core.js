@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.1';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -738,7 +738,7 @@
     ['hours', 'the time logged'],
     ['dur', 'the same, e.g. one entry\'s duration inside %{each entry}'],
     ['down', 'time between in and out that was not logged here'],
-    ['titles', 'the entry titles (%{title} works too)'],
+    ['titles', 'the entry titles, or the category when there is none (%{title} works too)'],
     ['notes', 'the notes, one per line'],
     ['files', 'the file paths (/file), one per line'],
     ['entries', 'how many entries'],
@@ -844,7 +844,7 @@
       hours: formatHM(ms),
       dur: formatHM(ms),
       down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
-      titles: uniq(spans.map((s) => s.note)).join(', '),
+      titles: uniq(spans.map((s) => s.note || s.category)).join(', '),
       notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
       files: spans.filter((s) => s.files).map((s) => s.files).join('\n'),
       entries: String(spans.length),

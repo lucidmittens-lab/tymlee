@@ -977,6 +977,14 @@ button.gui-day {
 .gform-range[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .gform-go { align-self: flex-start; border: 0; border-radius: 8px; padding: 9px 18px; background: var(--accent); color: var(--bg); font-weight: 600; }
 .gform-go.danger { background: var(--warn); color: #fff; }
+/* Tick lists (to-dos, checklists). */
+.gtick { display: flex; flex-direction: column; }
+.gtick-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 2px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gtick-row input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--accent); flex-shrink: 0; }
+.gtick-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.gtick-sub { color: var(--muted); font-size: 12px; }
+.gtick-row.done .gtick-text { color: var(--muted); text-decoration: line-through; }
+.gtick-more { display: flex; gap: 8px; margin-top: 12px; }
 
 @media (max-width: 600px) {
   .startbar {

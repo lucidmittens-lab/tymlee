@@ -730,7 +730,8 @@ async function interactive() {
     modalKey(key);
     if (key && key.ctrl && key.name === 'l') {
       // readline cleared the screen from the top; keep the prompt at the bottom.
-      setImmediate(() => { clearScreen(); rl.prompt(true); });
+      // Drawing the prompt can clear the rows below it: the status line again after.
+      setImmediate(() => { clearScreen(); rl.prompt(true); drawStatus(); });
       return;
     }
     if (redraw) return;

@@ -47,7 +47,7 @@ jobs:
           sudo installer -pkg dist/tymlee.pkg -target /
           /usr/local/bin/tymlee --version
           test "$(/usr/local/bin/tymlee --version)" = "$VERSION (build ${GITHUB_SHA::7})"
-          TYMLEE_HOME="$RUNNER_TEMP/tymlee" /usr/local/bin/tymlee dev release check | grep -q 'in #1 dev release check'
+          TYMLEE_HOME="$RUNNER_TEMP/tymlee" /usr/local/bin/tymlee dev release check | grep -q 'in ID:000010 dev release check'
           lipo -archs /usr/local/bin/tymlee
 
       - name: Publish the release

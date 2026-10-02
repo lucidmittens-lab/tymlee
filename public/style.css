@@ -250,6 +250,7 @@ body {
 }
 #matches span { cursor: pointer; margin-right: 2ch; }
 #matches span.sel { color: var(--accent); text-decoration: underline; }
+#matches .hint { font-style: normal; color: var(--muted); text-decoration: none; display: inline-block; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 #matches span.btn { border: 1px solid var(--line); border-radius: 4px; padding: 0 0.6ch; }
 
 #status {
@@ -279,6 +280,24 @@ body {
 #status .money.ot { color: var(--warn); }
 #status .stopped { color: var(--muted); }
 #status .dim { color: var(--muted); }
+/* The linked to-do and the due count: they open the to-do list. */
+#status .status-link {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  margin-left: 1ch;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--accent);
+  cursor: pointer;
+}
+#status .status-link.todo-tag { font-family: var(--mono); }
+#status .status-link.due { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+#status .status-link:hover { background: var(--accent-bg); }
 
 /* Touch screens: completions get larger tap targets. (iOS would zoom in on
    inputs under 16px; app.js turns that zoom off there instead.) */

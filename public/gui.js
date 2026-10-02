@@ -760,6 +760,7 @@
       update,
       toast,
       markStart(on) { lastStart = on; },
+      openTodos: () => todoSheet(),
       get active() { return active; },
     };
   }

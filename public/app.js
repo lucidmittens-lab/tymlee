@@ -1093,7 +1093,7 @@
     } else if (typed) {
       list = shell.completions(typed);
       sel = 0;
-      if (list[0]) {
+      if (list[0] && list[0].toLowerCase().startsWith(typed.toLowerCase())) {
         const span = document.createElement('span');
         span.className = 'typed';
         span.textContent = typed;
@@ -1103,6 +1103,8 @@
     matchesEl.replaceChildren(...list.map((m, i) => {
       const span = document.createElement('span');
       span.textContent = m;
+      const hint = shell.completionHint(m);
+      if (hint) span.append(Object.assign(document.createElement('i'), { className: 'hint', textContent: ` ${hint}` }));
       if (i === sel) span.className = 'sel';
       span.addEventListener('mousedown', (e) => {
         e.preventDefault(); // keep focus in the input
@@ -1303,6 +1305,19 @@
     return el;
   }
 
+  // A bit of the status bar that runs a command when clicked: the to-do
+  // being worked on, the count of to-dos due. In the GUI it opens the list.
+  function statusLink(cls, text, line, title) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `status-link ${cls}`;
+    b.textContent = text;
+    b.title = title;
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
+    b.addEventListener('click', () => (gui && gui.active ? gui.openTodos() : submit(line)));
+    return b;
+  }
+
   let lastStatusHeight = '';
 
   function renderStatus() {
@@ -1319,12 +1334,14 @@
       left.append(span('run', `▶ ${st.clock}`));
       if (st.money) left.append(span(`money${st.ot ? ' ot' : ''}`, `  ${st.money}${st.ot ? ' OT' : ''}`));
       left.append(span('what', `  ${st.what}`));
+      if (st.todo) left.append(statusLink('todo-tag', st.todo.tag, '/todos', 'The to-do you are working on: /done marks it done'));
       today = span('today', st.today);
       if (st.todayMoney) today.append(span('money', `  ${st.todayMoney}`));
       today.append(span('since', ` · since ${st.since}`));
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
-    statusEl.replaceChildren(...[left, today, right, clockToggle(), viewToggle()].filter(Boolean));
+    const due = st.due ? statusLink('due', `${st.due} due`, '/todos today', 'To-dos due today or overdue') : null;
+    statusEl.replaceChildren(...[left, due, today, right, clockToggle(), viewToggle()].filter(Boolean));
     if (gui) gui.update(st);
     const h = `${statusEl.offsetHeight}px`;
     if (h !== lastStatusHeight) $('dock').style.setProperty('--status-h', (lastStatusHeight = h));

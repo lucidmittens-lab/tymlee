@@ -639,6 +639,13 @@
       return null;
     }
 
+    // Open to-dos due today or earlier.
+    function dueCount() {
+      if (!store.recordsReady()) return 0;
+      const today = T.ymd(Date.now());
+      return store.listRecords('todo').filter((t) => !t.done && t.due && t.due <= today).length;
+    }
+
     // The open to-do started with /do that's running now.
     function runningTodo() {
       const cur = runningEntry();
@@ -1495,7 +1502,7 @@
         run(args) {
           if (!args.length) return print('usage: /find <words>, e.g. /find stems label', 'err');
           const query = args.join(' ');
-          const r = T.formatSearch(store.entries, query, Date.now());
+          const r = T.formatSearch(store.entries, query, Date.now(), 100, { compact: io.compact() });
           const words = query.toLowerCase().split(/\s+/);
           const todosFound = todos().filter((t) => words.every((w) => t.text.toLowerCase().includes(w)));
           const lines = [r.text];
@@ -1706,10 +1713,38 @@
     // Words that complete what has been typed: commands after "/", categories
     // otherwise.
     function completions(text, opts) {
-      // Form names after /form, /editform and /delform.
-      const m = text.match(/^(\/(?:form|editform|delform)\s+)(\S*)$/i);
+      // Form names after /form, /editform and /delform; checklist names
+      // after /check, /editchecklist and /delchecklist.
+      let m = text.match(/^(\/(?:form|editform|delform)\s+)(\S*)$/i);
       if (m) return T.suggest(m[2], Object.keys(forms()).sort(), opts).map((n) => m[1] + n);
+      m = text.match(/^(\/(?:check|editchecklist|delchecklist)\s+)(\S*)$/i);
+      if (m) return T.suggest(m[2], Object.keys(templates()).sort(), opts).map((n) => m[1] + n);
+      // To-dos after /do, /done, /due and /deltodo (open ones) or /undone
+      // (done ones): by the start of the short ID, or a word in the to-do.
+      m = text.match(/^(\/(do|done|undone|due|deltodo)\s+)(\S*)$/i);
+      if (m) {
+        const q = m[3].toLowerCase().replace(/^td:/, '');
+        const { limit = 8 } = opts || {};
+        return todos()
+          .filter((t) => (m[2].toLowerCase() === 'undone' ? t.done : !t.done))
+          .filter((t) => !q || shortId(t).startsWith(q) || t.text.toLowerCase().includes(q))
+          .slice(0, limit)
+          .map((t) => m[1] + shortId(t))
+          .filter((c) => (opts && opts.includeExact) || c !== text);
+      }
       return T.suggest(text, text.startsWith('/') ? commandWords : T.knownCategories(store.entries), opts);
+    }
+
+    // A to-do's ID without its leading zeros, as typed: 000020 -> 20.
+    const shortId = (t) => String(t.sid);
+
+    // What a completion is, when the completion alone doesn't say: the to-do
+    // for "/do 20".
+    function completionHint(line) {
+      const m = String(line).trim().match(/^\/(?:do|done|undone|due|deltodo)\s+(\d+)$/i);
+      if (!m) return '';
+      const t = todos().find((x) => String(x.sid) === m[1]);
+      return t ? t.text : '';
     }
 
     // ---- status line -------------------------------------------------------------
@@ -1723,7 +1758,7 @@
     function status(now) {
       applyClock();
       const sync = { status: store.status, label: syncLabel() };
-      if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync };
+      if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync, due: dueCount() };
       const spans = T.withSpans(store.entries, now);
       const cur = spans[spans.length - 1];
       // Same rule as the report: an entry counts toward the day it started on.
@@ -1759,6 +1794,7 @@
         // what's running, split into category and note.
         brk: cur.text === T.BREAK_PAID ? 'paid' : cur.text === T.BREAK_UNPAID ? 'unpaid' : '',
         todo: linked ? { id: linked.id, tag: linked.tag } : null,
+        due: dueCount(), // open to-dos due today or overdue
         last: last ? last.text : '',
         category: T.isMarker(cur.text) ? '' : cur.category,
         note: T.isMarker(cur.text) ? '' : cur.note,
@@ -1778,6 +1814,7 @@
       route,
       run,
       completions,
+      completionHint,
       status,
       applyClock,
       setClock,
@@ -1806,10 +1843,7 @@
         if (t) doTodo(t.n);
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
-      dueCount() {
-        const today = T.ymd(Date.now());
-        return todos().filter((t) => !t.done && t.due && t.due <= today).length;
-      },
+      dueCount,
       formQuestions,
       presetAnswers,
       commandWords,

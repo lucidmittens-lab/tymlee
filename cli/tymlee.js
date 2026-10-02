@@ -110,13 +110,14 @@ function statusText() {
   else if (st.state === 'off') { left = `${sgr('90', `■ ${st.offLabel || 'off'}`)}  since ${st.since}`; middle = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`; }
   else {
     const money = st.money ? `  ${st.ot ? sgr('33', `${st.money} OT`) : st.money}` : '';
-    left = `${sgr('32', `▶ ${st.clock}`)}${money}  ${st.what}`;
+    left = `${sgr('32', `▶ ${st.clock}`)}${money}  ${st.what}${st.todo ? `  ${sgr('36', st.todo.tag)}` : ''}`;
     const today = `${st.today}${st.todayMoney ? `  ${st.todayMoney}` : ''}`;
     middle = cols >= 70 ? `${today} · since ${st.since}` : today;
   }
   const syncColor = { synced: '32', error: '31', offline: '31', locked: '31' }[st.sync.status] || '90';
   const right = sgr(syncColor, st.sync.label);
-  const tail = `${middle ? `${sgr('90', middle)}   ` : ''}${right}`;
+  const due = st.due ? `${sgr('33', `${st.due} due`)}   ` : '';
+  const tail = `${due}${middle ? `${sgr('90', middle)}   ` : ''}${right}`;
   const room = cols - visibleLength(tail) - 2;
   if (visibleLength(left) > room) {
     // Shorten the entry text so the totals and sync state stay visible.
@@ -717,8 +718,14 @@ async function interactive() {
     historySize: HISTORY_SIZE,
     removeHistoryDuplicates: true,
     completer(line) {
-      if (modal || /\s/.test(line)) return [[], line];
+      if (modal) return [[], line];
       const hits = shell.completions(line, { includeExact: true, limit: 50 });
+      // Several to-dos: show what each one is before readline lists them.
+      if (hits.length > 1 && hits.some((h) => shell.completionHint(h))) {
+        stdout.write(`\n${hits.map((h) => `  ${h}  ${sgr('90', shell.completionHint(h))}`).join('\n')}\n`);
+        rl.prompt(true);
+        return [[], line];
+      }
       return [hits.map((h) => `${h} `), line];
     },
   });

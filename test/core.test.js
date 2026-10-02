@@ -900,3 +900,14 @@ test('due days: today, tomorrow, the next day name, +N, dates; labels say overdu
   assert.equal(T.dueLabel('2026-10-03', now).text, 'due tomorrow');
   assert.equal(T.dueLabel('2026-10-09', now).text, 'due Fri 10-09');
 });
+
+test('/find on a phone: two lines an entry, like the compact /log', () => {
+  const log = [{ id: 'a', ts: at('2026-09-23T09:00:00Z'), text: 'dev stems for the label', wo: '4471' }, { id: 'b', ts: at('2026-09-23T10:00:00Z'), text: '/off' }];
+  assert.equal(T.formatSearch(log, 'label', NOW, 100, { compact: true }).text, [
+    'found "label": 1 entry',
+    '',
+    'Wed 2026-09-23',
+    '  ID:000010  09:00   1:00  [4471]',
+    '             dev stems for the label',
+  ].join('\n'));
+});

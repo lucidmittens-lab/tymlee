@@ -1377,7 +1377,8 @@
   // Entries where every word appears (any case) in the text, notes, file
   // paths, work order or equipment: newest first, grouped by day, with the
   // matching notes and path lines under each. At most `limit` entries.
-  function formatSearch(entries, query, now, limit = 100) {
+  function formatSearch(entries, query, now, limit = 100, opts) {
+    const compact = Boolean(opts && opts.compact); // phones: two lines an entry, like /log
     const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
     const hay = (s) => [s.text, s.notes, s.files, s.wo, s.eq].filter(Boolean).join('\n').toLowerCase();
@@ -1396,8 +1397,13 @@
       }
       const dur = s.off ? '-' : formatHM(s.duration);
       const tags = `${s.wo ? `${woTag(s.wo)} ` : ''}${s.eq ? `${eqTag(s.eq)} ` : ''}`;
-      out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${tags}${s.category}${s.note ? ` ${s.note}` : ''}`);
       const indent = ' '.repeat(numWidth + 4);
+      if (compact) {
+        out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${tags}`.trimEnd());
+        out.push(`${indent}${s.category}${s.note ? ` ${s.note}` : ''}`);
+      } else {
+        out.push(`  ${idTag(s.n).padEnd(numWidth)}  ${clockCol(s.ts)}  ${dur.padStart(5)}  ${tags}${s.category}${s.note ? ` ${s.note}` : ''}`);
+      }
       out.push(...notesLines(s.notes, indent).filter(has), ...filesLines(s.files, indent).filter(has));
     }
     return { count: hits.length, text: out.join('\n') };

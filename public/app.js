@@ -873,7 +873,7 @@
   }
 
   function openTextBox({ text, items, mode, label }) {
-    if (view === 'gui') setView('cli', { save: false }); // /edit and /restore need the text view
+    if (view !== 'cli') setView('cli', { save: false }); // /edit and /restore need the text view
     const el = document.createElement('textarea');
     el.className = 'editor';
     el.value = text;
@@ -1339,6 +1339,7 @@
     if (store.entries.length) {
       print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now(), { compact: narrow.matches }), 'report');
     }
+    for (const note of shell.startupNotices()) print(note, 'dim');
     renderStatus();
     scrollToPrompt();
     // Reopen the view used last (after printing today's log into the scrollback).

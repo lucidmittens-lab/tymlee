@@ -541,7 +541,8 @@
           ]),
         ]]] : []),
         ['Backup', [
-          ['Restore from a file', () => opts.openCli('/restore file')],
+          ['Save a full backup', () => runMenu('Backup', '/backup')],
+          ['Restore from a file', () => runMenu('Restore', '/restore file')],
         ]],
         ['View', [
           ['CLI', () => opts.setView('cli')],

@@ -703,6 +703,7 @@ async function interactive() {
     const now = Date.now();
     print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70 }), 'report');
   }
+  for (const note of shell.startupNotices()) print(note, 'dim');
   drawStatus();
   checkForUpdate();
   const clock = setInterval(() => { drawPane(); drawStatus(); }, 1000);

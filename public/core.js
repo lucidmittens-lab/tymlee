@@ -1329,6 +1329,33 @@
     return { entries: out, errors };
   }
 
+  // ---- full backups ------------------------------------------------------------
+  // Everything in one JSON file: entries (with their IDs), records (forms,
+  // answers, to-dos, checklists, trash) and settings. Restoring adds what's
+  // missing and keeps what's there.
+
+  function makeFullBackup({ entries, records, settings, now }) {
+    return `${JSON.stringify({ tymlee: 'backup', format: 1, app: VERSION, made: new Date(now).toISOString(), entries, records, settings }, null, 1)}\n`;
+  }
+
+  // The parsed backup, or null when the text isn't one.
+  function readFullBackup(text) {
+    const t = String(text || '').trim();
+    if (!t.startsWith('{')) return null;
+    try {
+      const b = JSON.parse(t);
+      if (!b || b.tymlee !== 'backup' || !Array.isArray(b.entries)) return null;
+      return {
+        made: b.made || '',
+        entries: b.entries.filter((e) => e && typeof e.id === 'string' && typeof e.ts === 'number' && typeof e.text === 'string').map((e) => makeEntry(e)),
+        records: (Array.isArray(b.records) ? b.records : []).filter((r) => r && typeof r.id === 'string' && typeof r.kind === 'string' && r.body),
+        settings: b.settings && typeof b.settings === 'object' ? b.settings : {},
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Backup entries that are not already in the log, as new entries. Matching
   // is by start minute and text, so restoring the same backup twice is harmless.
   function mergeBackup(existing, backup) {
@@ -1420,7 +1447,7 @@
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
     MAX_FILES, joinFiles, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
-    parseBackup, mergeBackup,
+    parseBackup, mergeBackup, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

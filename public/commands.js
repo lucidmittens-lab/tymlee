@@ -523,6 +523,50 @@
       return lines.join('\n');
     }
 
+    // ---- full backups --------------------------------------------------------------
+
+    const BACKUP_KEY = 'tymlee.lastBackup';
+    const BACKUP_EVERY_DAYS = 7;
+
+    function lastBackup() {
+      try { return Number(io.storage.getItem(BACKUP_KEY)) || 0; } catch (_) { return 0; }
+    }
+
+    async function saveFullBackup() {
+      const now = Date.now();
+      const body = T.makeFullBackup({ entries: store.entries, records: store.allRecords(), settings: store.settings, now });
+      const where = await io.save(`tymlee-backup-${T.ymd(now)}.json`, body, 'application/json');
+      try { io.storage.setItem(BACKUP_KEY, String(now)); } catch (_) { /* no reminder memory */ }
+      const counts = store.allRecords().reduce((m, r) => ({ ...m, [r.kind]: (m[r.kind] || 0) + 1 }), {});
+      const parts = [plural(shown().length, 'entry', 'entries')];
+      if (counts.form) parts.push(plural(counts.form, 'form', 'forms'));
+      if (counts.todo) parts.push(plural(counts.todo, 'to-do', 'to-dos'));
+      if (counts.checklist || counts.checkrun) parts.push(plural((counts.checklist || 0) + (counts.checkrun || 0), 'checklist', 'checklists'));
+      print(`full backup saved: ${where} (${parts.join(', ')}, settings) · /restore reads it back`, 'ok');
+    }
+
+    function restoreFull(b) {
+      const have = new Set(store.entries.map((e) => e.id));
+      const fresh = b.entries.filter((e) => !have.has(e.id));
+      store.apply(fresh.map((entry) => ({ op: 'put', entry })));
+      const recs = store.importRecords(b.records);
+      const before = JSON.stringify(store.settings);
+      const merged = T.mergeSettings(store.settings, b.settings);
+      if (JSON.stringify(merged) !== before) store.setSettings(merged);
+      const skipped = b.entries.length - fresh.length;
+      print(`restored from the full backup${b.made ? ` of ${b.made.slice(0, 10)}` : ''}: ${plural(fresh.filter((e) => !T.isLink(e)).length, 'entry', 'entries')}, ${plural(recs, 'item', 'items')} (forms, to-dos, checklists…)${skipped ? ` · ${skipped} already here` : ''}`, 'ok');
+    }
+
+    // Things worth knowing when the app opens.
+    function startupNotices() {
+      const out = [];
+      const days = (Date.now() - lastBackup()) / 86400000;
+      if (shown().length >= 20 && days > BACKUP_EVERY_DAYS) {
+        out.push(lastBackup() ? `your last full backup was ${Math.floor(days)} days ago · /backup saves one` : 'no full backup on this device yet · /backup saves one (entries, forms, to-dos, checklists, settings)');
+      }
+      return out;
+    }
+
     // Deleted entries, newest deletion first (store.js keeps them 30 days).
     const trashed = () => store.listRecords('trash').filter((t) => t.entry && t.entry.id);
 
@@ -1186,6 +1230,9 @@
             if (busy()) return;
             text = got;
           }
+          // A full backup (/backup) goes straight back: nothing to edit.
+          const full = T.readFullBackup(text);
+          if (full) return restoreFull(full);
           print(inline
             ? 'restoring from a backup · /save to add the entries, /cancel to discard'
             : 'restoring from a backup in your editor…', 'dim');
@@ -1367,6 +1414,11 @@
           store.deleteRecords([run.id]);
           print(`deleted ${run.tag} ${run.title}`, 'ok');
         },
+      },
+      backup: {
+        usage: '/backup',
+        about: 'save everything in one file: entries, forms, to-dos, checklists, settings (/restore reads it)',
+        async run() { await saveFullBackup(); },
       },
       trash: {
         usage: '/trash',
@@ -1553,6 +1605,7 @@
       applyClock,
       setClock,
       formNames: () => Object.keys(forms()).sort(),
+      startupNotices,
       // For the GUI's checklists.
       checklistNames: () => Object.keys(templates()).sort(),
       checkRuns: () => runs(),

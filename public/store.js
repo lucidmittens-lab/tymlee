@@ -1161,6 +1161,22 @@
       listRecords,
       putRecord,
       deleteRecords,
+      // For full backups: every record as stored, and adding back missing ones.
+      allRecords: () => records.filter((r) => !r.deleted).map((r) => ({ id: r.id, kind: r.kind, body: r.body, at: r.at })),
+      importRecords(list) {
+        const have = new Set(records.map((r) => r.id));
+        const fresh = list.filter((r) => !have.has(r.id));
+        for (const r of fresh) {
+          records.push({ id: r.id, kind: r.kind, body: r.body, at: r.at || Date.now() });
+          touchRecord(r.id);
+        }
+        if (fresh.length) {
+          persistRecords();
+          onChange();
+          if (user) schedule(syncRecords);
+        }
+        return fresh.length;
+      },
       get user() { return user; },
       get pending() { return queue.length; },
       get status() { return status; },

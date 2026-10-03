@@ -10,6 +10,7 @@
   // scrolls rather than turning into slivers, nor stretched above the other.
   const FIT_MIN_PX = 0.4;
   const FIT_MAX_PX = 6;
+  const FIT_SPARE = 56; // px at least below the last moment (the zoom buttons sit there)
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -63,7 +64,9 @@
   //   fit(top)  the height (px) the hours may take below `top`, the bar; set,
   //             a day or week is scaled to it: from its first entry to its
   //             last moment plus 10%, rather than whole hours at a fixed size
-  function render({ store, range, mode = 'day', onSelect, onDay, header, fit }) {
+  //   zoom()    how many times taller than the fit to draw (1: fits; more:
+  //             the timeline scrolls)
+  function render({ store, range, mode = 'day', onSelect, onDay, header, fit, zoom }) {
     const rootEl = el('div', `tl tl-mode-${mode}`);
     rootEl.setAttribute('role', 'group');
     const tip = el('div', 'tl-tip');
@@ -137,8 +140,12 @@
         const span = Math.max(30, last - first);
         axisFrom = first;
         axisTo = first + span * 1.1;
-        px = Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, room / (axisTo - axisFrom)));
-        if (px * (axisTo - axisFrom) < room) axisTo = axisFrom + room / px; // stretched to the max: fill the rest
+        // 10% to spare below the last moment, and never less than the room
+        // the zoom buttons take in the corner.
+        px = Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, Math.min(room / (span * 1.1), (room - FIT_SPARE) / span)));
+        const z = zoom ? zoom() : 1;
+        if (z > 1) px *= z;
+        else if (px * (axisTo - axisFrom) < room) axisTo = axisFrom + room / px; // stretched to the max: fill the rest
       }
       const height = (axisTo - axisFrom) * px;
       // An hour label every hour, or every 2 or 3 when hours are short.

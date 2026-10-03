@@ -39,6 +39,8 @@
     down: '<path d="M7 10l5 5 5-5"/>',
     left: '<path d="M15 6l-6 6 6 6"/>',
     right: '<path d="M9 6l6 6-6 6"/>',
+    minus: '<path d="M6 12h12"/>',
+    plus: '<path d="M12 6v12M6 12h12"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   };
   function icon(name) {
@@ -662,6 +664,34 @@
       });
     }
 
+    // Accent colors: a swatch each, and any color from the system picker.
+    // Saved with the account's settings, so every device gets it.
+    function accentSheet() {
+      const current = (store.settings && store.settings.accent) || T.DEFAULT_ACCENT;
+      const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const grid = el('div', 'gaccent');
+      const pick = async (value) => {
+        await opts.run(`/accent ${value}`);
+        accentSheet();
+      };
+      for (const name of Object.keys(T.ACCENTS)) {
+        const c = T.accentColors(name);
+        const b = button('', `gaccent-swatch${name === current ? ' on' : ''}`, () => pick(name), name);
+        b.style.setProperty('--sw', dark ? c.dark.accent : c.light.accent);
+        b.append(el('span', 'gaccent-dot'), el('span', null, name));
+        grid.append(b);
+      }
+      const custom = el('label', `gaccent-swatch gaccent-custom${current.startsWith('#') ? ' on' : ''}`);
+      const input = el('input');
+      input.type = 'color';
+      input.value = current.startsWith('#') ? current : T.accentColors(current).light.accent;
+      input.addEventListener('change', () => pick(input.value));
+      custom.append(input, el('span', null, current.startsWith('#') ? current : 'Custom…'));
+      grid.append(custom);
+      const reset = el('p', 'gform-intro', 'Saved with your settings, so it follows you to every device. Light and dark screens each get a shade that reads well.');
+      sheet('Accent color', grid, reset);
+    }
+
     function findForm() {
       form('Find', {
         intro: 'Searches entry text, notes, file paths, work orders, equipment and to-dos.',
@@ -792,6 +822,7 @@
           ['Hybrid', () => opts.setView('gui')],
           ['Help', () => runMenu('Help', '/help')],
           ['Keyboard shortcuts', () => showShortcuts()],
+          ['Accent color', () => accentSheet()],
         ]],
       ];
     }
@@ -806,11 +837,16 @@
     }
 
     // The menu: a few things used most often on top, then sections that
-    // open and close (which ones are open is remembered on this device).
-    const OPEN_KEY = 'tymlee.menuOpen';
-    function openSections() {
-      try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY)) || ['To-do']); } catch (_) { return new Set(['To-do']); }
+    // open one at a time (the one left open is remembered on this device).
+    const OPEN_KEY = 'tymlee.menuSection';
+    function openSection() {
+      try { return localStorage.getItem(OPEN_KEY) ?? 'To-do'; } catch (_) { return 'To-do'; }
     }
+    function setOpen({ wrap, head }, on) {
+      wrap.classList.toggle('open', on);
+      head.setAttribute('aria-expanded', String(on));
+    }
+
     function openMenu() {
       const list = el('div', 'gmenu');
       const quick = el('div', 'gmenu-quick');
@@ -827,23 +863,23 @@
         quick.append(b);
       }
       list.append(quick);
-      const open = openSections();
+      const open = openSection();
+      const groups = [];
       for (const [section, items] of menuItems()) {
+        const wrap = el('div', 'gmenu-group');
         const head = button('', 'gmenu-section', () => {
           const now = !wrap.classList.contains('open');
-          wrap.classList.toggle('open', now);
-          head.setAttribute('aria-expanded', String(now));
-          const set = openSections();
-          if (now) set.add(section); else set.delete(section);
-          try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch (_) { /* fine */ }
+          for (const g of groups) setOpen(g, false);
+          setOpen({ wrap, head }, now);
+          try { localStorage.setItem(OPEN_KEY, now ? section : ''); } catch (_) { /* fine */ }
         });
         head.append(el('span', null, section), icon('down'));
-        const wrap = el('div', `gmenu-group${open.has(section) ? ' open' : ''}`);
-        head.setAttribute('aria-expanded', String(open.has(section)));
         const body = el('div', 'gmenu-items');
         for (const [label, action] of items) body.append(button(label, 'gmenu-item', go(action)));
         wrap.append(head, body);
         list.append(wrap);
+        groups.push({ wrap, head });
+        setOpen({ wrap, head }, section === open);
       }
       const about = el('div', 'gmenu-about');
       const { version, build, repo } = opts.about;

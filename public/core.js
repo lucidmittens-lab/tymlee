@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.7.0';
+  const VERSION = '1.7.1';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -414,6 +414,61 @@
     if (due === today) return { text: 'due today', late: false, soon: true };
     if (due === ymd(addDays(startOfDay(now), 1))) return { text: 'due tomorrow', late: false, soon: false };
     return { text: `due ${day}`, late: false, soon: false };
+  }
+
+  // ---- accent colors -------------------------------------------------------------
+  // The accent the website uses (buttons, the running card, highlights): a
+  // named one, each stepped for light and dark screens, or any #rrggbb (its
+  // dark-screen step is mixed lighter). Text on it is white or near black,
+  // whichever reads better.
+  const ACCENTS = {
+    indigo: ['#4f46e5', '#8b8cf8'],
+    blue: ['#2563eb', '#60a5fa'],
+    teal: ['#0f766e', '#2dd4bf'],
+    green: ['#15803d', '#4ade80'],
+    amber: ['#b45309', '#fbbf24'],
+    rose: ['#e11d48', '#fb7185'],
+    violet: ['#7c3aed', '#a78bfa'],
+    slate: ['#475569', '#94a3b8'],
+  };
+  const DEFAULT_ACCENT = 'indigo';
+
+  function hexRgb(hex) {
+    const m = String(hex).match(/^#?([0-9a-f]{6})$/i);
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const rgbHex = (rgb) => `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+  // WCAG relative luminance.
+  function luminance(rgb) {
+    const [r, g, b] = rgb.map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  function textOn(rgb) {
+    const l = luminance(rgb);
+    return contrast(l, 1) >= contrast(l, luminance([17, 19, 24])) ? '#ffffff' : '#111318';
+  }
+
+  // "teal", "#0a7d4f" or "" (the default) -> { name, light: { accent, on },
+  // dark: { accent, on } }, or null when it isn't a color.
+  function accentColors(value) {
+    const v = String(value || DEFAULT_ACCENT).trim().toLowerCase();
+    let pair = ACCENTS[v];
+    let name = v;
+    if (!pair) {
+      const rgb = hexRgb(v);
+      if (!rgb) return null;
+      name = rgbHex(rgb);
+      const lighter = rgb.map((c) => c + (255 - c) * 0.35);
+      pair = [name, rgbHex(lighter)];
+    }
+    const step = (hex) => ({ accent: hex, on: textOn(hexRgb(hex)) });
+    return { name, light: step(pair[0]), dark: step(pair[1]) };
   }
 
   // ---- report --------------------------------------------------------------
@@ -1520,7 +1575,7 @@
   const api = {
     parseInput, knownCategories, suggest, withSpans, summarize,
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
-    parseRange, parseDue, dueLabel, formatReport, toCSV,
+    parseRange, parseDue, dueLabel, ACCENTS, DEFAULT_ACCENT, accentColors, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
     formatEditable, parseEditable,
     VERSION, REPO_URL,

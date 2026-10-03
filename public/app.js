@@ -392,11 +392,89 @@
       header: (days) => guiBar(range, days),
       // A day or week fills the space between the bar and the controls.
       fit: mode === 'month' ? null : fitTimeline,
+      zoom: () => zoom,
     });
     if (slide) guiTimeline.el.classList.add(`tl-slide-${slide}`);
-    guiEl.replaceChildren(guiTimeline.el);
+    guiEl.replaceChildren(guiTimeline.el, ...(mode === 'month' ? [] : [zoomBar.el]));
+    zoomBar.sync();
     if (mode !== 'month') guiTimeline.refresh(); // measured now that it's on the page
   }
+
+  // ---- zoom ------------------------------------------------------------------
+  // 1 fits the day (or week) to the screen; up to 8 times taller, scrolling.
+  // A slider in the corner (−, +, Fit), Ctrl+scroll, or a pinch on a phone.
+  // Kept per device.
+  const ZOOM_KEY = 'tymlee.zoom';
+  const ZOOM_MAX = 8;
+  let zoom = 1;
+  try { zoom = Math.min(ZOOM_MAX, Math.max(1, Number(localStorage.getItem(ZOOM_KEY)) || 1)); } catch (_) { /* fine */ }
+  const toSlider = (z) => Math.round((Math.log(z) / Math.log(ZOOM_MAX)) * 100);
+  const fromSlider = (v) => Math.exp((v / 100) * Math.log(ZOOM_MAX));
+
+  let zoomFrame = 0;
+  function setZoom(z) {
+    z = Math.min(ZOOM_MAX, Math.max(1, z));
+    if (Math.abs(z - zoom) < 0.01) return;
+    // Keep the middle of what's showing in the middle.
+    const mid = guiEl.scrollHeight ? (guiEl.scrollTop + guiEl.clientHeight / 2) / guiEl.scrollHeight : 0;
+    zoom = z;
+    try { localStorage.setItem(ZOOM_KEY, String(Math.round(z * 100) / 100)); } catch (_) { /* fine */ }
+    zoomBar.sync();
+    cancelAnimationFrame(zoomFrame);
+    zoomFrame = requestAnimationFrame(() => {
+      if (!guiTimeline) return;
+      guiTimeline.refresh();
+      guiEl.scrollTop = mid * guiEl.scrollHeight - guiEl.clientHeight / 2;
+    });
+  }
+
+  const zoomBar = (() => {
+    const wrap = document.createElement('div');
+    wrap.className = 'gui-zoom-wrap';
+    const box = document.createElement('div');
+    box.className = 'gui-zoom';
+    const out = guiButton([window.TymleeGui.icon('minus')], () => setZoom(zoom / 1.5), { title: 'Zoom out', cls: 'gz-btn' });
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.className = 'gz-slider';
+    slider.setAttribute('aria-label', 'Zoom');
+    slider.addEventListener('input', () => setZoom(fromSlider(Number(slider.value))));
+    const inn = guiButton([window.TymleeGui.icon('plus')], () => setZoom(zoom * 1.5), { title: 'Zoom in', cls: 'gz-btn' });
+    const fitBtn = guiButton('Fit', () => setZoom(1), { title: 'Fit the day to the screen', cls: 'gz-fit' });
+    box.append(out, slider, inn, fitBtn);
+    wrap.append(box);
+    return {
+      el: wrap,
+      sync() {
+        slider.value = String(toSlider(zoom));
+        out.disabled = zoom <= 1;
+        inn.disabled = zoom >= ZOOM_MAX;
+        fitBtn.hidden = zoom <= 1;
+        box.classList.toggle('zoomed', zoom > 1);
+      },
+    };
+  })();
+
+  // Ctrl (or Cmd) + scroll, and trackpad pinches (which arrive as that).
+  guiEl.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || !guiTimeline) return;
+    e.preventDefault();
+    setZoom(zoom * Math.exp(-e.deltaY / 300));
+  }, { passive: false });
+  // Two fingers on a phone.
+  (function pinch() {
+    let start = null;
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    guiEl.addEventListener('touchstart', (e) => { start = e.touches.length === 2 ? { d: dist(e.touches), z: zoom } : null; }, { passive: true });
+    guiEl.addEventListener('touchmove', (e) => {
+      if (!start || e.touches.length !== 2) return;
+      e.preventDefault();
+      setZoom(start.z * (dist(e.touches) / start.d));
+    }, { passive: false });
+    guiEl.addEventListener('touchend', () => { start = null; }, { passive: true });
+  })();
 
   // The height the hours can take: from below the bar to the bottom of the
   // GUI's area, less its padding. 0 when it isn't on screen to measure.
@@ -1343,7 +1421,24 @@
 
   let lastStatusHeight = '';
 
+  // The accent color from the account's settings (/accent): a small style
+  // sheet that sets it for light and dark screens. Without one, style.css's.
+  const accentStyle = document.createElement('style');
+  document.head.append(accentStyle);
+  let accentShown = null;
+  function applyAccent() {
+    const want = (store.settings && store.settings.accent) || '';
+    if (want === accentShown) return;
+    accentShown = want;
+    const c = want ? T.accentColors(want) : null;
+    accentStyle.textContent = c ? [
+      `:root { --accent: ${c.light.accent}; --on-accent: ${c.light.on}; }`,
+      `@media (prefers-color-scheme: dark) { :root { --accent: ${c.dark.accent}; --on-accent: ${c.dark.on}; } }`,
+    ].join('\n') : '';
+  }
+
   function renderStatus() {
+    applyAccent();
     const st = shell.status(Date.now());
     const left = span('now', '');
     let today = null;

@@ -1620,6 +1620,24 @@
           print(`clock: ${arg}-hour, e.g. ${T.clock(Date.now())}`, 'ok');
         },
       },
+      accent: {
+        usage: '/accent [color]',
+        about: `the website's accent color: ${Object.keys(T.ACCENTS).join(', ')}, any #rrggbb, or default`,
+        run(args) {
+          const arg = (args[0] || '').toLowerCase();
+          const names = Object.keys(T.ACCENTS).join(', ');
+          if (!arg) return print(`accent: ${store.settings.accent || T.DEFAULT_ACCENT} · choose from ${names}, or any #rrggbb`, 'ok');
+          if (arg === 'default' || arg === T.DEFAULT_ACCENT) {
+            const { accent, ...rest } = store.settings;
+            store.setSettings(rest);
+            return print(`accent: ${T.DEFAULT_ACCENT} (the default)`, 'ok');
+          }
+          const c = T.accentColors(arg.startsWith('#') || /^[0-9a-f]{6}$/.test(arg) ? `#${arg.replace(/^#/, '')}` : arg);
+          if (!c) return print(`"${args[0]}" is not a color · try ${names}, or #rrggbb like #0a7d4f`, 'err');
+          store.setSettings({ ...store.settings, accent: c.name });
+          print(`accent: ${c.name}${io.place === 'this browser' || !io.place ? '' : ' (shows on the website)'}`, 'ok');
+        },
+      },
       clear: {
         usage: '/clear',
         about: 'clear the screen (the log is kept)',
@@ -1640,7 +1658,7 @@
       ['pay', 'Pay', ['rate', 'overtime'], ['rate', 'otmin', 'otrate']],
       ['backup', 'Backup', ['restore', 'import'], ['backup', 'restore', 'import', 'save']],
       ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
-      ['more', 'More', ['other', 'display', 'view'], []],
+      ['more', 'More', ['other', 'display', 'view'], ['clock', 'accent']],
     ];
     function helpGroups() {
       const placed = new Set();

@@ -73,7 +73,7 @@
     let composing = false;
     let state = null; // the last status from update()
 
-    const menuBtn = button('', 'sb-menu', () => openMenu(), 'Menu');
+    const menuBtn = button('', 'sb-menu', () => openMenu(), 'Menu (? lists the keyboard shortcuts)');
     menuBtn.append(icon('menu'));
     // The card: what's running and for how long.
     const card = el('div', 'sb-card');
@@ -113,11 +113,11 @@
     };
     const startBtn = withIcon('play', 'Start', 'sb-start', () => start(), 'Start this entry (Enter)');
     const cancelBtn = withIcon('x', 'Cancel', 'sb-cancel', () => setComposing(false), 'Keep what is running (Esc)');
-    const resumeBtn = withIcon('back', 'Resume', 'sb-resume', () => resume(), 'Start the last task again');
-    const backBtn = withIcon('back', 'Back to work', 'sb-back', () => resume(), 'End the break and start the last task again');
-    const newBtn = withIcon('swap', 'New task', 'sb-new', () => setComposing(true), 'Start something else (ends what is running)');
-    const doneBtn = withIcon('check', 'Done', 'sb-done', () => opts.run('/done'), 'Mark the to-do done (the timer keeps going)');
-    const offBtn = withIcon('stop', 'Off', 'sb-off', () => off(), 'Clock out (/off)');
+    const resumeBtn = withIcon('back', 'Resume', 'sb-resume', () => resume(), 'Start the last task again (R)');
+    const backBtn = withIcon('back', 'Back to work', 'sb-back', () => resume(), 'End the break and start the last task again (R)');
+    const newBtn = withIcon('swap', 'New task', 'sb-new', () => setComposing(true), 'Start something else, which ends what is running (N)');
+    const doneBtn = withIcon('check', 'Done', 'sb-done', () => opts.run('/done'), 'Mark the to-do done; the timer keeps going (D)');
+    const offBtn = withIcon('stop', 'Off', 'sb-off', () => off(), 'Clock out (O)');
     // Breaks: each ends when the next entry starts. Phones show both; wide
     // screens one Break button (the kind used last) with ▾ for the other.
     const paidBtn = withIcon('cup', 'Paid', 'sb-break sb-paid', () => takeBreak('paid'), 'Paid break: counts toward hours and pay (/break-paid)');
@@ -170,6 +170,22 @@
     async function resume() {
       if (!state || !state.last) return;
       await opts.run(state.last, { undo: true });
+      flashStarted();
+    }
+
+    // "✓ Started" on the main button for a moment after something starts.
+    let flashTimer = null;
+    function flashStarted() {
+      const label = newBtn.querySelector('.sb-label');
+      clearTimeout(flashTimer);
+      newBtn.classList.add('sb-flash');
+      label.textContent = 'Started';
+      newBtn.replaceChild(icon('check'), newBtn.firstChild);
+      flashTimer = setTimeout(() => {
+        newBtn.classList.remove('sb-flash');
+        label.textContent = 'New task';
+        newBtn.replaceChild(icon('swap'), newBtn.firstChild);
+      }, 1200);
     }
 
     // Category suggestions: known categories, most recent first, matching
@@ -235,6 +251,7 @@
       composing = false;
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); // phones: keyboard away
       await opts.run(t ? `${c} ${t}` : c, { undo: true });
+      flashStarted();
     }
 
     function off() {
@@ -275,17 +292,60 @@
       const next = lastBreak();
       breakBtn.querySelector('.sb-label').textContent = onBreak ? `${st.brk === 'paid' ? 'Paid' : 'Unpaid'} break` : 'Break';
       breakBtn.disabled = onBreak;
-      breakBtn.title = onBreak ? 'On a break' : `${next === 'paid' ? 'Paid' : 'Unpaid'} break (▾ for the other kind)`;
+      breakBtn.title = onBreak ? 'On a break (Shift+B switches kind)' : `${next === 'paid' ? 'Paid' : 'Unpaid'} break (B; Shift+B for ${next === 'paid' ? 'unpaid' : 'paid'})`;
       breakBtn.replaceChild(icon(onBreak ? (st.brk === 'paid' ? 'cup' : 'pause') : next === 'paid' ? 'cup' : 'pause'), breakBtn.firstChild);
       for (const b of breakMenu.children) b.disabled = b.dataset.kind === st.brk;
       resumeBtn.disabled = !st.last;
-      resumeBtn.title = st.last ? `Start again: ${st.last}` : 'Nothing to resume yet';
-      backBtn.title = st.last ? `Back to: ${st.last}` : 'End the break';
+      resumeBtn.title = st.last ? `Start again: ${st.last} (R)` : 'Nothing to resume yet';
+      backBtn.title = st.last ? `Back to: ${st.last} (R)` : 'End the break';
       startBtn.querySelector('.sb-label').textContent = mode === 'compose' ? 'Switch' : 'Start';
+      startBtn.title = mode === 'compose' ? 'End what is running and start this (Enter)' : 'Start this entry (Enter)';
       startBtn.replaceChild(icon(mode === 'compose' ? 'swap' : 'play'), startBtn.firstChild);
       const dockH = `${dockEl.offsetHeight}px`;
       if (appEl.style.getPropertyValue('--dock-h') !== dockH) appEl.style.setProperty('--dock-h', dockH);
     }
+
+    // ---- keyboard shortcuts ------------------------------------------------------
+    // Single keys, in the GUI view, when not typing in a field and nothing is
+    // open over the timeline. Each button's tooltip names its key.
+    const SHORTCUTS = [
+      ['N', 'New task (or the fields, when nothing runs)'],
+      ['B', 'Break, the kind used last'],
+      ['Shift+B', 'Break, the other kind'],
+      ['O', 'Off'],
+      ['D', 'Done: the to-do being worked on'],
+      ['R', 'Resume, or back to work after a break'],
+      ['/', 'Find'],
+      ['?', 'This list'],
+      ['Enter / Esc', 'In the fields: start / cancel'],
+      ['Ctrl+Z', 'Undo'],
+    ];
+    function showShortcuts() {
+      const list = el('div', 'gkeys');
+      for (const [k, what] of SHORTCUTS) list.append(el('kbd', null, k), el('span', null, what));
+      sheet('Keyboard shortcuts', list);
+    }
+    document.addEventListener('keydown', (e) => {
+      if (!active || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('input, textarea, select, [contenteditable], .entry-card')) return;
+      if (sheetEl || document.querySelector('.entry-card')) return;
+      const k = e.key;
+      const mode = bar.dataset.mode;
+      const visible = (b) => b.offsetParent !== null && !b.disabled;
+      let act = null;
+      if (k === 'n' || k === 'N') act = () => (mode === 'idle' ? cat.focus() : visible(newBtn) && setComposing(true));
+      else if (k === 'b' && (mode === 'running' || mode === 'break')) act = () => takeBreak(state && state.brk === lastBreak() ? (lastBreak() === 'paid' ? 'unpaid' : 'paid') : lastBreak());
+      else if (k === 'B' && (mode === 'running' || mode === 'break')) act = () => takeBreak(lastBreak() === 'paid' ? 'unpaid' : 'paid');
+      else if ((k === 'o' || k === 'O') && visible(offBtn)) act = () => off();
+      else if ((k === 'd' || k === 'D') && state && state.todo) act = () => opts.run('/done');
+      else if ((k === 'r' || k === 'R') && (visible(resumeBtn) || visible(backBtn))) act = () => resume();
+      else if (k === '/') act = () => findForm();
+      else if (k === '?') act = () => showShortcuts();
+      if (!act) return;
+      e.preventDefault();
+      act();
+    });
 
     // ---- toasts --------------------------------------------------------------
 
@@ -293,14 +353,28 @@
     toasts.setAttribute('aria-live', 'polite');
     appEl.append(toasts);
 
+    // A toast with an action (Undo) stays 8 seconds, with a line counting
+    // down; pointing at it pauses the count. Others go after 4 (errors 6).
     function toast(text, cls = '', action) {
       const t = el('div', `toast ${cls}`);
       t.append(el('span', null, text));
-      if (action) t.append(button(action.label, 'toast-action', () => { t.remove(); action.run(); }));
+      const leave = () => {
+        t.classList.add('out');
+        setTimeout(() => t.remove(), 400);
+      };
+      if (action) {
+        t.classList.add('has-action');
+        t.append(button(action.label, 'toast-action', () => { t.remove(); action.run(); }));
+        const timer = el('span', 'toast-timer');
+        const fill = el('i');
+        timer.append(fill);
+        fill.addEventListener('animationend', leave);
+        t.append(timer);
+      } else {
+        setTimeout(leave, cls.includes('err') ? 6000 : 4000);
+      }
       toasts.append(t);
       while (toasts.children.length > 3) toasts.firstChild.remove();
-      setTimeout(() => t.classList.add('out'), cls.includes('err') ? 6000 : 4000);
-      setTimeout(() => t.remove(), cls.includes('err') ? 6400 : 4400);
     }
 
     // ---- sheets --------------------------------------------------------------
@@ -588,6 +662,13 @@
       });
     }
 
+    function findForm() {
+      form('Find', {
+        intro: 'Searches entry text, notes, file paths, work orders, equipment and to-dos.',
+        fields: [{ name: 'q', label: 'Words', placeholder: 'stems label' }], submit: 'Find',
+      }, (v) => v.q && runMenu('Find', `/find ${v.q}`));
+    }
+
     function menuItems() {
       const signedIn = Boolean(store.user);
       const enc = store.encryption;
@@ -603,10 +684,7 @@
           ['Edit entries', () => opts.openCli('/edit')],
         ]],
         ['Search', [
-          ['Find', () => form('Find', {
-            intro: 'Searches entry text, notes, file paths, work orders, equipment and to-dos.',
-            fields: [{ name: 'q', label: 'Words', placeholder: 'stems label' }], submit: 'Find',
-          }, (v) => v.q && runMenu('Find', `/find ${v.q}`))],
+          ['Find', () => findForm()],
         ]],
         ['Reports', [
           ['Log', () => show('Log', '/log')],
@@ -713,6 +791,7 @@
           ['CLI', () => opts.setView('cli')],
           ['Hybrid', () => opts.setView('gui')],
           ['Help', () => runMenu('Help', '/help')],
+          ['Keyboard shortcuts', () => showShortcuts()],
         ]],
       ];
     }
@@ -739,7 +818,7 @@
       const go = (fn) => () => { closeSheet(); setTimeout(fn, 170); };
       for (const [label, ico, fn, badge] of [
         ['To-do', 'check', () => todoSheet(), due ? `${due} due` : ''],
-        ['Find', 'search', () => menuItems().find(([n]) => n === 'Search')[1][0][1](), ''],
+        ['Find', 'search', () => findForm(), ''],
         ['Undo', 'back', () => runMenu('Undo', '/undo'), ''],
       ]) {
         const b = button('', 'gmenu-tile', go(fn), label);

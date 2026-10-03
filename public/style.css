@@ -1014,6 +1014,7 @@ button.gui-day {
 .icon svg { width: 16px; height: 16px; }
 .startbar button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; }
 .sb-menu { width: 38px; padding: 0 !important; }
+.startbar .sb-new.sb-flash { background: color-mix(in srgb, var(--s3) 85%, var(--fg)); border-color: transparent; color: #fff; transition: background-color 0.2s; }
 .sb-cancel { background: transparent !important; border-color: transparent !important; box-shadow: none !important; color: var(--muted) !important; }
 .sb-cancel:hover { color: var(--fg) !important; }
 .sb-break.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); opacity: 1; }
@@ -1106,6 +1107,12 @@ button.gui-day {
 /* With a sheet open, toasts show at the top, over it. */
 #app:has(.gsheet-wrap) .toasts { bottom: auto; top: calc(env(safe-area-inset-top) + 12px); z-index: 40; }
 .toast.out { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
+/* Undo toasts: a line counting down 8 seconds; pointing at it pauses. */
+.toast.has-action { position: relative; padding-bottom: 11px; overflow: hidden; }
+.toast-timer { position: absolute; left: 14px; right: 14px; bottom: 5px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--bg) 25%, transparent); overflow: hidden; }
+.toast-timer i { display: block; height: 100%; background: var(--bg); transform-origin: left; animation: toast-count 8s linear forwards; }
+.toast:hover .toast-timer i { animation-play-state: paused; }
+@keyframes toast-count { to { transform: scaleX(0); } }
 .toast-action { border: 0; background: transparent; color: inherit; text-decoration: underline; padding: 0; font-weight: 600; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -1202,6 +1209,8 @@ button.gui-day {
   color: var(--fg);
 }
 .gmenu-item:hover { background: var(--accent-bg); color: var(--accent); }
+.gkeys { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center; }
+.gkeys kbd { justify-self: start; font: 600 12px var(--mono); padding: 2px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--bg); }
 .gmenu-about { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .gmenu-about a { color: var(--muted); }
 

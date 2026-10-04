@@ -61,6 +61,16 @@
 
 * { box-sizing: border-box; }
 
+/* Feel like an app, not a page: no grey flash on tap, no copy/share callout
+   on a long press, and no selecting the interface's own words. Entries,
+   reports and anything typed stay selectable. */
+html { -webkit-tap-highlight-color: transparent; }
+button, .startbar, #status, .tabbar, .gui-bar, .tl-top, .tl-hour, .tl-head, .tl-block, .gmenu, .gsheet-head, .sb-card, .gui-zoom, .toast {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -1321,3 +1331,98 @@ button.gui-day {
   .gsheet-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
   .gmenu-item { padding: 12px 10px; }
 }
+
+/* ---- the phone tab bar (gui.js) ----------------------------------------------- */
+.tabbar { display: none; }
+@media (max-width: 600px) {
+  #app.pure-mode #status { display: none; }
+  #app.pure-mode .tabbar:not([hidden]) {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 2px max(6px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(6px, env(safe-area-inset-left));
+    background: var(--card);
+    border-top: 1px solid var(--line);
+  }
+  .kb #app.pure-mode .tabbar, #app.pure-mode.kb .tabbar { display: none; }
+  .tab {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 7px 0 6px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .tab .icon svg { width: 22px; height: 22px; }
+  .tab[aria-current="true"] { color: var(--accent); }
+  .tab:active .icon { transform: scale(0.9); }
+  .tab-badge:empty { display: none; }
+  .tab-badge {
+    position: absolute;
+    top: 3px;
+    left: calc(50% + 6px);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--warn);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+  }
+  /* Sheets get a grip to pull them down by. */
+  .gsheet-grip { display: block; margin: 8px auto 0; }
+  .gsheet { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  /* The start bar's own menu button is the Menu tab now. */
+  #app.pure-mode .startbar .sb-menu { display: none !important; }
+  #app.pure-mode .startbar[data-mode="running"], #app.pure-mode .startbar[data-mode="running"][data-todo="0"] { grid-template-areas: "card card card card card card card" "done done paid paid paid unpaid unpaid" "off off new new new new new"; }
+  #app.pure-mode .startbar[data-mode="break"] { grid-template-areas: "card card card card card card card" "paid paid paid paid unpaid unpaid unpaid" "off off back back back back back"; }
+  #app.pure-mode .startbar[data-mode="compose"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "cancel cancel start start start start start"; }
+  #app.pure-mode .startbar[data-mode="idle"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "resume resume start start start start start"; }
+  #app.pure-mode .startbar { margin-bottom: 6px; }
+}
+.gsheet-grip { display: none; }
+
+/* Pull to sync: a strip that grows at the top of the timeline. */
+.pull-tip {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 0;
+  overflow: hidden;
+  padding-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  transition: height 0.2s;
+}
+.pull-tip.ready { color: var(--accent); }
+
+/* Safari on iPhone: how to add it to the Home Screen (once). */
+.home-hint {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: 12px;
+  right: 12px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.home-hint span { flex: 1; }
+.home-hint button { display: inline-flex; padding: 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }

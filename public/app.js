@@ -231,6 +231,8 @@
     appEl,
     dockEl: $('dock'),
     run: runLine,
+    // The Timeline tab: today, at the top of the view.
+    home: () => showUnit(guiUnit || 'day', 0),
     // /edit and /restore need the text box: the CLI view, then back.
     openCli(line) {
       setView('cli', { save: false });
@@ -267,7 +269,10 @@
   // `back` of them before the current one; or, with unit null, `guiRange`
   // (from /timeline <range>).
   const UNITS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
+  // Day, week or month: the one last chosen, on this device.
+  const UNIT_KEY = 'tymlee.unit';
   let guiUnit = 'day';
+  try { if (['day', 'week', 'month'].includes(localStorage.getItem(UNIT_KEY))) guiUnit = localStorage.getItem(UNIT_KEY); } catch (_) { /* default */ }
   let guiBack = 0;
   let guiRange = null;
   let guiTimeline = null;
@@ -308,6 +313,7 @@
   function showUnit(unit, back = 0) {
     guiUnit = unit;
     guiBack = back;
+    try { localStorage.setItem(UNIT_KEY, unit); } catch (_) { /* a per-device convenience */ }
     renderGui();
     scrollToNow();
   }
@@ -500,6 +506,40 @@
       const quick = Date.now() - start.t < 600;
       start = null;
       if (quick && Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
+
+  // Pull the timeline down from the top to sync (signed in) or just redraw.
+  (function pullToSync() {
+    const tip = document.createElement('div');
+    tip.className = 'pull-tip';
+    tip.setAttribute('aria-hidden', 'true');
+    let pull = null;
+    guiEl.addEventListener('touchstart', (e) => {
+      pull = e.touches.length === 1 && guiEl.scrollTop <= 0 && !e.target.closest('.entry-card, .gui-zoom')
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dy: 0 } : null;
+    }, { passive: true });
+    guiEl.addEventListener('touchmove', (e) => {
+      if (!pull || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - pull.x;
+      const dy = e.touches[0].clientY - pull.y;
+      if (!pull.dy && (dy <= 0 || Math.abs(dx) > Math.abs(dy))) { pull = null; return; }
+      pull.dy = Math.max(0, dy);
+      if (!tip.isConnected) guiEl.prepend(tip);
+      const h = Math.min(70, pull.dy * 0.5);
+      tip.style.height = `${h}px`;
+      tip.textContent = h >= 60 ? (store.user ? 'Release to sync' : 'Release to refresh') : (store.user ? 'Pull to sync' : 'Pull to refresh');
+      tip.classList.toggle('ready', h >= 60);
+    }, { passive: true });
+    guiEl.addEventListener('touchend', () => {
+      if (!pull) return;
+      const ready = tip.classList.contains('ready');
+      pull = null;
+      tip.style.height = '0px';
+      setTimeout(() => tip.remove(), 200);
+      if (!ready) return;
+      if (store.user) runLine('/sync');
+      else if (guiTimeline) { guiTimeline.refresh(); gui.toast('Up to date · this device only (sign in to sync)', 'dim'); }
     }, { passive: true });
   })();
 
@@ -1467,6 +1507,31 @@
   }
 
   // ---- boot ----------------------------------------------------------------
+
+  // In Safari on an iPhone or iPad (not opened from the Home Screen), a
+  // one-time hint on how to install it as an app.
+  (function homeScreenHint() {
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const installed = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    let seen = false;
+    try { seen = localStorage.getItem('tymlee.homeHint') === '1'; } catch (_) { /* show it */ }
+    if (!ios || installed || seen) return;
+    const hint = document.createElement('div');
+    hint.className = 'home-hint';
+    hint.setAttribute('role', 'note');
+    const text = document.createElement('span');
+    text.append('Use tymlee like an app: tap ', Object.assign(document.createElement('b'), { textContent: 'Share' }), ', then ', Object.assign(document.createElement('b'), { textContent: 'Add to Home Screen' }), '.');
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.append(window.TymleeGui.icon('x'));
+    close.addEventListener('click', () => {
+      hint.remove();
+      try { localStorage.setItem('tymlee.homeHint', '1'); } catch (_) { /* fine */ }
+    });
+    hint.append(text, close);
+    appEl.append(hint);
+  })();
 
   print('tymlee · type what you are starting and press Enter · /help for commands', 'dim');
   fitToViewport();

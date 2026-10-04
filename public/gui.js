@@ -40,6 +40,7 @@
     left: '<path d="M15 6l-6 6 6 6"/>',
     right: '<path d="M9 6l6 6-6 6"/>',
     minus: '<path d="M6 12h12"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   };
@@ -265,6 +266,7 @@
     function update(st) {
       state = st;
       if (!active) return;
+      updateTabs(st);
       const onBreak = Boolean(st.brk);
       const running = st.state === 'running' && !onBreak;
       if (!running && !onBreak) composing = false;
@@ -305,6 +307,39 @@
       startBtn.replaceChild(icon(mode === 'compose' ? 'swap' : 'play'), startBtn.firstChild);
       const dockH = `${dockEl.offsetHeight}px`;
       if (appEl.style.getPropertyValue('--dock-h') !== dockH) appEl.style.setProperty('--dock-h', dockH);
+    }
+
+    // ---- tab bar (phones) ----------------------------------------------------------
+    // On a phone the GUI view's bottom row is a tab bar, like an app's:
+    // Timeline (back to today, sheets closed), To-do, Find and Menu. The clock
+    // and view switches move into Menu → View.
+    const tabbar = el('nav', 'tabbar');
+    tabbar.setAttribute('aria-label', 'Sections');
+    tabbar.hidden = true;
+    const tabs = {};
+    for (const [key, label, ico, run] of [
+      ['timeline', 'Timeline', 'clock', () => { closeSheet(); opts.home(); }],
+      ['todo', 'To-do', 'check', () => todoSheet()],
+      ['find', 'Find', 'search', () => findForm()],
+      ['menu', 'Menu', 'menu', () => openMenu()],
+    ]) {
+      const b = button('', 'tab', run, label);
+      b.dataset.tab = key;
+      b.append(icon(ico), el('span', 'tab-label', label), el('span', 'tab-badge'));
+      tabs[key] = b;
+      tabbar.append(b);
+    }
+    dockEl.append(tabbar);
+    function markTab() {
+      const now = !sheetName ? 'timeline' : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : '';
+      for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
+    }
+    function updateTabs(st) {
+      const due = st.due || 0;
+      tabs.todo.querySelector('.tab-badge').textContent = due ? String(due) : '';
+      const bad = ['error', 'offline', 'locked'].includes(st.sync && st.sync.status);
+      tabs.menu.querySelector('.tab-badge').textContent = bad ? '!' : '';
+      tabs.menu.title = bad ? `Menu · ${st.sync.label}` : 'Menu';
     }
 
     // ---- keyboard shortcuts ------------------------------------------------------
@@ -384,10 +419,13 @@
     // screens. Closes with ✕, Esc or a tap outside.
 
     let sheetEl = null;
+    let sheetName = '';
     function closeSheet() {
       if (!sheetEl) return;
       const s = sheetEl;
       sheetEl = null;
+      sheetName = '';
+      markTab();
       s.classList.add('out');
       setTimeout(() => s.remove(), 160);
     }
@@ -403,13 +441,49 @@
       head.append(el('span', 'gsheet-title', heading), close);
       const body = el('div', 'gsheet-body');
       body.append(...content);
-      panel.append(head, body);
+      panel.append(el('div', 'sheet-grip gsheet-grip'), head, body);
       wrap.append(panel);
       wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) closeSheet(); });
       panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+      dragDown(panel, body, closeSheet);
       appEl.append(wrap);
       sheetEl = wrap;
+      sheetName = heading;
+      markTab();
       return panel;
+    }
+
+    // Phones: pull a sheet down to close it, from anywhere while its content
+    // is scrolled to the top. It follows the finger and springs back if not
+    // pulled far enough.
+    function dragDown(panel, body, close) {
+      let drag = null;
+      panel.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1 || body.scrollTop > 0 || e.target.closest('input, textarea, select')) return;
+        drag = { y: e.touches[0].clientY, t: Date.now(), dy: 0 };
+      }, { passive: true });
+      panel.addEventListener('touchmove', (e) => {
+        if (!drag) return;
+        const dy = e.touches[0].clientY - drag.y;
+        if (dy < 0 && !drag.dy) { drag = null; return; } // scrolling up: not a pull
+        drag.dy = Math.max(0, dy);
+        panel.style.transition = 'none';
+        panel.style.transform = `translateY(${drag.dy}px)`;
+        if (drag.dy > 4) e.preventDefault();
+      }, { passive: false });
+      panel.addEventListener('touchend', () => {
+        if (!drag) return;
+        const { dy, t } = drag;
+        drag = null;
+        panel.style.transition = '';
+        const fast = dy > 40 && dy / Math.max(1, Date.now() - t) > 0.5;
+        if (dy > 110 || fast) {
+          panel.style.transform = 'translateY(100%)';
+          close();
+        } else {
+          panel.style.transform = '';
+        }
+      });
     }
     // Printed output in a sheet; reports keep their columns when they wrap.
     function textSheet(heading, items) {
@@ -822,6 +896,7 @@
           ['Hybrid', () => opts.setView('gui')],
           ['Help', () => runMenu('Help', '/help')],
           ['Keyboard shortcuts', () => showShortcuts()],
+          [T.clockMode() === '12' ? '24-hour clock' : '12-hour clock', () => runMenu('Clock', `/clock ${T.clockMode() === '12' ? '24' : '12'}`)],
           ['Accent color', () => accentSheet()],
         ]],
       ];
@@ -896,11 +971,14 @@
       show() {
         active = true;
         bar.hidden = false;
+        tabbar.hidden = false;
+        markTab();
         if (state) update(state);
       },
       hide() {
         active = false;
         bar.hidden = true;
+        tabbar.hidden = true;
         closeSheet();
       },
       output,

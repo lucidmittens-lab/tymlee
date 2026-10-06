@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '1.8.0';
+  const VERSION = '1.8.1';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -145,12 +145,84 @@
     return String(notes).split('\n').map((l) => `${indent}> ${l}`.trimEnd());
   }
 
-  // File paths on an entry, one per line: shown under it as "@ path" lines,
-  // apart from notes so forms can use them on their own (%{files}).
+  // File paths on an entry. Kept as full paths, one per line. Typed and
+  // shown more compactly: a folder, then the names of files in it
+  //   /Volumes/Work/SP/ stems.zip mix_v7.wav
+  // (spaces or commas between them; "quotes" around a path with spaces).
   const MAX_FILES = 8000;
+
+  // Words of a line: split on spaces and commas, "quoted" parts kept whole.
+  function fileWords(line) {
+    const out = [];
+    const re = /"([^"]*)"|([^\s,"]+)/g;
+    let m;
+    while ((m = re.exec(line))) out.push(m[1] != null ? m[1] : m[2]);
+    return out.filter(Boolean);
+  }
+  const isPath = (w) => w.includes('/') || w.startsWith('~');
+  const quoteWord = (w) => (/[\s,"]/.test(w) ? `"${w.replace(/"/g, '')}"` : w);
+
+  // Typed or pasted file paths -> full paths. A path followed by plain
+  // names is their folder; a folder carries over to the next lines, so
+  //   /Volumes/Work/SP/      or   /Volumes/Work/SP/ stems.zip mix_v7.wav
+  //   stems.zip
+  //   mix_v7.wav
+  // both give /Volumes/Work/SP/stems.zip and /Volumes/Work/SP/mix_v7.wav.
+  function parseFiles(text) {
+    const out = [];
+    let folder = '';
+    let alone = ''; // a folder with no names after it yet: kept if none come
+    const name = (w) => {
+      out.push(folder ? folder + w : w);
+      alone = '';
+    };
+    for (const line of String(text || '').split('\n')) {
+      const words = fileWords(line);
+      words.forEach((w, i) => {
+        if (!isPath(w)) return name(w);
+        if (alone) out.push(alone);
+        alone = '';
+        const next = words[i + 1];
+        if (next && !isPath(next)) folder = w.endsWith('/') ? w : `${w}/`;
+        else if (!next && w.endsWith('/')) folder = alone = w;
+        else out.push(w);
+      });
+    }
+    if (alone) out.push(alone);
+    return [...new Set(out)];
+  }
+
+  // Full paths -> the compact form: paths in the same folder (next to each
+  // other) as "folder/ name name", others whole. One string per group.
+  function groupFiles(files) {
+    const paths = String(files || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const dir = (p) => (p.includes('/') && !p.endsWith('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+    const groups = [];
+    for (const p of paths) {
+      const d = dir(p);
+      const last = groups[groups.length - 1];
+      if (d && last && last.dir === d) last.names.push(p.slice(d.length));
+      else groups.push({ dir: d, path: p, names: d ? [p.slice(d.length)] : [] });
+    }
+    return groups.map((g) => (g.names.length > 1 ? [g.dir, ...g.names].map(quoteWord).join(' ') : quoteWord(g.path)));
+  }
+
+  // Shown under an entry as "@ " lines, apart from notes (forms use them on
+  // their own: %{files}).
   function filesLines(files, indent) {
     if (!files) return [];
-    return String(files).split('\n').map((l) => `${indent}@ ${l}`.trimEnd());
+    return groupFiles(files).map((g) => `${indent}@ ${g}`.trimEnd());
+  }
+
+  // For a form: a folder on its line, its files indented under it.
+  function filesList(files) {
+    const out = [];
+    for (const g of groupFiles(files)) {
+      const words = fileWords(g);
+      if (words.length > 1) out.push(words[0], ...words.slice(1).map((n) => `  ${n}`));
+      else out.push(words[0] || g);
+    }
+    return out.join('\n');
   }
 
   // "@ /a/path" -> "/a/path" (null if the line isn't a file line).
@@ -159,8 +231,8 @@
     return trimmed.slice(1).replace(/^ /, '');
   }
 
-  // Paths typed or pasted, one per line: trimmed, blank lines dropped.
-  const joinFiles = (lines) => lines.map((l) => l.trim()).filter(Boolean).join('\n');
+  // Lines of paths, in any of the forms above -> full paths, one per line.
+  const joinFiles = (lines) => parseFiles(lines.join('\n')).join('\n');
 
   // "> some text" -> "some text" (null if the line isn't a notes line).
   function notesLine(trimmed) {
@@ -838,7 +910,8 @@
     ['down', 'time between in and out that was not logged here'],
     ['titles', 'the entry titles, or the category when there is none (%{title} works too)'],
     ['notes', 'the notes, one per line'],
-    ['files', 'the file paths (/file), one per line'],
+    ['files', 'the file paths (/file): each folder, with its files under it'],
+    ['paths', 'the file paths (/file), in full, one per line'],
     ['entries', 'how many entries'],
   ];
   const FORM_DIVIDER = '-'.repeat(40);
@@ -944,7 +1017,8 @@
       down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
       titles: uniq(spans.map((s) => s.note || s.category)).join(', '),
       notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
-      files: spans.filter((s) => s.files).map((s) => s.files).join('\n'),
+      files: filesList(spans.filter((s) => s.files).map((s) => s.files).join('\n')),
+      paths: spans.filter((s) => s.files).map((s) => s.files).join('\n'),
       entries: String(spans.length),
     };
   }
@@ -1294,7 +1368,7 @@
         errors.push(`${where}: "${wo}" is not a valid work order (no spaces or brackets, up to ${MAX_WO} characters)`);
         return;
       }
-      const files = joinFiles(get(r, 'files').split('\n'));
+      const files = get(r, 'files').split('\n').map((l) => l.trim()).filter(Boolean).join('\n'); // full paths, as written
       entries.push({ ts, end, text: markerFor(entryText) || entryText, notes, files, wo });
     });
     entries.sort((a, b) => a.ts - b.ts);
@@ -1581,7 +1655,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    MAX_FILES, joinFiles, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    MAX_FILES, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

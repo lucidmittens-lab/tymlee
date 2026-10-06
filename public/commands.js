@@ -1014,8 +1014,8 @@
         },
       },
       file: {
-        usage: '/file <path>  or  /file #ID [path]',
-        about: 'add a file path to the current entry, or pick one (shown as "@ path"; %{files} in forms)',
+        usage: '/file <paths>  or  /file #ID [paths]',
+        about: 'add file paths to the current entry, or pick one: /file /Volumes/Work/SP/ mix.wav stems.zip (a folder, then its files)',
         async run(args) {
           if (busy()) return;
           if (!shown().length) return print('no entries to add a file path to', 'err');
@@ -1041,12 +1041,14 @@
             if (typed == null) return print('cancelled', 'dim');
             path = typed;
           }
-          path = path.trim();
-          if (!path) return print('no path given', 'err');
-          const files = T.joinFiles([...(current.files ? current.files.split('\n') : []), path]);
+          const added = T.parseFiles(path);
+          if (!added.length) return print('no path given', 'err');
+          const before = current.files ? current.files.split('\n') : [];
+          const files = [...new Set([...before, ...added])].join('\n');
           if (files.length > T.MAX_FILES) return print(`file paths are limited to ${T.MAX_FILES} characters`, 'err');
           store.apply([{ op: 'put', entry: T.makeEntry(current, { files }) }]);
-          print(`@ ${path} added to ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
+          const shownAs = T.groupFiles(added.join('\n')).map((g) => `@ ${g}`).join('\n');
+          print(`${shownAs}${added.length > 1 ? `\n${added.length} files` : ''} added to ${T.idTag(chosen.n)} ${describe(chosen)}`, 'ok');
         },
       },
       timeline: {

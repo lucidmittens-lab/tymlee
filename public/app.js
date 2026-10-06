@@ -731,8 +731,9 @@
     notes.placeholder = 'notes';
     const files = document.createElement('textarea');
     files.rows = 2;
-    files.value = entry.files || '';
-    files.placeholder = 'one path per line';
+    files.value = T.groupFiles(entry.files).join('\n');
+    files.placeholder = '/Volumes/Work/ mix.wav stems.zip';
+    files.title = 'A folder, then the files in it (spaces or commas between); or full paths, one per line';
     files.spellcheck = false;
     for (const c of [wo, eq, text, notes, files]) c.setAttribute('autocapitalize', 'off');
     // Not a login or address form: keep browser autofill bars away.

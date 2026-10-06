@@ -28,7 +28,7 @@
   // Notes, then file paths ("@ path"), for a block's lines and its tip.
   const extraLines = (b) => [
     ...(b.notes ? b.notes.split('\n') : []),
-    ...(b.files ? b.files.split('\n').map((f) => `@ ${f}`) : []),
+    ...(b.files ? T.groupFiles(b.files).map((f) => `@ ${f}`) : []),
   ];
 
   function blockTitle(b) {

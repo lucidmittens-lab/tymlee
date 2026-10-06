@@ -877,7 +877,7 @@ test('/find: every word, in text, notes, file paths or work orders; newest first
     'Wed 2026-09-23',
     '  ID:000010  09:00  24:00  [4471] dev stems for the label',
   ].join('\n'));
-  assert.match(T.formatSearch(log, 'stems.zip', NOW).text, /@ \/Work\/stems\.zip/);
+  assert.match(T.formatSearch(log, 'stems.zip', NOW).text, /@ \/Work\/ stems\.zip other\.wav/);
   assert.equal(T.formatSearch(log, '4471 label', NOW).count, 1);
   assert.equal(T.formatSearch(log, 'nope', NOW).text, 'nothing found for "nope"');
 });
@@ -922,4 +922,18 @@ test('accent colors: named ones step for dark screens; any #rrggbb works; text o
   assert.equal(T.accentColors('#0a7d4f').light.on, '#ffffff');
   assert.equal(T.accentColors('nope'), null);
   assert.equal(T.accentColors('#12345'), null);
+});
+
+test('file paths: a folder then its files, commas or spaces, carried across lines; shown grouped', () => {
+  assert.deepEqual(T.parseFiles('/Volumes/Work/SP/ stems.zip mix_v7.wav, ref.wav'), ['/Volumes/Work/SP/stems.zip', '/Volumes/Work/SP/mix_v7.wav', '/Volumes/Work/SP/ref.wav']);
+  assert.deepEqual(T.parseFiles('/Volumes/Work/SP stems.zip'), ['/Volumes/Work/SP/stems.zip']);
+  assert.deepEqual(T.parseFiles('/Volumes/Work/SP/\nstems.zip\nmix_v7.wav\n/Other/one.wav'), ['/Volumes/Work/SP/stems.zip', '/Volumes/Work/SP/mix_v7.wav', '/Other/one.wav']);
+  assert.deepEqual(T.parseFiles('/a/x.wav /b/y.wav'), ['/a/x.wav', '/b/y.wav']);
+  assert.deepEqual(T.parseFiles('/a/ x y /b/ z'), ['/a/x', '/a/y', '/b/z']);
+  assert.deepEqual(T.parseFiles('/Volumes/Work/SP/'), ['/Volumes/Work/SP/']); // a folder on its own
+  assert.deepEqual(T.parseFiles('"/Volumes/Work/stems v3/stems.zip"'), ['/Volumes/Work/stems v3/stems.zip']);
+  const full = '/Volumes/Work/SP/stems.zip\n/Volumes/Work/SP/mix_v7.wav\n/Other/one.wav';
+  assert.deepEqual(T.groupFiles(full), ['/Volumes/Work/SP/ stems.zip mix_v7.wav', '/Other/one.wav']);
+  assert.equal(T.parseFiles(T.groupFiles(full).join('\n')).join('\n'), full); // shown, then read back: the same
+  assert.equal(T.filesList(full), '/Volumes/Work/SP/\n  stems.zip\n  mix_v7.wav\n/Other/one.wav');
 });

@@ -67,6 +67,15 @@
     '- add_todo: category, note, due ("" if none).',
     '- add_name: category, name. When a schedule or the person uses a full name (e.g. "Silent Partner Productions") that you matched to a category (SILENTPARTNER), suggest it so it is known next time. Never repeat a name already listed.',
     '',
+    'Schedules: an attached schedule (e.g. an operator schedule) lists bookings like "WO#1033587 - Silent Partner Film LLC Project: Silent Partner Editorial Conform" with a date, start, end, status (Confirmed, Second Hold, ...) and room. Bookings are plans, often overlapping, not time worked, so unless asked otherwise:',
+    '- Link each booking\'s work order to its category for that date (link_wo). The work order is the digits after "WO#" (1033587).',
+    '- Match the category by the project name first, then the client, using the categories and full names listed below.',
+    '- Do not add entries for bookings unless asked.',
+    '- Include holds (e.g. "Second Hold") but name them in the message, since they may not happen.',
+    '- tymlee links one work order per category per day. If two bookings fall on the same category and day, link the first and name the other in the message.',
+    '- When no category fits, make one: a single word, upper case, from the project\'s main title (e.g. "Line of Fire Finishing Season 1" -> LINEOFFIRE). Say in the message which categories are new.',
+    '- For every booking you matched or made, suggest add_name with the project title as written (e.g. "Silent Partner") unless it is listed already.',
+    '',
     'Rules:',
     '- Use existing categories and their full names to match. Only invent a category when nothing fits, and say so in the message.',
     '- Times are 24-hour HH:MM. "Lunch" is an unpaid break. "Until 3" means the next thing (or off) starts at 15:00.',
@@ -113,7 +122,7 @@
     const m = MODELS[model] || MODELS[DEFAULT_MODEL];
     const content = [];
     if (pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } });
-    content.push({ type: 'text', text: `${context}\n\nRequest: ${text || 'Use the attached schedule.'}` });
+    content.push({ type: 'text', text: `${context}\n\nRequest: ${text || 'Link the work orders in the attached schedule to my categories.'}` });
     const req = {
       model: m.id,
       max_tokens: 16000,

@@ -940,17 +940,20 @@ test('file paths: a folder then its files, commas or spaces, carried across line
 
 test('/ai request: structured output, effort by task, fallbacks only where supported; replies are checked', () => {
   const A = require('../public/ai.js');
-  const r = A.buildRequest({ model: 'opus', context: 'ctx', text: 'do it', pdf: null });
+  const r = A.buildRequest({ model: 'opus', context: 'ctx', text: 'do it' });
   assert.equal(r.model, 'claude-opus-5-5');
   assert.equal(r.output_config.format.type, 'json_schema');
   assert.equal(r.output_config.effort, 'low');
   assert.deepEqual(r.betas, ['server-side-fallback-2026-07-01']);
   assert.equal(r.fallbacks, 'default');
   assert.equal(r.messages[0].content.at(-1).text, 'ctx\n\nRequest: do it');
-  const p = A.buildRequest({ model: 'opus', context: 'ctx', text: '', pdf: 'QUJD' });
-  assert.equal(p.messages[0].content[0].type, 'document');
+  const p = A.buildRequest({ model: 'opus', context: 'ctx', text: '', files: [{ kind: 'pdf', name: 's.pdf', data: 'QUJD' }, { kind: 'image', name: 'board.png', media_type: 'image/png', data: 'QUJD' }, { kind: 'text', name: 'a.csv', text: 'x,y' }] });
+  assert.deepEqual(p.messages[0].content.map((b) => b.type), ['document', 'image', 'text', 'document', 'text']);
+  assert.equal(p.messages[0].content[2].text, '(The image above is board.png.)');
+  assert.deepEqual(p.messages[0].content[3].source, { type: 'text', media_type: 'text/plain', data: 'x,y' });
+  assert.match(p.messages[0].content.at(-1).text, /Request: Link the work orders/);
   assert.equal(p.output_config.effort, 'medium');
-  const h = A.buildRequest({ model: 'haiku', context: 'ctx', text: 'x', pdf: null });
+  const h = A.buildRequest({ model: 'haiku', context: 'ctx', text: 'x' });
   assert.equal(h.model, 'claude-haiku-4-5');
   assert.equal(h.output_config.effort, undefined);
   assert.equal(h.betas, undefined);
@@ -960,7 +963,80 @@ test('/ai request: structured output, effort by task, fallbacks only where suppo
   assert.equal(ok.changes.length, 1); // an unknown action is dropped
   assert.equal(ok.changes[0].time, '16:00');
   assert.equal(ok.changes[0].category, ''); // missing fields become ""
+  assert.equal(ok.changes[0].notes, '');
+  // Title and notes are kept apart, with a glossary.
+  assert.deepEqual(['title', 'notes'].map((f) => f in A.SCHEMA.properties.changes.items.properties), [true, true]);
+  assert.match(A.SYSTEM, /Glossary/);
+  assert.match(A.SYSTEM, /it goes in notes, never in title/);
   assert.match(A.readReply(msg('not json')).error, /unexpected/);
   assert.match(A.readReply(msg('{}', 'refusal')).error, /declined/);
   assert.match(A.readReply(msg('{"mess', 'max_tokens')).error, /cut off/);
+});
+
+// A zip (as Word, Excel and PowerPoint files are), deflated like the real ones.
+function zipOf(files) {
+  const zlib = require('node:zlib');
+  const locals = [];
+  const central = [];
+  let at = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const n = Buffer.from(name);
+    const data = zlib.deflateRawSync(Buffer.from(text));
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(data.length, 18); local.writeUInt32LE(Buffer.byteLength(text), 22); local.writeUInt16LE(n.length, 26);
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0); dir.writeUInt16LE(8, 10);
+    dir.writeUInt32LE(data.length, 20); dir.writeUInt32LE(Buffer.byteLength(text), 24); dir.writeUInt16LE(n.length, 28); dir.writeUInt32LE(at, 42);
+    locals.push(local, n, data);
+    central.push(dir, n);
+    at += 30 + n.length + data.length;
+  }
+  const dirBytes = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(dirBytes.length, 12); end.writeUInt32LE(at, 16);
+  return new Uint8Array(Buffer.concat([...locals, dirBytes, end]));
+}
+
+test('/ai attachments: any kind is checked; Word, Excel and PowerPoint become text', async () => {
+  const A = require('../public/ai.js');
+  const tools = { toBase64: (b) => Buffer.from(b).toString('base64'), inflateRaw: async (b) => new Uint8Array(require('node:zlib').inflateRawSync(b)) };
+  const enc = (t) => new Uint8Array(Buffer.from(t));
+  assert.equal(A.kindOf('Schedule.PDF'), 'pdf');
+  assert.equal(A.kindOf('board.jpeg'), 'image');
+  assert.equal(A.kindOf('notes', 'text/plain'), 'text');
+  assert.equal(A.kindOf('cal.ics'), 'text');
+  assert.equal(A.kindOf('sheet.xlsx'), 'office');
+  assert.equal(A.kindOf('take.wav'), '');
+  assert.match(A.checkFile({ name: 'take.wav', size: 10 }), /can't read this kind/);
+  assert.match(A.checkFile({ name: 'big.png', size: 6 * 1024 * 1024 }), /too large \(5 MB/);
+  assert.equal(A.checkFile({ name: 'ok.pdf', size: 1000 }), '');
+
+  const pdf = await A.readAttachment({ name: 's.pdf', type: '', bytes: enc('ABC') }, tools);
+  assert.deepEqual(pdf, { name: 's.pdf', kind: 'pdf', media_type: 'application/pdf', data: 'QUJD' });
+  assert.equal((await A.readAttachment({ name: 'n.csv', type: '', bytes: enc('a,b') }, tools)).text, 'a,b');
+  assert.match((await A.readAttachment({ name: 'x.zip', type: '', bytes: enc('PK') }, tools)).error, /can't read/);
+  assert.match((await A.readAttachment({ name: 'bad.docx', type: '', bytes: enc('not a zip') }, tools)).error, /couldn't read bad.docx/);
+
+  const docx = zipOf({
+    '[Content_Types].xml': '<Types/>',
+    'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>WO 4471</w:t></w:r><w:r><w:tab/><w:t>Hachette &amp; Co</w:t></w:r></w:p><w:p><w:r><w:t>Room B</w:t></w:r></w:p></w:body></w:document>',
+  });
+  const d = await A.readAttachment({ name: 'Schedule.docx', type: '', bytes: docx }, tools);
+  assert.equal(d.kind, 'text');
+  assert.equal(d.text, 'WO 4471\tHachette & Co\nRoom B');
+
+  const xlsx = zipOf({
+    'xl/sharedStrings.xml': '<sst><si><t>WO</t></si><si><t>Client</t></si><si><r><t>Life </t></r><r><t>of Fish</t></r></si></sst>',
+    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2"><v>4471</v></c><c r="B2" t="s"><v>2</v></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>note</t></is></c></row></sheetData></worksheet>',
+    'xl/worksheets/sheet2.xml': '<worksheet><sheetData><row><c t="s"><v>1</v></c></row></sheetData></worksheet>',
+  });
+  assert.equal(await A.officeText(xlsx, 'xlsx', tools.inflateRaw), 'Sheet 1\nWO\tClient\n4471\tLife of Fish\nnote\n\nSheet 2\nClient');
+
+  const pptx = zipOf({
+    'ppt/slides/slide10.xml': '<p:sld><a:p><a:r><a:t>Last</a:t></a:r></a:p></p:sld>',
+    'ppt/slides/slide2.xml': '<p:sld><a:p><a:r><a:t>First</a:t></a:r></a:p></p:sld>',
+  });
+  assert.equal(await A.officeText(pptx, 'pptx', tools.inflateRaw), 'Slide 1\nFirst\n\nSlide 2\nLast');
 });

@@ -188,15 +188,16 @@
       // this browser straight to Anthropic with the person's own key.
       ai: {
         module: window.TymleeAi,
-        pdfUsage: '/ai file [what to do]',
+        fileUsage: '/ai file [what to do]',
+        tools: { toBase64, inflateRaw },
         async client(key) {
           await loadScript('vendor/anthropic.js');
           return new window.TymleeAnthropic({ apiKey: key, dangerouslyAllowBrowser: true });
         },
-        async pdf(args) {
-          if ((args[0] || '').toLowerCase() !== 'file') return { pdf: null, name: '', rest: args };
-          const file = await choosePdf();
-          return file ? { ...file, rest: args.slice(1) } : null;
+        async files(args) {
+          if ((args[0] || '').toLowerCase() !== 'file') return { files: [], rest: args };
+          const files = await chooseFiles();
+          return files.length ? { files, rest: args.slice(1) } : null;
         },
       },
       keys: [
@@ -1025,29 +1026,36 @@
     return loading.get(src);
   }
 
-  // A PDF (a schedule) for /ai: { pdf: base64, name }, or null.
-  function choosePdf() {
+  // Files for /ai, any kind: [{ name, type, bytes }] (empty if none picked).
+  function chooseFiles() {
     return new Promise((resolve) => {
       const picker = document.createElement('input');
       picker.type = 'file';
-      picker.accept = '.pdf,application/pdf';
+      picker.multiple = true;
       picker.hidden = true;
-      picker.addEventListener('change', () => {
-        const file = picker.files && picker.files[0];
+      picker.addEventListener('change', async () => {
+        const list = [...(picker.files || [])];
         picker.remove();
-        if (!file) return resolve(null);
-        if (file.size > 20 * 1024 * 1024) {
-          print(`${file.name} is too large (20 MB at most)`, 'err');
-          return resolve(null);
-        }
-        const reader = new FileReader();
-        reader.onload = () => resolve({ pdf: String(reader.result).replace(/^data:[^,]*,/, ''), name: file.name });
-        reader.onerror = () => { print(`could not read ${file.name}`, 'err'); resolve(null); };
-        reader.readAsDataURL(file);
+        resolve(await readFiles(list));
       });
       document.body.append(picker);
       picker.click();
     });
+  }
+
+  function readFiles(list) {
+    return Promise.all(list.map(async (f) => ({ name: f.name, type: f.type, bytes: new Uint8Array(await f.arrayBuffer()) })));
+  }
+
+  function toBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  async function inflateRaw(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
   }
 
   function chooseBackupFile() {

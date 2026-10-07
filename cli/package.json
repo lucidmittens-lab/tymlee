@@ -1,6 +1,6 @@
 {
   "name": "tymlee",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "private": true,
   "description": "tymlee in your terminal: a text-only time tracker shell that syncs with tymlee.date.",
   "bin": {

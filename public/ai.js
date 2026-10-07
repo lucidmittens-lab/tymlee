@@ -21,7 +21,7 @@
 
   // Every change has every field ("" when it doesn't apply), which keeps the
   // schema flat and the answer easy to check.
-  const FIELDS = ['action', 'id', 'date', 'time', 'category', 'note', 'wo', 'eq', 'kind', 'name', 'due'];
+  const FIELDS = ['action', 'id', 'date', 'time', 'category', 'title', 'notes', 'wo', 'eq', 'kind', 'name', 'due'];
   const SCHEMA = {
     type: 'object',
     additionalProperties: false,
@@ -40,7 +40,8 @@
             date: { type: 'string', description: 'YYYY-MM-DD, or "" for today.' },
             time: { type: 'string', description: 'HH:MM on the 24-hour clock, or "".' },
             category: { type: 'string', description: 'One word, no spaces. Use an existing category when one fits.' },
-            note: { type: 'string', description: 'What the entry or to-do is about, without the category.' },
+            title: { type: 'string', description: 'The words after the category on the entry\'s one line (or the to-do\'s text). Changing it renames the entry. "" to leave it.' },
+            notes: { type: 'string', description: 'add_entry / edit_entry: lines to ADD under the entry as notes (tymlee keeps the ones already there). "" for none.' },
             wo: { type: 'string', description: 'Work order number, or "".' },
             eq: { type: 'string', description: 'Equipment, comma-separated, or "".' },
             kind: { type: 'string', description: 'break: "paid" or "unpaid". Otherwise "".' },
@@ -55,18 +56,26 @@
   const SYSTEM = [
     'You turn what someone writes (and any schedule they attach) into changes to their time log in tymlee.',
     '',
-    'How tymlee works: each entry starts at a time and runs until the next one starts. An entry is a category (one word, e.g. ACME or dev) and an optional note. "off" stops the clock; a break is paid or unpaid and also ends at the next entry. Work orders (wo) and equipment (eq) can be on an entry, or linked to a category for a day (link_wo / link_eq), which gives every entry in that category that day the work order.',
+    'How tymlee works: each entry starts at a time and runs until the next one starts. "off" stops the clock; a break is paid or unpaid and also ends at the next entry.',
+    '',
+    'Glossary: the parts of an entry, and the fields that change them. Keep them apart.',
+    '- category: the first word of the entry, e.g. ACME or LOF. What the time is billed to.',
+    '- title: the rest of the entry\'s one line, after the category, e.g. "finishing" in "LOF finishing". Short; says what the work was. Only change it when they ask to rename or retitle, or to fix what the entry says it was.',
+    '- notes: extra lines kept under an entry ("> " lines in tymlee), e.g. "client asked for a recut of reel 2". When someone says note, add a note, jot down, remember that, or mention, it goes in notes, never in title. Notes are added, never replaced.',
+    '- wo: a work order number on the entry. eq: equipment on it. Either can also be linked to a category for a day (link_wo / link_eq), which gives every entry in that category that day the work order or equipment.',
+    '- to-do: a task for later (add_todo), not an entry.',
     '',
     'Actions:',
-    '- add_entry: date, time, category, note (and wo / eq if given).',
-    '- edit_entry: id of an existing entry; fill only the fields that change (time, category, note, wo, eq); leave the rest "".',
+    '- add_entry: date, time, category, title (and notes, wo, eq if given).',
+    '- edit_entry: id of an existing entry; fill only the fields that change (time, category, title, wo, eq) or notes to add; leave the rest "". "Add a note to my current entry" is edit_entry with only notes filled.',
     '- delete_entry: id.',
     '- break: date, time, kind ("paid" unless they say unpaid or lunch).',
     '- off: date, time.',
     '- link_wo / link_eq: date, category, wo / eq. Use these for work orders from a schedule.',
-    '- add_todo: category, note, due ("" if none).',
+    '- add_todo: category, title, due ("" if none).',
     '- add_name: category, name. When a schedule or the person uses a full name (e.g. "Silent Partner Productions") that you matched to a category (SILENTPARTNER), suggest it so it is known next time. Never repeat a name already listed.',
     '',
+    'Attachments: the person may attach files (schedules, emails, spreadsheets, notes, photos). Read them for what the request asks; if they asked for nothing in particular, use them as below.',
     'Schedules: an attached schedule (e.g. an operator schedule) lists bookings like "WO#1033587 - Silent Partner Film LLC Project: Silent Partner Editorial Conform" with a date, start, end, status (Confirmed, Second Hold, ...) and room. Bookings are plans, often overlapping, not time worked, so unless asked otherwise:',
     '- Link each booking\'s work order to its category for that date (link_wo). The work order is the digits after "WO#" (1033587).',
     '- Match the category by the project name first, then the client, using the categories and full names listed below.',
@@ -80,7 +89,7 @@
     '- Use existing categories and their full names to match. Only invent a category when nothing fits, and say so in the message.',
     '- Times are 24-hour HH:MM. "Lunch" is an unpaid break. "Until 3" means the next thing (or off) starts at 15:00.',
     '- There are no end times: something ends when the next thing starts. Never add or move anything to a time later than now (given at the top); tymlee refuses it.',
-    '- An interruption to what is running now: add the interruption at its start time. If it has already ended, also add an entry that resumes what was running (same category and note) at the time it ended. If it is still going, add only the interruption.',
+    '- An interruption to what is running now: add the interruption at its start time. If it has already ended, also add an entry that resumes what was running (same category and title) at the time it ended. If it is still going, add only the interruption.',
     '- Only edit or delete entries listed below, by their ID. Never invent IDs.',
     '- If the request is unclear, return no changes and ask one short question in the message.',
     '- Keep the message short. Do not list the changes in it; tymlee shows them.',
@@ -105,12 +114,16 @@
     // The last three days of entries, with IDs to edit by.
     const since = T.addDays(T.startOfDay(now), -2);
     const spans = T.withSpans(entries, now).filter((s) => s.ts >= since);
-    lines.push('', 'Recent entries (ID, date, start-end, what):');
+    lines.push('', 'Recent entries (ID, date, start-end, category and title, then any notes as "> " lines):');
     if (!spans.length) lines.push('  (none)');
     for (const s of spans) {
       const end = s.running ? 'now' : T.clockAs('24', s.end);
       const tags = `${s.wo ? ` wo:${s.wo}` : ''}${s.eq ? ` eq:${s.eq}` : ''}`;
       lines.push(`  ${s.n}  ${T.ymd(s.ts)} ${T.clockAs('24', s.ts)}-${end}  ${s.category}${s.note ? ` ${s.note}` : ''}${tags}`);
+      // Enough of the notes to know they're there, not all of them.
+      const notes = String(s.notes || '').split('\n').filter(Boolean);
+      for (const l of notes.slice(0, 3)) lines.push(`        > ${l.length > 120 ? `${l.slice(0, 120)}…` : l}`);
+      if (notes.length > 3) lines.push(`        > (${notes.length - 3} more)`);
     }
     if (todos && todos.length) {
       lines.push('', 'Open to-dos:');
@@ -119,12 +132,142 @@
     return lines.join('\n');
   }
 
-  // The request for the Messages API. `pdf` is base64 (or null).
-  function buildRequest({ model, context, text, pdf }) {
+  // ---- attachments ---------------------------------------------------------
+  // Claude reads PDFs, images and text directly. Word, Excel and PowerPoint
+  // files are zips of XML: their text is pulled out here. Anything else is
+  // refused with a reason.
+  const IMAGE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+  const TEXT_EXT = ['txt', 'text', 'csv', 'tsv', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'ics', 'eml', 'log', 'rtf', 'yaml', 'yml', 'ini', 'srt', 'vtt', 'edl', 'ale'];
+  const OFFICE_EXT = ['docx', 'xlsx', 'pptx'];
+  const MAX_BYTES = { pdf: 20 * 1024 * 1024, image: 5 * 1024 * 1024, text: 2 * 1024 * 1024, office: 20 * 1024 * 1024 };
+  const MAX_FILES = 5;
+
+  const extOf = (name) => (String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+  const kindOf = (name, type) => {
+    const ext = extOf(name);
+    if (ext === 'pdf' || type === 'application/pdf') return 'pdf';
+    if (IMAGE_TYPES[ext] || /^image\/(jpeg|png|gif|webp)$/.test(type || '')) return 'image';
+    if (OFFICE_EXT.includes(ext)) return 'office';
+    if (TEXT_EXT.includes(ext) || /^text\//.test(type || '') || /json|xml|calendar/.test(type || '')) return 'text';
+    return '';
+  };
+
+  // Plain text out of an XML string: paragraph and row ends become line
+  // breaks; tags go; entities are decoded.
+  function xmlText(xml, { para = /<\/(w:p|a:p)>/g, tab = /<w:tab\/>/g } = {}) {
+    return xml.replace(para, '\n').replace(tab, '\t').replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&')
+      .replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // The files inside a zip: { name -> bytes }, for names matching `want`.
+  // inflateRaw(bytes) -> Promise<Uint8Array> (each place has its own).
+  async function unzip(bytes, want, inflateRaw) {
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let end = -1;
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+      if (v.getUint32(i, true) === 0x06054b50) { end = i; break; }
+    }
+    if (end < 0) throw new Error('not a valid file');
+    const count = v.getUint16(end + 10, true);
+    let p = v.getUint32(end + 16, true);
+    const out = {};
+    const dec = new TextDecoder();
+    for (let n = 0; n < count && v.getUint32(p, true) === 0x02014b50; n++) {
+      const method = v.getUint16(p + 10, true);
+      const size = v.getUint32(p + 20, true);
+      const nameLen = v.getUint16(p + 28, true);
+      const skip = nameLen + v.getUint16(p + 30, true) + v.getUint16(p + 32, true);
+      const local = v.getUint32(p + 42, true);
+      const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      p += 46 + skip;
+      if (!want.test(name)) continue;
+      const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+      const raw = bytes.subarray(start, start + size);
+      if (method === 0) out[name] = raw;
+      else if (method === 8) out[name] = await inflateRaw(raw);
+    }
+    return out;
+  }
+
+  const byNumber = (a, b) => (+(a.match(/(\d+)\.xml$/) || [0, 0])[1]) - (+(b.match(/(\d+)\.xml$/) || [0, 0])[1]);
+
+  // Text out of a Word, Excel or PowerPoint file.
+  async function officeText(bytes, ext, inflateRaw) {
+    const dec = new TextDecoder();
+    if (ext === 'docx') {
+      const f = await unzip(bytes, /^word\/document\.xml$/, inflateRaw);
+      return xmlText(dec.decode(f['word/document.xml'] || new Uint8Array()));
+    }
+    if (ext === 'pptx') {
+      const f = await unzip(bytes, /^ppt\/slides\/slide\d+\.xml$/, inflateRaw);
+      return Object.keys(f).sort(byNumber).map((k, i) => `Slide ${i + 1}\n${xmlText(dec.decode(f[k]))}`).join('\n\n');
+    }
+    // xlsx: each sheet as rows of tab-separated cells.
+    const f = await unzip(bytes, /^xl\/(sharedStrings\.xml|worksheets\/sheet\d+\.xml)$/, inflateRaw);
+    const shared = [];
+    const ss = f['xl/sharedStrings.xml'] ? dec.decode(f['xl/sharedStrings.xml']) : '';
+    for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(xmlText(m[1].replace(/<rPh[\s\S]*?<\/rPh>/g, '')));
+    const sheets = Object.keys(f).filter((k) => k.includes('worksheets/')).sort(byNumber);
+    return sheets.map((k, i) => {
+      const xml = dec.decode(f[k]);
+      const rows = [];
+      for (const r of xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
+        const cells = [];
+        for (const c of r[1].matchAll(/<c([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+          const attrs = c[1] || '';
+          const body = c[2] || '';
+          const v = (body.match(/<v>([\s\S]*?)<\/v>/) || [])[1];
+          let val = '';
+          if (/t="s"/.test(attrs) && v != null) val = shared[+v] || '';
+          else if (/t="inlineStr"/.test(attrs)) val = xmlText(body);
+          else if (v != null) val = xmlText(v);
+          cells.push(val);
+        }
+        if (cells.some(Boolean)) rows.push(cells.join('\t'));
+      }
+      return `Sheet ${i + 1}\n${rows.join('\n')}`;
+    }).join('\n\n');
+  }
+
+  // A file -> what to send: { name, kind, media_type, data (base64) | text },
+  // or { name, error }. `tools`: { toBase64(bytes), inflateRaw(bytes) }.
+  // '' if a file ({ name, type, size }) can be sent, else why not.
+  function checkFile({ name, type, size }) {
+    const kind = kindOf(name, type);
+    if (!kind) return `${name}: tymlee can't read this kind of file (PDFs, images, text, Word, Excel and PowerPoint work)`;
+    if (size > MAX_BYTES[kind]) return `${name} is too large (${Math.round(MAX_BYTES[kind] / 1048576)} MB at most for this kind)`;
+    return '';
+  }
+
+  async function readAttachment({ name, type, bytes }, tools) {
+    const kind = kindOf(name, type);
+    const why = checkFile({ name, type, size: bytes.length });
+    if (why) return { name, error: why };
+    if (kind === 'pdf') return { name, kind, media_type: 'application/pdf', data: tools.toBase64(bytes) };
+    if (kind === 'image') return { name, kind, media_type: IMAGE_TYPES[extOf(name)] || type, data: tools.toBase64(bytes) };
+    if (kind === 'text') return { name, kind, text: new TextDecoder().decode(bytes) };
+    try {
+      const text = await officeText(bytes, extOf(name), tools.inflateRaw);
+      if (!text.trim()) return { name, error: `${name} has no text in it` };
+      return { name, kind: 'text', text };
+    } catch (_) {
+      return { name, error: `couldn't read ${name}` };
+    }
+  }
+
+  // A file to send, as a content block.
+  function fileBlock(f) {
+    if (f.kind === 'pdf') return { type: 'document', title: f.name, source: { type: 'base64', media_type: 'application/pdf', data: f.data } };
+    if (f.kind === 'image') return { type: 'image', source: { type: 'base64', media_type: f.media_type, data: f.data } };
+    return { type: 'document', title: f.name, source: { type: 'text', media_type: 'text/plain', data: f.text } };
+  }
+
+  // The request for the Messages API. `files` from readAttachment.
+  function buildRequest({ model, context, text, files = [] }) {
     const m = MODELS[model] || MODELS[DEFAULT_MODEL];
-    const content = [];
-    if (pdf) content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } });
-    content.push({ type: 'text', text: `${context}\n\nRequest: ${text || 'Link the work orders in the attached schedule to my categories.'}` });
+    const content = files.flatMap((f) => (f.kind === 'image' ? [fileBlock(f), { type: 'text', text: `(The image above is ${f.name}.)` }] : [fileBlock(f)]));
+    content.push({ type: 'text', text: `${context}\n\nRequest: ${text || (files.length ? 'Link the work orders in the attached schedule to my categories.' : '')}` });
     const req = {
       model: m.id,
       max_tokens: 16000,
@@ -133,7 +276,7 @@
       output_config: { format: { type: 'json_schema', schema: SCHEMA } },
     };
     // Thinking depth: a sentence needs little; a schedule a bit more.
-    if (m.effort) req.output_config.effort = pdf ? 'medium' : 'low';
+    if (m.effort) req.output_config.effort = files.length ? 'medium' : 'low';
     // If the model declines, the API tries another one in the same call.
     if (m.fallbacks) {
       req.betas = ['server-side-fallback-2026-07-01'];
@@ -166,7 +309,7 @@
     return betas ? client.beta.messages.create({ ...body, betas }) : client.messages.create(body);
   }
 
-  const api = { MODELS, DEFAULT_MODEL, ACTIONS, SCHEMA, SYSTEM, contextText, buildRequest, readReply, send };
+  const api = { MODELS, DEFAULT_MODEL, ACTIONS, SCHEMA, SYSTEM, MAX_FILES, kindOf, checkFile, readAttachment, officeText, contextText, buildRequest, readReply, send };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TymleeAi = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -924,8 +924,8 @@ button.gui-day {
    One system for every button: primary (the one main action: filled accent),
    secondary (a card with a hairline), and danger. All share the same
    hover, press and keyboard-focus behavior. */
-.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button,
-.gform-range, .gform-go, .gtick-play {
+.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .sb-ai, .editor-buttons button, .ec-buttons button,
+.gform-range, .gform-go, .gtick-play, .gai-attach, .gai-go {
   font: inherit;
   font-weight: 500;
   border: 1px solid var(--line);
@@ -937,19 +937,19 @@ button.gui-day {
   transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.08s, opacity 0.12s;
   -webkit-tap-highlight-color: transparent;
 }
-:is(.sb-menu, .sb-off, .sb-break, .sb-done, .sb-resume, .editor-buttons button, .ec-buttons button, .gform-range, .gtick-play):not(:disabled):hover {
+:is(.sb-menu, .sb-off, .sb-break, .sb-done, .sb-resume, .sb-ai, .editor-buttons button, .ec-buttons button, .gform-range, .gtick-play, .gai-attach):not(:disabled):hover {
   background: color-mix(in srgb, var(--fg) 4%, var(--card));
   border-color: color-mix(in srgb, var(--fg) 18%, var(--line));
 }
 /* Primary. */
-.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gform-range[aria-pressed="true"] {
+.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gform-range[aria-pressed="true"], .gai-go {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-:is(.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go):not(:disabled):hover {
+:is(.sb-start, .sb-new, .sb-back, .editor-buttons .editor-save, .ec-buttons button[type="submit"], .gform-go, .gai-go):not(:disabled):hover {
   background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 /* Danger: red text that fills on hover; solid when it is the action. */
@@ -957,16 +957,16 @@ button.gui-day {
 .ec-buttons .ec-delete:not(:disabled):hover { background: color-mix(in srgb, var(--warn) 10%, var(--card)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
 .gform-go.danger { background: var(--warn); border-color: var(--warn); color: #fff; }
 /* Press, keyboard focus, disabled. */
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .sb-ai, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play, .gai-attach, .gai-go,
     .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):not(:disabled):active { transform: scale(0.97); }
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .sb-ai, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play, .gai-attach, .gai-go,
     .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .tl-date, .tl-block):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring), 0 0 0 1px var(--accent);
 }
-:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-resume, .gform-go, .gtick-play):disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+:is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-resume, .gform-go, .gtick-play, .gai-attach, .gai-go):disabled { opacity: 0.4; cursor: default; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
-  :is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play,
+  :is(.sb-menu, .sb-off, .sb-start, .sb-break, .sb-done, .sb-cancel, .sb-resume, .sb-back, .sb-new, .sb-ai, .editor-buttons button, .ec-buttons button, .gform-range, .gform-go, .gtick-play, .gai-attach, .gai-go,
       .view-toggle button, .gui-bar button, .gmenu-item, .gsheet-close, .toast-action):active { transform: none; }
 }
 
@@ -1429,13 +1429,8 @@ button.gui-day {
 
 /* ---- Ask AI ------------------------------------------------------------------- */
 .sb-ai { grid-area: ai; display: flex !important; }
-.startbar .sb-ai {
-  background: color-mix(in srgb, var(--accent) 12%, var(--card));
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-  color: var(--accent);
-  font-weight: 600;
-}
-.startbar .sb-ai:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 20%, var(--card)); border-color: var(--accent); }
+/* A secondary button like its neighbours; only the sparkle wears the accent. */
+.sb-ai .icon { color: var(--accent); }
 .startbar[data-mode="idle"] { grid-template-columns: auto auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu ai cat title resume start"; }
 .startbar[data-mode="compose"] { grid-template-columns: auto auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu ai cat title cancel start"; }
 .startbar[data-mode="running"] { grid-template-columns: auto auto 1fr auto auto auto auto; grid-template-areas: "menu ai card done brk off new"; }
@@ -1459,27 +1454,19 @@ button.gui-day {
 }
 .gai-text:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--card); }
 .gai-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.gai-attach, .gai-model, .gai-go {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--fg);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-.gai-model { color: var(--muted); font-size: 12.5px; border-color: transparent; background: transparent; }
+.gai-attach, .gai-model, .gai-go { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; }
+.gai-attach .icon, .gai-go .icon { display: inline-flex; }
+.gai-attach .icon svg, .gai-go .icon svg { width: 16px; height: 16px; }
+.gai-model { border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
 .gai-model:hover { color: var(--fg); }
-.gai-go { margin-left: auto; background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-.gai-go:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
-.gai-chip { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 13px; font-weight: 500; }
-.gai-chip[hidden] { display: none; }
-.gai-chip-x { display: inline-flex; padding: 2px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.gai-go { margin-left: auto; }
+.gai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gai-chips[hidden] { display: none; }
+.gai-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); font-size: 13px; }
+.gai-chip > span:not(.icon) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gai-chip > .icon { color: var(--muted); }
+.gai-chip-x { display: inline-flex; padding: 2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.gai-chip-x:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .gai-chip-x .icon svg, .gai-chip .icon svg { width: 14px; height: 14px; }
 .gai-wait { margin: 18px 0; color: var(--muted); text-align: center; animation: gai-pulse 1.4s ease-in-out infinite; }
 @keyframes gai-pulse { 50% { opacity: 0.45; } }
@@ -1493,21 +1480,8 @@ button.gui-day {
 .gai-change.del .gai-mark { color: var(--warn); }
 .gai-change.skipped { color: var(--muted); font-style: italic; font-family: var(--font); }
 @media (max-width: 600px) {
-  /* Phones: AI is the raised tab in the middle of the tab bar. */
+  /* Phones: AI is a tab like the others. */
   #app.pure-mode .startbar .sb-ai { display: none !important; }
   #app.pure-mode .tabbar:not([hidden]) { grid-template-columns: repeat(5, 1fr); }
-  .tab[data-tab="ai"] .icon {
-    display: grid;
-    place-items: center;
-    width: 46px;
-    height: 46px;
-    margin-top: -20px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--on-accent);
-    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 0 4px var(--card);
-  }
-  .tab[data-tab="ai"] .icon svg { width: 22px; height: 22px; }
-  .tab[data-tab="ai"] { color: var(--accent); font-weight: 600; }
   .gai-text { font-size: 16px; }
 }

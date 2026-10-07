@@ -30,9 +30,10 @@
 //                        /timeline prints text, colored by paint(slot, text)
 //   paint, width()       for the text timeline (terminal)
 //   ai                   /ai: { module (ai.js), client(key) -> Promise<SDK
-//                        client>, pdf(args) -> Promise<{ pdf, name, rest }>
-//                        (a schedule PDF named in args or picked; pdf is
-//                        base64, or null with rest = args), pdfUsage }
+//                        client>, files(args) -> Promise<{ files, rest }>
+//                        (files named in args or picked, as { name, type,
+//                        bytes }; null to stop), tools ({ toBase64,
+//                        inflateRaw }, for reading them), fileUsage }
 (function (root) {
   'use strict';
 
@@ -757,7 +758,8 @@
     // Claude's changes -> what to do: entry ops (one batch, undoable),
     // command lines (links, to-dos), full names; and preview lines.
     // Changes that don't make sense are listed as skipped.
-    function aiPlan(changes, now) {
+    // notesOk: whether the server keeps notes (see /note).
+    function aiPlan(changes, now, notesOk = true) {
       const spans = T.withSpans(store.entries, now);
       const plan = { ops: [], lines: [], names: [], preview: [], skipped: [] };
       const word = (c) => String(c || '').replace(/^\/+/, '').replace(/\s+/g, '-');
@@ -770,21 +772,24 @@
         const ts = c.time ? aiTime(c.date, c.time, now) : null;
         if (c.action === 'add_entry' || c.action === 'break' || c.action === 'off') {
           if (ts == null) { plan.skipped.push(`${c.action} without a time`); continue; }
-          if (future(ts)) { plan.skipped.push(`${c.action === 'add_entry' ? `${word(c.category)} ${c.note}`.trim() : c.action} at ${when(ts)}: that's later than now`); continue; }
+          if (future(ts)) { plan.skipped.push(`${c.action === 'add_entry' ? `${word(c.category)} ${c.title}`.trim() : c.action} at ${when(ts)}: that's later than now`); continue; }
           let text;
           if (c.action === 'off') text = T.OFF;
           else if (c.action === 'break') text = c.kind === 'unpaid' ? T.BREAK_UNPAID : T.BREAK_PAID;
           else {
             if (!word(c.category)) { plan.skipped.push('an entry without a category'); continue; }
-            text = c.note ? `${word(c.category)} ${c.note}` : word(c.category);
+            text = c.title ? `${word(c.category)} ${c.title}` : word(c.category);
           }
           const extra = {};
           if (c.action === 'add_entry' && c.wo && T.validWo(c.wo)) Object.assign(extra, { wo: c.wo, wl: false });
           const eq = c.action === 'add_entry' && c.eq ? T.normalizeEq(c.eq) : '';
           if (eq) Object.assign(extra, { eq, ql: false });
+          const notes = c.notes ? cleanNotes(c.notes) : '';
+          if (notes && !notesOk) plan.skipped.push(`notes on ${text}: the server needs the latest supabase/schema.sql for notes`);
+          else if (notes) extra.notes = notes;
           const entry = T.makeEntry({ id: T.uuid(), ts, text }, extra);
           plan.ops.push({ op: 'put', entry, undo: { op: 'del', id: entry.id } });
-          plan.preview.push(`+ ${T.ymd(ts) === T.ymd(now) ? '' : `${T.ymd(ts)} `}${T.clock(ts)}  ${T.isMarker(text) ? T.MARKERS[text] : text}${extra.wo ? `  ${T.woTag(extra.wo)}` : ''}${eq ? `  ${T.eqTag(eq)}` : ''}`);
+          plan.preview.push(`+ ${T.ymd(ts) === T.ymd(now) ? '' : `${T.ymd(ts)} `}${T.clock(ts)}  ${T.isMarker(text) ? T.MARKERS[text] : text}${extra.wo ? `  ${T.woTag(extra.wo)}` : ''}${eq ? `  ${T.eqTag(eq)}` : ''}${extra.notes ? `  + notes "${extra.notes.replace(/\n/g, ' / ')}"` : ''}`);
         } else if (c.action === 'edit_entry' || c.action === 'delete_entry') {
           const s = c.id && T.findById(spans, c.id.replace(/^id:/i, ''));
           const current = s && store.entries.find((e) => e.id === s.id);
@@ -796,9 +801,13 @@
           }
           const parsed = T.parseInput(current.text);
           const cat = c.category ? word(c.category) : parsed.category;
-          const note = c.note || parsed.note;
+          const title = c.title || parsed.note;
           const fields = {};
-          if (!T.isMarker(current.text) && (c.category || c.note)) fields.text = note ? `${cat} ${note}` : cat;
+          if (!T.isMarker(current.text) && (c.category || c.title)) fields.text = title ? `${cat} ${title}` : cat;
+          if (fields.text === current.text) delete fields.text;
+          const added = c.notes ? cleanNotes(c.notes) : '';
+          if (added && !notesOk) plan.skipped.push(`notes on ${T.idTag(s.n)}: the server needs the latest supabase/schema.sql for notes`);
+          else if (added) fields.notes = `${current.notes ? `${current.notes}\n` : ''}${added}`.slice(0, T.MAX_NOTES);
           if (c.time) {
             const t2 = aiTime(c.date || T.ymd(current.ts), c.time, now);
             if (t2 != null && future(t2)) { plan.skipped.push(`moving ${T.idTag(s.n)} to ${when(t2)}: that's later than now`); continue; }
@@ -810,7 +819,7 @@
           const { ts: newTs, text: newText, ...extra } = fields;
           const entry = T.makeEntry({ id: current.id, ts: newTs || current.ts, text: newText || current.text, sid: current.sid }, { ...current, ...extra });
           plan.ops.push({ op: 'put', entry, undo: { op: 'put', entry: current } });
-          const what = [newTs ? `${T.clock(current.ts)} → ${T.clock(newTs)}` : '', newText ? `"${current.text}" → "${newText}"` : '', extra.wo ? T.woTag(extra.wo) : '', extra.eq ? T.eqTag(extra.eq) : ''].filter(Boolean).join(', ');
+          const what = [newTs ? `${T.clock(current.ts)} → ${T.clock(newTs)}` : '', newText ? `"${current.text}" → "${newText}"` : '', extra.wo ? T.woTag(extra.wo) : '', extra.eq ? T.eqTag(extra.eq) : '', added && extra.notes ? `+ notes "${added.replace(/\n/g, ' / ')}"` : ''].filter(Boolean).join(', ');
           plan.preview.push(`~ ${label(s)}: ${what}`);
         } else if (c.action === 'link_wo' || c.action === 'link_eq') {
           const v = c.action === 'link_wo' ? c.wo : c.eq;
@@ -821,8 +830,8 @@
         } else if (c.action === 'add_todo') {
           if (!word(c.category)) { plan.skipped.push('a to-do without a category'); continue; }
           const due = c.due ? T.parseDue(c.due, now) : null;
-          plan.lines.push(`/todo ${word(c.category)} ${c.note}${due ? ` due:${due}` : ''}`.trim());
-          plan.preview.push(`to-do ${word(c.category)} ${c.note}${due ? ` (${T.dueLabel(due, now).text})` : ''}`);
+          plan.lines.push(`/todo ${word(c.category)} ${c.title}${due ? ` due:${due}` : ''}`.trim());
+          plan.preview.push(`to-do ${word(c.category)} ${c.title}${due ? ` (${T.dueLabel(due, now).text})` : ''}`);
         } else if (c.action === 'add_name') {
           if (!word(c.category) || !c.name) continue;
           const known = (fullNames()[word(c.category)] || []).some((n) => n.toLowerCase() === c.name.toLowerCase());
@@ -834,17 +843,28 @@
       return plan;
     }
 
+    // Notes as Claude gave them: trimmed lines, no "> " markers.
+    function cleanNotes(text) {
+      return String(text).split('\n').map((l) => l.replace(/^\s*>\s?/, '').trimEnd()).filter(Boolean).join('\n').slice(0, T.MAX_NOTES);
+    }
+
     // Ask Claude; resolves to { error } or { label, message, plan }. Used by
     // /ai and by the GUI's Ask AI sheet.
-    async function aiAsk({ text, pdf, name }) {
+    async function aiAsk({ text, files = [] }) {
       const key = aiSettings().key;
       if (!key) return { error: 'no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)' };
       if (!io.ai) return { error: '/ai is not available here' };
-      const now = Date.now();
       const A = io.ai.module;
+      if (files.length > A.MAX_FILES) return { error: `${A.MAX_FILES} files at most at a time` };
+      // A request can carry about 32 MB, and files grow by a third on the way.
+      if (files.reduce((n, f) => n + f.bytes.length, 0) > 22 * 1024 * 1024) return { error: 'those files are too large together (22 MB at most)' };
+      const read = await Promise.all(files.map((f) => A.readAttachment(f, io.ai.tools)));
+      const bad = read.filter((f) => f.error);
+      if (bad.length) return { error: bad.map((f) => f.error).join('\n') };
+      const now = Date.now();
       const model = aiSettings().model || A.DEFAULT_MODEL;
       const context = A.contextText({ T, now, entries: store.entries, names: fullNames(), todos: todos().filter((t) => !t.done) });
-      const req = A.buildRequest({ model, context, text, pdf });
+      const req = A.buildRequest({ model, context, text, files: read });
       let res;
       try {
         const client = await io.ai.client(key);
@@ -859,20 +879,21 @@
       }
       const reply = A.readReply(res);
       if (reply.error) return reply;
-      return { label: A.MODELS[model].label, name, message: reply.message, plan: aiPlan(reply.changes, Date.now()) };
+      return { label: A.MODELS[model].label, message: reply.message, plan: aiPlan(reply.changes, Date.now(), await store.supports('notes')) };
     }
 
     async function runAi(args) {
       if (!aiSettings().key) return print('no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)', 'err');
       if (!io.ai) return print('/ai is not available here', 'err');
       if ((args[0] || '').toLowerCase() === 'undo') return undoAi();
-      const got = await io.ai.pdf(args);
+      const got = await io.ai.files(args);
       if (!got) return undefined;
       const text = got.rest.join(' ').trim();
-      if (!text && !got.pdf) return print(`usage: /ai <what to do>, e.g. /ai 9-11 ACME drawings, lunch, then mtg till 3 · ${io.ai.pdfUsage} to add a schedule PDF`, 'err');
+      if (!text && !got.files.length) return print(`usage: /ai <what to do>, e.g. /ai 9-11 ACME drawings, lunch, then mtg till 3 · ${io.ai.fileUsage} to add files (a schedule, a sheet, a photo)`, 'err');
       const A = io.ai.module;
-      print(`asking ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label}${got.name ? ` about ${got.name}` : ''}…`, 'dim');
-      const r = await aiAsk({ text, pdf: got.pdf, name: got.name });
+      const names = got.files.map((f) => f.name).join(', ');
+      print(`asking ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label}${names ? ` about ${names}` : ''}…`, 'dim');
+      const r = await aiAsk({ text, files: got.files });
       if (r.error) return print(r.error, 'err');
       const { plan } = r;
       const head = r.message ? `Claude: ${r.message}` : '';
@@ -1820,8 +1841,8 @@
         },
       },
       ai: {
-        usage: `/ai <what to do>  or  ${io.ai ? io.ai.pdfUsage : '/ai file'}`,
-        about: `plain language to changes, with your Claude API key: /ai 9-11 ACME drawings, lunch, mtg till 3 · ${io.ai ? io.ai.pdfUsage : '/ai file'} reads a schedule PDF · /ai undo`,
+        usage: `/ai <what to do>  or  ${io.ai ? io.ai.fileUsage : '/ai file'}`,
+        about: `plain language to changes, with your Claude API key: /ai 9-11 ACME drawings, lunch, mtg till 3 · ${io.ai ? io.ai.fileUsage : '/ai file'} reads files (PDFs, images, text, Word, Excel, PowerPoint; up to 5) · /ai undo`,
         run(args) { return runAi(args); },
       },
       aikey: {
@@ -2135,6 +2156,9 @@
         models: () => (io.ai ? Object.entries(io.ai.module.MODELS).map(([k, m]) => [k, m.label]) : []),
         modelKey: () => aiSettings().model || (io.ai ? io.ai.module.DEFAULT_MODEL : ''),
         ask: (o) => aiAsk(o),
+        // Whether a file can go to Claude: '' if so, else why not.
+        check: (f) => (io.ai ? io.ai.module.checkFile(f) : '/ai is not available here'),
+        maxFiles: () => (io.ai ? io.ai.module.MAX_FILES : 0),
         apply: (plan) => applyAiPlan(plan),
         undo: () => undoAi(),
       },

@@ -9,6 +9,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const readline = require('node:readline');
 const { spawnSync } = require('node:child_process');
 
@@ -607,27 +608,44 @@ const shell = createShell({
     place: 'this computer',
     compact: () => (stdout.columns || 80) < 70,
     // /ai: requests go from this computer straight to Anthropic with the
-    // person's own key. A schedule PDF is named in the line:
-    //   /ai ~/Downloads/schedule.pdf link today's work orders
+    // person's own key. Files (any kind it can read) start the line:
+    //   /ai ~/Downloads/schedule.pdf ~/Desktop/sheet.xlsx link the work orders
     ai: {
       module: require('../public/ai.js'),
-      pdfUsage: '/ai ~/path/schedule.pdf [what to do]',
+      fileUsage: '/ai ~/path/file … [what to do]',
+      tools: {
+        toBase64: (bytes) => Buffer.from(bytes).toString('base64'),
+        inflateRaw: async (bytes) => new Uint8Array(zlib.inflateRawSync(bytes)),
+      },
       async client(key) {
         const SDK = require('@anthropic-ai/sdk');
         const Anthropic = SDK.default || SDK;
         return new Anthropic({ apiKey: key });
       },
-      async pdf(args) {
-        const first = args[0] || '';
-        if (!/\.pdf$/i.test(first)) return { pdf: null, name: '', rest: args };
-        const file = path.resolve(first.replace(/^~(?=\/|$)/, os.homedir()));
-        try {
-          if (fs.statSync(file).size > 20 * 1024 * 1024) { print(`${first} is too large (20 MB at most)`, 'err'); return null; }
-          return { pdf: fs.readFileSync(file).toString('base64'), name: path.basename(file), rest: args.slice(1) };
-        } catch (_) {
-          print(`could not read ${first}`, 'err');
-          return null;
+      // Leading words that are files are attached; the rest is the request.
+      async files(args) {
+        const files = [];
+        let i = 0;
+        for (; i < args.length; i++) {
+          const word = args[i];
+          const file = path.resolve(word.replace(/^~(?=\/|$)/, os.homedir()));
+          let stat = null;
+          try { stat = fs.statSync(file); } catch (_) { /* not a file */ }
+          if (!stat || !stat.isFile()) {
+            // Looks like a path but isn't there.
+            if (/^[~./]/.test(word) && /\/./.test(word)) { print(`could not find ${word}`, 'err'); return null; }
+            break;
+          }
+          const why = this.module.checkFile({ name: path.basename(file), size: stat.size });
+          if (why) { print(why, 'err'); return null; }
+          try {
+            files.push({ name: path.basename(file), type: '', bytes: new Uint8Array(fs.readFileSync(file)) });
+          } catch (_) {
+            print(`could not read ${word}`, 'err');
+            return null;
+          }
         }
+        return { files, rest: args.slice(i) };
       },
     },
     async save(name, body) {

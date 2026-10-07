@@ -45,6 +45,7 @@
     paperclip: '<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
+    up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
     note: '<path d="M6 4.5h12A1.5 1.5 0 0 1 19.5 6v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5z"/><path d="M8.5 9.5h7M8.5 13h7M8.5 16.5h4"/>',
     hash: '<path d="M9.5 4L8 20M16 4l-1.5 16M5 9h15M4 15h15"/>',
     tool: '<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5"/><path d="M14.5 6.5L17 4l3 3-2.5 2.5"/>',
@@ -336,6 +337,7 @@
     function update(st) {
       state = st;
       if (!active) return;
+      showAiButton();
       updateTabs(st);
       const onBreak = Boolean(st.brk);
       const running = st.state === 'running' && !onBreak;
@@ -406,6 +408,15 @@
       const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : sheetName === 'Menu' ? 'menu' : (sheetName.startsWith('To-do') || sheetName === 'Done') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
       for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
     }
+    // AI shows only once it's set up (a key, here or synced from another
+    // device); until then it is one item in Menu → View.
+    function showAiButton() {
+      const on = shell.ai.ready() ? '1' : '0';
+      if (bar.dataset.ai === on) return;
+      bar.dataset.ai = tabbar.dataset.ai = on;
+      aiBtn.hidden = tabs.ai.hidden = on === '0';
+      if (on === '0') closeAi();
+    }
     function updateTabs(st) {
       const due = st.due || 0;
       tabs.todo.querySelector('.tab-badge').textContent = due ? String(due) : '';
@@ -433,7 +444,7 @@
     ];
     function showShortcuts() {
       const list = el('div', 'gkeys');
-      for (const [k, what] of SHORTCUTS) list.append(el('kbd', null, k), el('span', null, what));
+      for (const [k, what] of SHORTCUTS) if (k !== 'A' || shell.ai.ready()) list.append(el('kbd', null, k), el('span', null, what));
       sheet('Keyboard shortcuts', list);
     }
     document.addEventListener('keydown', (e) => {
@@ -455,7 +466,7 @@
       else if ((k === 'd' || k === 'D') && state && state.todo) act = () => opts.run('/done');
       else if ((k === 'r' || k === 'R') && (visible(resumeBtn) || visible(backBtn))) act = () => resume();
       else if (k === '/') act = () => findForm();
-      else if (k === 'a' || k === 'A') act = () => toggleAi();
+      else if ((k === 'a' || k === 'A') && shell.ai.ready()) act = () => toggleAi();
       else if ((k === '+' || k === '=') && (mode === 'running' || mode === 'break')) act = () => toggleAddMenu();
       else if (k === '?') act = () => showShortcuts();
       if (!act) return;
@@ -906,6 +917,7 @@
       }, async (v) => {
         if (!v.key) return;
         await quietly(async () => { await opts.run(`/aikey ${v.key}`); await opts.run(`/aimodel ${v.model}`); });
+        showAiButton();
         if (shell.ai.ready()) {
           toast(`AI is set up · ${shell.ai.model()}`, 'ok');
           setTimeout(openAi, 200);
@@ -924,32 +936,42 @@
     aiModel.setAttribute('aria-label', 'Model');
     aiModel.title = 'Model (billed to your API key)';
     aiModel.addEventListener('change', () => quietly(() => opts.run(`/aimodel ${aiModel.value}`)));
-    const aiClose = button('', 'aip-close', () => closeAi(), 'Close (Esc)');
+    const aiClose = button('', 'aip-close', () => closeAi(), 'Close (Esc); the chat stays');
     aiClose.append(icon('x'));
+    const aiNew = button('', 'aip-new', () => { aiReset(); focusAi(); }, 'New chat');
+    aiNew.append(icon('plus'));
     const aiTitle = el('span', 'aip-title');
     aiTitle.append(icon('spark'), el('span', null, 'Ask AI'));
-    aiHead.append(aiTitle, aiModel, aiClose);
+    aiHead.append(aiTitle, aiModel, aiNew, aiClose);
     const aiBody = el('div', 'aip-body');
     aiPanel.append(aiHead, aiBody);
     aiPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeAi(); } });
-    dragDown(aiPanel, aiBody, () => { closeAi(); aiPanel.style.transform = ''; });
+    
     dockEl.insertBefore(aiPanel, bar);
     // Toasts sit just above the dock, which grows with an open panel.
     if (window.ResizeObserver) new ResizeObserver(() => appEl.style.setProperty('--dock-h', `${dockEl.offsetHeight}px`)).observe(dockEl);
 
-    const aiText = el('textarea', 'gai-text');
-    aiText.rows = 2;
-    aiText.placeholder = 'e.g. 9-12 ACME drawings, lunch, then a client call till 2 · or attach a schedule';
-    aiText.setAttribute('aria-label', 'What to do');
+    // A chat: what you wrote on the right, Claude's answers on the left, each
+    // with its changes; the latest has Apply. Replying refines it (Claude
+    // answers with the whole revised set). Applying closes the panel and
+    // starts a new chat; ✕ keeps it for later.
+    const aiThread = el('div', 'chat');
+    aiThread.setAttribute('aria-live', 'polite');
+    const aiText = el('textarea', 'chat-input');
+    aiText.rows = 1;
+    aiText.setAttribute('aria-label', 'Message');
     aiText.enterKeyHint = 'send';
-    // Enter sends; Shift+Enter is a new line.
+    // Enter sends; Shift+Enter is a new line. It grows with what's typed.
     aiText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); aiSend(); } });
-    let aiFiles = [];
+    aiText.addEventListener('input', () => fitAiText());
+    function fitAiText() {
+      aiText.style.height = 'auto';
+      aiText.style.height = `${Math.min(aiText.scrollHeight + 2, 140)}px`;
+    }
+    let aiFiles = []; // attached, not yet sent
+    let aiSent = []; // sent in this chat (they go along with every turn)
     let aiBusy = 0; // which request is on its way (0: none)
-    // The conversation so far ({ text, reply } per turn) and the last answer,
-    // while it is neither applied nor dismissed: a reply follows it up.
-    let aiHistory = [];
-    let aiLast = null;
+    let aiHistory = []; // the turns so far, for Claude: [{ text, reply }]
     const aiChips = el('div', 'gai-chips');
     function pickAiFiles(camera = false) {
       const picker = document.createElement('input');
@@ -967,7 +989,7 @@
         const max = shell.ai.maxFiles();
         const bad = [];
         for (const file of list) {
-          if (aiFiles.length >= max) { bad.push(`${max} files at most`); break; }
+          if (aiFiles.length + aiSent.length >= max) { bad.push(`${max} files at most in a chat`); break; }
           // Photos are shrunk first (and HEIC becomes JPEG), so check after.
           const quick = !/^image\//.test(file.type) && shell.ai.check({ name: file.name, type: file.type, size: file.size });
           if (quick) { bad.push(quick); continue; }
@@ -978,19 +1000,24 @@
         }
         drawAiChips();
         if (bad.length) toast(bad.join(' · '), 'err');
+        focusAi();
       });
       document.body.append(picker);
       picker.click();
     }
-    const aiAttach = button('', 'gai-attach', () => pickAiFiles(), 'Attach files: a schedule, a sheet, a document or a photo');
-    aiAttach.append(icon('paperclip'), el('span', null, 'Attach files'));
+    const aiAttach = button('', 'chat-tool gai-attach', () => pickAiFiles(), 'Attach files: a schedule, a sheet, a document or a photo');
+    aiAttach.append(icon('paperclip'));
     // Phones: straight to the camera (a page of notes, a schedule on a wall).
-    const aiPhoto = button('', 'gai-attach gai-photo', () => pickAiFiles(true), 'Take a photo');
-    aiPhoto.append(icon('camera'), el('span', null, 'Photo'));
-    const aiGo = button('', 'gai-go', () => aiSend(), 'Ask (Ctrl/Cmd+Enter)');
-    aiGo.append(icon('spark'), el('span', null, 'Ask'));
-    const aiRow = el('div', 'gai-row');
-    aiRow.append(aiAttach, aiPhoto, aiGo);
+    const aiPhoto = button('', 'chat-tool gai-photo', () => pickAiFiles(true), 'Take a photo');
+    aiPhoto.append(icon('camera'));
+    const aiGo = button('', 'chat-send gai-go', () => aiSend(), 'Send (Enter)');
+    aiGo.append(icon('up'));
+    const aiCompose = el('div', 'chat-compose');
+    const aiRow = el('div', 'chat-row');
+    aiRow.append(aiAttach, aiPhoto, aiText, aiGo);
+    aiCompose.append(aiChips, aiRow);
+    aiBody.append(aiThread, aiCompose);
+    dragDown(aiPanel, aiThread, () => { closeAi(); aiPanel.style.transform = ''; });
 
     function drawAiChips() {
       aiChips.replaceChildren();
@@ -1002,23 +1029,33 @@
         chip.append(icon('paperclip'), el('span', null, f.name), x);
         aiChips.append(chip);
       });
-      aiAttach.disabled = aiPhoto.disabled = aiFiles.length >= shell.ai.maxFiles();
+      aiAttach.disabled = aiPhoto.disabled = aiFiles.length + aiSent.length >= shell.ai.maxFiles();
     }
-
-    function aiCompose() {
+    function aiEmpty() {
+      const hint = el('div', 'chat-empty');
+      hint.append(el('p', null, 'Tell it what happened, or attach a schedule, a sheet or a photo of your notes.'), el('p', 'chat-eg', 'e.g. 9-12 ACME drawings, lunch, then a client call till 2'));
+      return hint;
+    }
+    function drawAi() {
+      aiNew.hidden = !aiHistory.length && !aiBusy;
+      aiText.placeholder = aiHistory.length ? 'Reply…' : 'Message…';
+      if (!aiThread.children.length) aiThread.append(aiEmpty());
+      aiThread.scrollTop = aiThread.scrollHeight;
+    }
+    // A new chat, empty.
+    function aiReset() {
       aiBusy = 0;
       aiHistory = [];
-      aiLast = null;
-      aiText.placeholder = 'e.g. 9-12 ACME drawings, lunch, then a client call till 2 · or attach a schedule';
-      drawAiChips();
-      aiBody.replaceChildren(aiText, aiChips, aiRow);
-    }
-    // Dismiss (or applied): start over, empty.
-    function aiReset() {
-      aiText.value = '';
+      aiSent = [];
       aiFiles = [];
-      aiCompose();
+      aiText.value = '';
+      aiThread.replaceChildren();
+      fitAiText();
+      drawAiChips();
+      drawAi();
     }
+    aiReset();
+    function focusAi() { if (!window.matchMedia('(pointer: coarse)').matches) aiText.focus(); }
 
     function aiOpen() { return !aiPanel.hidden; }
     function openAi() {
@@ -1031,11 +1068,11 @@
         return o;
       }));
       aiModel.value = shell.ai.modelKey();
-      if (!aiBusy && !aiBody.children.length) aiCompose();
       aiPanel.hidden = false;
       aiBtn.setAttribute('aria-pressed', 'true');
       markTab();
-      if (aiBody.contains(aiText) && !window.matchMedia('(pointer: coarse)').matches) aiText.focus();
+      drawAi();
+      focusAi();
     }
     function closeAi() {
       if (aiPanel.hidden) return;
@@ -1045,37 +1082,62 @@
     }
     function toggleAi() { return aiOpen() ? closeAi() : openAi(); }
 
+    function bubble(who, ...content) {
+      const b = el('div', `chat-msg ${who}`);
+      b.append(...content);
+      aiThread.querySelector('.chat-empty')?.remove();
+      aiThread.append(b);
+      aiThread.scrollTop = aiThread.scrollHeight;
+      return b;
+    }
+
     async function aiSend() {
+      if (aiBusy) return;
       const words = aiText.value.trim();
-      const followUp = aiHistory.length > 0;
-      if (!words && (followUp || !aiFiles.length)) { aiText.focus(); return; }
-      const names = aiFiles.map((f) => f.name).join(', ');
+      const fresh = aiFiles;
+      if (!words && !fresh.length) { aiText.focus(); return; }
+      // What was written, as sent.
+      const mine = [];
+      if (words) mine.push(el('div', 'chat-text', words));
+      if (fresh.length) {
+        const chips = el('div', 'chat-files');
+        for (const f of fresh) { const c = el('span', 'chat-file'); c.append(icon('paperclip'), el('span', null, f.name)); chips.append(c); }
+        mine.push(chips);
+      }
+      bubble('me', ...mine);
+      aiSent = [...aiSent, ...fresh];
+      aiFiles = [];
+      aiText.value = '';
+      fitAiText();
+      drawAiChips();
+      // The answer before is no longer the one to apply.
+      for (const b of aiThread.querySelectorAll('.chat-apply')) b.remove();
+      for (const b of aiThread.querySelectorAll('.chat-msg.ai .gai-list')) b.classList.add('old');
       const ticket = Date.now();
       aiBusy = ticket;
-      aiBody.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${names && !followUp ? ` about ${names}` : ''}…`));
-      const r = await shell.ai.ask({ text: words, files: aiFiles, history: aiHistory });
-      if (aiBusy !== ticket) return; // Cancelled meanwhile.
+      const wait = bubble('ai wait', el('span', 'chat-dots', ''));
+      wait.setAttribute('aria-label', `${shell.ai.model()} is answering`);
+      drawAi();
+      const r = await shell.ai.ask({ text: words, files: aiSent, history: aiHistory });
+      if (aiBusy !== ticket) return; // a new chat meanwhile
       aiBusy = 0;
+      wait.remove();
       if (r.error) {
-        // Back to where it was: the last answer (to reply again) or the start.
-        const back = button('Back', 'gform-range', () => (aiLast ? showPlan(aiLast) : aiCompose()));
-        const row = el('div', 'gai-row');
-        row.append(back);
-        aiBody.replaceChildren(el('p', 'gsheet-text err', r.error), row);
+        bubble('ai err', el('div', 'chat-text', r.error));
+        drawAi();
         return;
       }
       aiHistory = [...aiHistory, r.turn];
-      aiText.value = '';
       showPlan(r);
+      drawAi();
+      focusAi();
     }
 
-    // Claude's answer: its note, the changes, and a box to reply in (Enter
-    // sends; Claude answers with the whole revised set). Dismiss starts over.
+    // Claude's answer: its note and the changes, with Apply on the latest.
     function showPlan(r) {
-      aiLast = r;
       const { plan } = r;
       const out = [];
-      if (r.message) out.push(el('p', 'gai-msg', r.message));
+      if (r.message) out.push(el('div', 'chat-text', r.message));
       const list = el('div', 'gai-list');
       for (const line of plan.preview) {
         const kind = line.startsWith('+') ? 'add' : line.startsWith('~') ? 'edit' : line.startsWith('-') ? 'del' : 'other';
@@ -1085,28 +1147,20 @@
       }
       for (const x of plan.skipped) list.append(el('div', 'gai-change skipped', `skipped: ${x}`));
       if (plan.preview.length || plan.skipped.length) out.push(list);
-      if (!r.message && !plan.preview.length) out.push(el('p', 'gai-msg', 'No changes.'));
-      aiText.placeholder = plan.preview.length ? 'Reply to change these (Enter sends)' : 'Reply (Enter sends)';
-      out.push(aiText);
-      const row = el('div', 'gai-row');
-      const dismiss = button('Dismiss', 'gform-range', () => { aiReset(); if (!window.matchMedia('(pointer: coarse)').matches) aiText.focus(); }, 'Clear this and start over');
-      const reply = button('', 'gai-attach gai-reply', () => aiSend(), 'Send the reply (Enter)');
-      reply.append(icon('spark'), el('span', null, 'Reply'));
-      row.append(dismiss, reply);
+      if (!r.message && !plan.preview.length) out.push(el('div', 'chat-text', 'No changes.'));
       if (plan.preview.length) {
         const n = plan.preview.length;
-        const apply = button('', 'gai-go', async () => {
+        const apply = button('', 'chat-apply gai-go', async () => {
+          // Done: the panel closes and the next chat starts empty.
           aiReset();
           closeAi();
           await quietly(() => shell.ai.apply(plan));
           toast(`Applied ${n} change${n === 1 ? '' : 's'}`, 'ok', plan.ops.length ? { label: 'Undo', run: async () => { await quietly(() => shell.ai.undo()); toast('Undone', 'dim'); } } : null);
         });
         apply.append(icon('check'), el('span', null, `Apply ${n === 1 ? '1 change' : `${n} changes`}`));
-        row.append(apply);
+        out.push(apply);
       }
-      out.push(row);
-      aiBody.replaceChildren(...out);
-      if (!window.matchMedia('(pointer: coarse)').matches) aiText.focus();
+      bubble('ai', ...out);
     }
 
     function findForm() {
@@ -1241,7 +1295,7 @@
           ['Keyboard shortcuts', () => showShortcuts()],
           [T.clockMode() === '12' ? '24-hour clock' : '12-hour clock', () => runMenu('Clock', `/clock ${T.clockMode() === '12' ? '24' : '12'}`)],
           ['Accent color', () => accentSheet()],
-          ['AI key and model', () => aiSetup()],
+          [shell.ai.ready() ? 'AI key and model' : 'Set up AI (optional)', () => aiSetup()],
         ]],
       ];
     }
@@ -1316,6 +1370,7 @@
         active = true;
         bar.hidden = false;
         tabbar.hidden = false;
+        showAiButton();
         markTab();
         if (state) update(state);
       },

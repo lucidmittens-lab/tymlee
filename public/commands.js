@@ -1173,7 +1173,10 @@
             '  dev fixing the login bug',
             '  mtg standup',
             '',
-            ...groups.flatMap((g) => [`${g.title}  (/help ${g.key})`, ...g.names.map(line), '']),
+            // AI stays out of the way until it's set up: one line about it.
+            ...groups.flatMap((g) => (g.key === 'ai' && !aiSettings().key
+              ? ['AI  (/help ai)', `  ${'/aikey sk-ant-…'.padEnd(28)}  optional: turn on /ai with your own Claude API key`, '']
+              : [`${g.title}  (/help ${g.key})`, ...g.names.map(line), ''])),
             'Ranges: today (default), yesterday, week, month, calweek, calmonth, all,',
             '        Nd (last N days), a day name, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD',
             ...(io.keys && io.keys.length ? ['', ...io.keys] : []),

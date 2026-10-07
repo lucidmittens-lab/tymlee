@@ -854,7 +854,9 @@
 
     // Ask Claude; resolves to { error } or { label, message, plan }. Used by
     // /ai and by the GUI's Ask AI sheet.
-    async function aiAsk({ text, files = [] }) {
+    // history: earlier turns ({ text, reply }) when following up; the result
+    // has `turn`, this one, to add to it.
+    async function aiAsk({ text, files = [], history = [] }) {
       const key = aiSettings().key;
       if (!key) return { error: 'no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)' };
       if (!io.ai) return { error: '/ai is not available here' };
@@ -868,7 +870,7 @@
       const now = Date.now();
       const model = aiSettings().model || A.DEFAULT_MODEL;
       const context = A.contextText({ T, now, entries: store.entries, names: fullNames(), todos: todos().filter((t) => !t.done) });
-      const req = A.buildRequest({ model, context, text, files: read });
+      const req = A.buildRequest({ model, context, text, files: read, history });
       let res;
       try {
         const client = await io.ai.client(key);
@@ -883,7 +885,7 @@
       }
       const reply = A.readReply(res);
       if (reply.error) return reply;
-      return { label: A.MODELS[model].label, message: reply.message, plan: aiPlan(reply.changes, Date.now(), await store.supports('notes')) };
+      return { label: A.MODELS[model].label, message: reply.message, turn: { text, reply: reply.raw }, plan: aiPlan(reply.changes, Date.now(), await store.supports('notes')) };
     }
 
     async function runAi(args) {
@@ -897,16 +899,24 @@
       const A = io.ai.module;
       const names = got.files.map((f) => f.name).join(', ');
       print(`asking ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label}${names ? ` about ${names}` : ''}…`, 'dim');
-      const r = await aiAsk({ text, files: got.files });
-      if (r.error) return print(r.error, 'err');
-      const { plan } = r;
-      const head = r.message ? `Claude: ${r.message}` : '';
-      if (!plan.preview.length) return print([head || 'Claude: no changes', ...plan.skipped.map((x) => `  skipped: ${x}`)].join('\n'), 'report');
-      print([head, ...plan.preview.map((l) => `  ${l}`), ...plan.skipped.map((x) => `  skipped: ${x}`)].filter(Boolean).join('\n'), 'report');
-      const n = plan.preview.length;
-      const yes = await io.ask(`apply ${n === 1 ? 'this change' : `these ${n} changes`}? y/n`, '', 'yesno');
-      if (!yes || !/^y/i.test(yes.trim())) return print('nothing changed', 'dim');
-      return applyAiPlan(plan);
+      const history = [];
+      let ask = text;
+      for (;;) {
+        const r = await aiAsk({ text: ask, files: got.files, history });
+        if (r.error) return print(r.error, 'err');
+        history.push(r.turn);
+        const { plan } = r;
+        const head = r.message ? `Claude: ${r.message}` : '';
+        print([head || (plan.preview.length ? '' : 'Claude: no changes'), ...plan.preview.map((l) => `  ${l}`), ...plan.skipped.map((x) => `  skipped: ${x}`)].filter(Boolean).join('\n'), 'report');
+        const n = plan.preview.length;
+        // y applies, n (or nothing) cancels, anything else is a reply.
+        const answer = String(await io.ask(n ? `apply ${n === 1 ? 'this change' : `these ${n} changes`}? y/n, or reply to Claude` : 'reply to Claude, or Enter to finish', '', n ? 'yesno' : 'reply') || '').trim();
+        if (n && /^(y|yes)$/i.test(answer)) return applyAiPlan(plan);
+        if (answer.startsWith('/')) { if (n) print('nothing changed', 'dim'); return run(answer); } // a command: done here
+        if (!answer || /^(n|no)$/i.test(answer)) return n ? print('nothing changed', 'dim') : undefined;
+        ask = answer;
+        print(`asking ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label}…`, 'dim');
+      }
     }
 
     function applyAiPlan(plan) {

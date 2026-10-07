@@ -1040,3 +1040,31 @@ test('/ai attachments: any kind is checked; Word, Excel and PowerPoint become te
   });
   assert.equal(await A.officeText(pptx, 'pptx', tools.inflateRaw), 'Slide 1\nFirst\n\nSlide 2\nLast');
 });
+
+test('/ai context: a calendar of last, this and next week (Sunday to Saturday), across months', () => {
+  const A = require('../public/ai.js');
+  const now = new Date(2026, 9, 1, 15, 0).getTime(); // Thursday 1 October
+  const old = { id: 'o', ts: new Date(2026, 8, 19, 9, 0).getTime(), text: 'ACME older' }; // before last week
+  const lastWeek = { id: 'l', ts: new Date(2026, 8, 21, 9, 0).getTime(), text: 'ACME monday last week' };
+  const ctx = A.contextText({ T, now, entries: [old, lastWeek], names: {}, todos: [] });
+  assert.match(ctx, /This week: Sun 2026-09-27, Mon 2026-09-28, Tue 2026-09-29, Wed 2026-09-30, Thu 2026-10-01, Fri 2026-10-02, Sat 2026-10-03/);
+  assert.match(ctx, /Last week: Sun 2026-09-20, /);
+  assert.match(ctx, /Next week: Sun 2026-10-04, /);
+  assert.ok(ctx.includes('monday last week') && !ctx.includes('ACME older'), 'entries from the start of last week');
+  assert.match(A.SYSTEM, /never assume it stays in one month/);
+});
+
+test('/ai follow-up: earlier turns go first (files with the first), the log as it is now with the last', () => {
+  const A = require('../public/ai.js');
+  const files = [{ kind: 'text', name: 'a.csv', text: 'x,y' }];
+  const r = A.buildRequest({ model: 'haiku', context: 'CTX', text: 'make it 3pm', files, history: [{ text: 'add a call at 2', reply: '{"message":"ok","changes":[]}' }] });
+  assert.deepEqual(r.messages.map((m) => m.role), ['user', 'assistant', 'user']);
+  assert.equal(r.messages[0].content[0].type, 'document');
+  assert.equal(r.messages[0].content.at(-1).text, 'Request: add a call at 2');
+  assert.equal(r.messages[1].content[0].text, '{"message":"ok","changes":[]}');
+  assert.match(r.messages[2].content[0].text, /^CTX\n\nFollow-up: make it 3pm/);
+  assert.match(r.messages[2].content[0].text, /complete set of changes/);
+  assert.ok(!r.messages[0].content.some((b) => b.text && b.text.includes('CTX')), 'the context only once, as it is now');
+  const reply = A.readReply({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"message":"hi","changes":[]}' }] });
+  assert.equal(reply.raw, '{"message":"hi","changes":[]}');
+});

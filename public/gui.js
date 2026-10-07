@@ -83,7 +83,7 @@
     let composing = false;
     let state = null; // the last status from update()
 
-    const menuBtn = button('', 'sb-menu', () => openMenu(), 'Menu (? lists the keyboard shortcuts)');
+    const menuBtn = button('', 'sb-menu', () => (sheetName === 'Menu' ? closeSheet() : openMenu()), 'Menu (? lists the keyboard shortcuts)');
     menuBtn.append(icon('menu'));
     // The card: what's running and for how long.
     const card = el('div', 'sb-card');
@@ -394,7 +394,8 @@
       ['find', 'Find', 'search', () => findForm()],
       ['menu', 'Menu', 'menu', () => openMenu()],
     ]) {
-      const b = button('', 'tab', run, label);
+      // A second tap on the lit tab closes its panel.
+      const b = button('', 'tab', () => (key !== 'timeline' && b.getAttribute('aria-current') === 'true' ? (aiOpen() ? closeAi() : closeSheet()) : run()), label);
       b.dataset.tab = key;
       b.append(icon(ico), el('span', 'tab-label', label), el('span', 'tab-badge'));
       tabs[key] = b;
@@ -439,6 +440,7 @@
       if (!active || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
       const t = e.target;
       if (t && t.closest && t.closest('input, textarea, select, [contenteditable], .entry-card')) return;
+      if (e.key === 'Escape' && sheetEl) { e.preventDefault(); closeSheet(); return; }
       if (sheetEl || document.querySelector('.entry-card')) return;
       const k = e.key;
       if (k === 'Escape' && !addMenu.hidden) { e.preventDefault(); toggleAddMenu(false); return; }
@@ -503,34 +505,37 @@
       sheetEl = null;
       sheetName = '';
       markTab();
-      s.classList.add('out');
-      setTimeout(() => s.remove(), 160);
+      s.remove();
     }
+    // A panel above the start bar, like Ask AI: menus, forms, lists and
+    // reports. One at a time (it replaces Ask AI's while open, which keeps its
+    // draft). Closes with ✕ or Esc.
     function sheet(heading, ...content) {
       closeSheet();
-      const wrap = el('div', 'gsheet-wrap');
+      closeAi();
+      if (opts.closeEntry) opts.closeEntry();
+      const wrap = el('div', 'gsheet-wrap gpanel');
       const panel = el('div', 'gsheet');
-      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('role', 'region');
       panel.setAttribute('aria-label', heading);
       const head = el('div', 'gsheet-head');
-      const close = button('', 'gsheet-close', closeSheet, 'Close');
+      const close = button('', 'gsheet-close', closeSheet, 'Close (Esc)');
       close.append(icon('x'));
       head.append(el('span', 'gsheet-title', heading), close);
       const body = el('div', 'gsheet-body');
       body.append(...content);
-      panel.append(el('div', 'sheet-grip gsheet-grip'), head, body);
+      panel.append(head, body);
       wrap.append(panel);
-      wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) closeSheet(); });
-      panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+      wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeSheet(); } });
       dragDown(panel, body, closeSheet);
-      appEl.append(wrap);
+      dockEl.insertBefore(wrap, aiPanel);
       sheetEl = wrap;
       sheetName = heading;
       markTab();
       return panel;
     }
 
-    // Phones: pull a sheet down to close it, from anywhere while its content
+    // Phones: pull a panel down to close it, from anywhere while its content
     // is scrolled to the top. It follows the finger and springs back if not
     // pulled far enough.
     function dragDown(panel, body, close) {
@@ -927,15 +932,24 @@
     const aiBody = el('div', 'aip-body');
     aiPanel.append(aiHead, aiBody);
     aiPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeAi(); } });
+    dragDown(aiPanel, aiBody, () => { closeAi(); aiPanel.style.transform = ''; });
     dockEl.insertBefore(aiPanel, bar);
+    // Toasts sit just above the dock, which grows with an open panel.
+    if (window.ResizeObserver) new ResizeObserver(() => appEl.style.setProperty('--dock-h', `${dockEl.offsetHeight}px`)).observe(dockEl);
 
     const aiText = el('textarea', 'gai-text');
     aiText.rows = 2;
     aiText.placeholder = 'e.g. 9-12 ACME drawings, lunch, then a client call till 2 · or attach a schedule';
     aiText.setAttribute('aria-label', 'What to do');
-    aiText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); aiSend(); } });
+    aiText.enterKeyHint = 'send';
+    // Enter sends; Shift+Enter is a new line.
+    aiText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); aiSend(); } });
     let aiFiles = [];
     let aiBusy = 0; // which request is on its way (0: none)
+    // The conversation so far ({ text, reply } per turn) and the last answer,
+    // while it is neither applied nor dismissed: a reply follows it up.
+    let aiHistory = [];
+    let aiLast = null;
     const aiChips = el('div', 'gai-chips');
     function pickAiFiles(camera = false) {
       const picker = document.createElement('input');
@@ -993,14 +1007,24 @@
 
     function aiCompose() {
       aiBusy = 0;
+      aiHistory = [];
+      aiLast = null;
+      aiText.placeholder = 'e.g. 9-12 ACME drawings, lunch, then a client call till 2 · or attach a schedule';
       drawAiChips();
       aiBody.replaceChildren(aiText, aiChips, aiRow);
+    }
+    // Dismiss (or applied): start over, empty.
+    function aiReset() {
+      aiText.value = '';
+      aiFiles = [];
+      aiCompose();
     }
 
     function aiOpen() { return !aiPanel.hidden; }
     function openAi() {
       if (!shell.ai.ready()) return aiSetup();
       closeSheet();
+      if (opts.closeEntry) opts.closeEntry();
       aiModel.replaceChildren(...shell.ai.models().map(([k, label]) => {
         const o = el('option', null, label.replace(/^Claude /, ''));
         o.value = k;
@@ -1023,25 +1047,32 @@
 
     async function aiSend() {
       const words = aiText.value.trim();
-      if (!words && !aiFiles.length) { aiText.focus(); return; }
+      const followUp = aiHistory.length > 0;
+      if (!words && (followUp || !aiFiles.length)) { aiText.focus(); return; }
       const names = aiFiles.map((f) => f.name).join(', ');
       const ticket = Date.now();
       aiBusy = ticket;
-      aiBody.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${names ? ` about ${names}` : ''}…`));
-      const r = await shell.ai.ask({ text: words, files: aiFiles });
+      aiBody.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${names && !followUp ? ` about ${names}` : ''}…`));
+      const r = await shell.ai.ask({ text: words, files: aiFiles, history: aiHistory });
       if (aiBusy !== ticket) return; // Cancelled meanwhile.
       aiBusy = 0;
       if (r.error) {
-        const back = button('Back', 'gform-range', () => aiCompose());
+        // Back to where it was: the last answer (to reply again) or the start.
+        const back = button('Back', 'gform-range', () => (aiLast ? showPlan(aiLast) : aiCompose()));
         const row = el('div', 'gai-row');
         row.append(back);
         aiBody.replaceChildren(el('p', 'gsheet-text err', r.error), row);
         return;
       }
+      aiHistory = [...aiHistory, r.turn];
+      aiText.value = '';
       showPlan(r);
     }
 
+    // Claude's answer: its note, the changes, and a box to reply in (Enter
+    // sends; Claude answers with the whole revised set). Dismiss starts over.
     function showPlan(r) {
+      aiLast = r;
       const { plan } = r;
       const out = [];
       if (r.message) out.push(el('p', 'gai-msg', r.message));
@@ -1054,26 +1085,28 @@
       }
       for (const x of plan.skipped) list.append(el('div', 'gai-change skipped', `skipped: ${x}`));
       if (plan.preview.length || plan.skipped.length) out.push(list);
+      if (!r.message && !plan.preview.length) out.push(el('p', 'gai-msg', 'No changes.'));
+      aiText.placeholder = plan.preview.length ? 'Reply to change these (Enter sends)' : 'Reply (Enter sends)';
+      out.push(aiText);
       const row = el('div', 'gai-row');
-      const back = button('Back', 'gform-range', () => aiCompose());
+      const dismiss = button('Dismiss', 'gform-range', () => { aiReset(); if (!window.matchMedia('(pointer: coarse)').matches) aiText.focus(); }, 'Clear this and start over');
+      const reply = button('', 'gai-attach gai-reply', () => aiSend(), 'Send the reply (Enter)');
+      reply.append(icon('spark'), el('span', null, 'Reply'));
+      row.append(dismiss, reply);
       if (plan.preview.length) {
         const n = plan.preview.length;
         const apply = button('', 'gai-go', async () => {
-          aiText.value = '';
-          aiFiles = [];
-          aiCompose();
+          aiReset();
           closeAi();
           await quietly(() => shell.ai.apply(plan));
           toast(`Applied ${n} change${n === 1 ? '' : 's'}`, 'ok', plan.ops.length ? { label: 'Undo', run: async () => { await quietly(() => shell.ai.undo()); toast('Undone', 'dim'); } } : null);
         });
         apply.append(icon('check'), el('span', null, `Apply ${n === 1 ? '1 change' : `${n} changes`}`));
-        row.append(back, apply);
-      } else {
-        if (!r.message) out.push(el('p', 'gai-msg', 'No changes.'));
-        row.append(back);
+        row.append(apply);
       }
       out.push(row);
       aiBody.replaceChildren(...out);
+      if (!window.matchMedia('(pointer: coarse)').matches) aiText.focus();
     }
 
     function findForm() {
@@ -1298,6 +1331,8 @@
       toast,
       markStart(on) { lastStart = on; },
       openTodos: () => todoSheet(),
+      // The phone's entry card takes the same place: it closes these first.
+      closePanels() { closeSheet(); closeAi(); },
       get active() { return active; },
     };
   }

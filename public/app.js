@@ -248,6 +248,7 @@
     dockEl: $('dock'),
     run: runLine,
     readAiFile: (f) => readAiFile(f),
+    closeEntry: () => closeEntryEditor(),
     // The + on the running entry → Edit entry: its card, on today's timeline.
     editEntry(id) {
       const find = () => [...guiEl.querySelectorAll('.tl-block')].filter((x) => x.dataset.id === id).pop();
@@ -690,13 +691,9 @@
 
   function closeEntryEditor() {
     if (!editCard) return;
-    const { el, backdrop } = editCard;
+    const { el } = editCard;
     editCard = null;
-    if (!backdrop) return el.remove();
-    // Phones: slide the sheet away.
-    el.classList.add('sheet-out');
-    backdrop.classList.add('sheet-out');
-    setTimeout(() => { el.remove(); backdrop.remove(); }, 180);
+    el.remove();
   }
 
   function field(labelText, control) {
@@ -839,34 +836,13 @@
     });
 
     if (narrow.matches) {
-      // Phones: a bottom sheet over a dimmed timeline. Tap outside or swipe it
-      // down to close. The keyboard stays down until a field is tapped.
-      card.classList.add('sheet');
-      const grip = document.createElement('div');
-      grip.className = 'sheet-grip';
-      card.prepend(grip);
-      const backdrop = document.createElement('div');
-      backdrop.className = 'sheet-backdrop';
-      backdrop.addEventListener('click', () => closeEntryEditor());
-      appEl.append(backdrop, card);
-      editCard = { el: card, id: b.id, backdrop };
-      let drag = null;
-      card.addEventListener('touchstart', (e) => {
-        if (e.target.closest('input, textarea, button') || card.scrollTop > 0) return;
-        drag = { y: e.touches[0].clientY, dy: 0 };
-      }, { passive: true });
-      card.addEventListener('touchmove', (e) => {
-        if (!drag) return;
-        drag.dy = Math.max(0, e.touches[0].clientY - drag.y);
-        card.style.transform = `translateY(${drag.dy}px)`;
-      }, { passive: true });
-      card.addEventListener('touchend', () => {
-        if (!drag) return;
-        const { dy } = drag;
-        drag = null;
-        card.style.transform = '';
-        if (dy > 80) closeEntryEditor();
-      });
+      // Phones: a panel above the start bar, like the GUI's others (it closes
+      // them). The keyboard stays down until a field is tapped.
+      if (gui) gui.closePanels();
+      card.classList.add('dock-card');
+      const dockEl = $('dock');
+      dockEl.insertBefore(card, $('startbar'));
+      editCard = { el: card, id: b.id };
       return;
     }
 
@@ -1261,7 +1237,7 @@
         return;
       }
       input.value = initial || '';
-      input.placeholder = yesno ? 'y + Enter: apply · Esc: cancel' : 'Enter: save · Esc: cancel';
+      input.placeholder = yesno ? 'y + Enter: apply · or type a reply · Esc: cancel' : name === 'reply' ? 'type a reply · Enter alone: done' : 'Enter: save · Esc: cancel';
       renderHints();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);

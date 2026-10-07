@@ -302,7 +302,9 @@ function ask(label, initial, name) {
       confirm: 'confirming needs the tymlee shell; or type /reset-encryption DELETE',
       form: 'this form asks questions (%{ask:...}); fill it in from the tymlee shell',
       yesno: '/ai shows its changes and asks before applying; run it from the tymlee shell',
+      reply: '',
     };
+    if (name === 'reply') return Promise.resolve(null); // a question from Claude: shown, nothing more
     print(why[name] || 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
   }
@@ -313,7 +315,8 @@ function ask(label, initial, name) {
     const lines = multiline ? (initial || '').split('\n') : [];
     const current = multiline ? lines.pop() : initial || '';
     modal = { kind: 'ask', multiline, lines, name: name === 'yesno' ? 'apply' : name || 'answer', resolve };
-    print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}${name === 'yesno' ? 'y + Enter: apply' : 'Enter: save'} · Esc: cancel`, 'dim');
+    const keys = name === 'yesno' ? 'y + Enter: apply · or type a reply' : name === 'reply' ? 'Enter: send · Enter alone: done' : 'Enter: save';
+    print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}${keys} · Esc: cancel`, 'dim');
     for (const line of lines) print(`${sgr('90', `${modal.name} ›`)} ${line}`);
     rl.setPrompt(sgr('32', `${modal.name} › `));
     promptShown = true;

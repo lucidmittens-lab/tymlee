@@ -88,6 +88,7 @@
     '',
     'Rules:',
     '- Use existing categories and their full names to match. Only invent a category when nothing fits, and say so in the message.',
+    '- Dates: use the calendar below for "Monday", "this week", "last Friday" and the like. A week often starts in one month and ends in the next; never assume it stays in one month.',
     '- Times are 24-hour HH:MM. "Lunch" is an unpaid break. "Until 3" means the next thing (or off) starts at 15:00.',
     '- There are no end times: something ends when the next thing starts. Never add or move anything to a time later than now (given at the top); tymlee refuses it.',
     '- An interruption to what is running now: add the interruption at its start time. If it has already ended, also add an entry that resumes what was running (same category and title) at the time it ended. If it is still going, add only the interruption.',
@@ -101,7 +102,16 @@
   function contextText({ T, now, entries, names, todos }) {
     const lines = [];
     const d = new Date(now);
-    lines.push(`Now: ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()]} ${T.ymd(now)} ${T.clockAs('24', now)}`);
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    lines.push(`Now: ${DAYS[d.getDay()]} ${T.ymd(now)} ${T.clockAs('24', now)}`);
+    // The dates of this week and last (Sunday to Saturday), written out:
+    // weeks often cross into another month.
+    const thisWeek = T.weekStart(now);
+    lines.push('', 'Calendar (weeks run Sunday to Saturday):');
+    for (const [label, from] of [['Last week', T.addDays(thisWeek, -7)], ['This week', thisWeek], ['Next week', T.addDays(thisWeek, 7)]]) {
+      const days = [0, 1, 2, 3, 4, 5, 6].map((i) => { const t = T.addDays(from, i); return `${DAYS[new Date(t).getDay()].slice(0, 3)} ${T.ymd(t)}`; });
+      lines.push(`  ${label}: ${days.join(', ')}`);
+    }
     const cats = T.knownCategories(entries);
     lines.push('', 'Categories (and the full names that mean them):');
     if (!cats.length) lines.push('  (none yet)');
@@ -112,8 +122,8 @@
     for (const [c, full] of Object.entries(names || {})) {
       if (!cats.includes(c) && full.length) lines.push(`  ${c} = ${full.join(' | ')}`);
     }
-    // The last three days of entries, with IDs to edit by.
-    const since = T.addDays(T.startOfDay(now), -2);
+    // Entries since the start of last week, with IDs to edit by.
+    const since = T.addDays(thisWeek, -7);
     const spans = T.withSpans(entries, now).filter((s) => s.ts >= since);
     lines.push('', 'Recent entries (ID, date, start-end, category and title, then any notes as "> " lines):');
     if (!spans.length) lines.push('  (none)');
@@ -264,20 +274,35 @@
     return { type: 'document', title: f.name, source: { type: 'text', media_type: 'text/plain', data: f.text } };
   }
 
-  // The request for the Messages API. `files` from readAttachment.
-  function buildRequest({ model, context, text, files = [] }) {
+  const DEFAULT_REQUEST = 'Link the work orders in the attached schedule to my categories.';
+
+  // The request for the Messages API. `files` from readAttachment. `history`:
+  // earlier turns of this conversation, [{ text, reply }] (reply: Claude's
+  // answer as sent), for a follow-up; the files go with the first turn, the
+  // log as it is now with the last.
+  function buildRequest({ model, context, text, files = [], history = [] }) {
     const m = MODELS[model] || MODELS[DEFAULT_MODEL];
     const content = files.flatMap((f) => (f.kind === 'image' ? [fileBlock(f), { type: 'text', text: `(The image above is ${f.name}.)` }] : [fileBlock(f)]));
-    content.push({ type: 'text', text: `${context}\n\nRequest: ${text || (files.length ? 'Link the work orders in the attached schedule to my categories.' : '')}` });
+    const messages = [];
+    if (history.length) {
+      history.forEach((h, i) => {
+        messages.push({ role: 'user', content: [...(i === 0 ? content : []), { type: 'text', text: `Request: ${h.text || (files.length ? DEFAULT_REQUEST : '')}` }] });
+        messages.push({ role: 'assistant', content: [{ type: 'text', text: h.reply }] });
+      });
+      messages.push({ role: 'user', content: [{ type: 'text', text: `${context}\n\nFollow-up: ${text}\n\n(None of the changes you proposed so far were applied. Answer with the complete set of changes wanted now.)` }] });
+    } else {
+      content.push({ type: 'text', text: `${context}\n\nRequest: ${text || (files.length ? DEFAULT_REQUEST : '')}` });
+      messages.push({ role: 'user', content });
+    }
     const req = {
       model: m.id,
       max_tokens: 16000,
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content }],
+      messages,
       output_config: { format: { type: 'json_schema', schema: SCHEMA } },
     };
     // Thinking depth: a sentence needs little; a schedule a bit more.
-    if (m.effort) req.output_config.effort = files.length ? 'medium' : 'low';
+    if (m.effort) req.output_config.effort = files.length || history.length ? 'medium' : 'low';
     // If the model declines, the API tries another one in the same call.
     if (m.fallbacks) {
       req.betas = ['server-side-fallback-2026-07-01'];
@@ -301,7 +326,7 @@
     const changes = (Array.isArray(out.changes) ? out.changes : [])
       .filter((c) => c && ACTIONS.includes(c.action))
       .map((c) => Object.fromEntries(FIELDS.map((f) => [f, String(c[f] == null ? '' : c[f]).trim()])));
-    return { message: String(out.message || '').trim(), changes };
+    return { message: String(out.message || '').trim(), changes, raw: text };
   }
 
   // How the API is called: the beta endpoint when fallbacks are on.

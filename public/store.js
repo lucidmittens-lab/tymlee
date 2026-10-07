@@ -1003,9 +1003,11 @@
 
     // Send queued changes, then fetch. `full` downloads the whole log;
     // otherwise only recent entries, unless a full download is overdue.
+    // Resolves once the sync, and any follow-up it queued (such as sending
+    // entries that got new IDs), is done, so the status it leaves is final.
     function sync({ full = false } = {}) {
       if (!user) return Promise.resolve();
-      return schedule(async () => {
+      return idle(schedule(async () => {
         const now = Date.now();
         const fullNow = full || now - lastFullPull > FULL_EVERY_MS;
         // Re-check older servers now and then, so new features switch on
@@ -1021,7 +1023,17 @@
         if (fullNow) lastFullPull = now;
         await syncSettings();
         await syncRecords();
-      });
+      }));
+    }
+
+    // After `run`, wait for whatever was queued behind it meanwhile.
+    async function idle(run) {
+      await run;
+      while (true) {
+        const last = chain;
+        await last;
+        if (last === chain) return;
+      }
     }
 
     // ---- auth --------------------------------------------------------------

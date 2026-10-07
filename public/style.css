@@ -746,7 +746,133 @@ button.gui-day {
 @keyframes tl-from-right { from { transform: translateX(48px); opacity: 0; } }
 @keyframes tl-from-left { from { transform: translateX(-48px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .tl-slide-next .tl-scroll, .tl-slide-prev .tl-scroll, .entry-card.sheet, /* Phones: the entry card is a panel above the start bar, like the others. */
+  .tl-slide-next .tl-scroll, .tl-slide-prev .tl-scroll, .entry-card.dock-card { animation: none !important; }
+  #app.console-anim #out { transition: none; }
+}
+
+/* ---- phones: a timeline-first layout ------------------------------------------ */
+@media (max-width: 600px) {
+  /* Status bar, in two rows: the current entry on top; the day, sync and the
+     view switch below. Sync is a colored dot (its label is still read out). */
+  #status { flex-wrap: wrap; row-gap: 4px; align-items: center; }
+  #status .now { flex: 1 0 100%; }
+  #status .sync { font-size: 0; margin-left: auto; }
+  #status .sync::before { content: '●'; font-size: 12px; }
+  #status { column-gap: 1ch; }
+  #status .view-toggle button { padding: 0 5px; }
+}
+/* Narrow phones: "12 | 24", so both switches fit on the second row. */
+@media (max-width: 420px) {
+  .clock-toggle .ck-h { display: none; }
+
+  #app.gui-mode #gui { padding-left: 10px; padding-right: 10px; }
+  .tl-top { padding-top: 10px; }
+  .gui-bar { gap: 6px; flex-wrap: nowrap; }
+  .tl-long { display: none; }
+  .tl-short { display: inline; }
+  .tl-top .tl-legend { display: none; } /* room for the timeline; tap a block for what it is */
+  .gui-presets { flex: none; gap: 0; }
+  .gui-bar .gui-presets button {
+    width: 34px;
+    border: 0;
+    border-radius: 7px;
+    padding: 5px 0;
+    font-size: 13px;
+  }
+  .gui-steps { flex: 1; min-width: 0; justify-content: space-between; margin: 0; }
+  .gui-day, button.gui-day { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 2px; }
+  .gui-bar .gui-step { width: 34px; height: 32px; padding: 0; font-size: 18px; border-radius: var(--radius); }
+  /* Week: seven narrow columns, category names only. */
+  .tl-mode-week { --axis: 1.6em; }
+  .tl-mode-week .tl-grid { column-gap: 2px; }
+  .tl-mode-week .tl-min { display: none; }
+  .tl-mode-week .tl-hour { right: 2px; font-size: 10px; }
+  .tl-mode-week .tl-head { text-align: center; padding: 0 0 4px; font-size: 11px; }
+  .tl-mode-week .tl-head-name, .tl-mode-week .tl-head-total { display: block; overflow: hidden; text-overflow: clip; }
+  .tl-mode-week .tl-head-total { font-size: 10px; }
+  .tl-mode-week .tl-head-total::before { content: none; }
+  .tl-mode-week .tl-block { left: 1px; right: 1px; padding: 1px 2px 1px 3px; border-left-width: 3px; border-radius: 4px; font-size: 10px; }
+  .tl-mode-week .tl-wo, .tl-mode-week .tl-note, .tl-mode-week .tl-dur,
+  .tl-mode-week .tl-times, .tl-mode-week .tl-notes { display: none; }
+  .tl-mode-week .tl-line { text-overflow: clip; }
+  .tl-mode-week .tl-line b { margin: 0; }
+  .tl-mode-week .tl-now span { display: none; }
+  /* Month: smaller days. */
+  .tl-cal-grid { gap: 2px; }
+  .tl-cell { padding: 2px 1px; border-radius: 4px; }
+  .tl-mini { height: 60px; }
+  .tl-mblock { left: 1px; right: 1px; }
+  .tl-block { border-radius: 6px; }
+
+  #app.gui-mode #divider { height: 22px; }
+  /* Completions float above the prompt, over the console, so they never
+     move the timeline. */
+  #app.gui-mode #dock .col { position: relative; }
+  #app.gui-mode #matches { min-height: 0; }
+  #app.gui-mode #matches:not(:empty) {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    z-index: 4;
+    padding: 0 16px 0 calc(16px + 2ch);
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+  #app.gui-mode #prompt { margin-top: 4px; }
+  .divider-label { display: none; }
+  .grip { width: 44px; height: 5px; margin: -2.5px 0 0 -22px; }
+  #app.gui-mode #out { padding-top: 0; }
+  #app.gui-mode.console-folded #out pre:not(:last-child) { visibility: hidden; }
+}
+
+/* Editing card for a clicked block. */
+.entry-card {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+}
+.ec-title { color: var(--muted); }
+.ec-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.ec-row .ec-field { flex: 1 1 120px; min-width: 0; }
+.ec-field { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
+.entry-card input,
+.entry-card textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.entry-card textarea { resize: vertical; min-height: 3.6em; }
+.entry-card input:focus,
+.entry-card textarea:focus { outline: none; border-color: var(--accent); background: var(--card); box-shadow: 0 0 0 3px var(--accent-ring); }
+.entry-card input:disabled,
+.entry-card textarea:disabled { opacity: 0.6; }
+.ec-error { color: var(--warn); min-height: 0; }
+.ec-error:empty { display: none; }
+.ec-buttons { display: flex; gap: 8px; }
+.ec-buttons button { font-size: 12px; padding: 5px 14px; }
+.ec-buttons .ec-delete { margin-left: auto; }
+@media (pointer: coarse) {
+  .entry-card input,
+  .entry-card textarea { font-size: 15px; }
+}
+
+/* Phones: editing happens in a bottom sheet. */
+/* Phones: the entry card is a panel above the start bar, like the others. */
 .entry-card.dock-card {
   position: static;
   max-height: 52vh;
@@ -1029,6 +1155,7 @@ button.gui-day {
   border: 1px solid var(--line);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .gsheet-head {
   display: flex;

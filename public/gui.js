@@ -123,7 +123,7 @@
     const newBtn = withIcon('swap', 'New task', 'sb-new', () => setComposing(true), 'Start something else, which ends what is running (N)');
     const doneBtn = withIcon('check', 'Done', 'sb-done', () => opts.run('/done'), 'Mark the to-do done; the timer keeps going (D)');
     const offBtn = withIcon('stop', 'Off', 'sb-off', () => off(), 'Clock out (O)');
-    const aiBtn = withIcon('spark', 'Ask AI', 'sb-ai', () => aiSheet(), 'Ask AI: plain language or files (a schedule, a sheet, a photo) to changes (A)');
+    const aiBtn = withIcon('spark', 'Ask AI', 'sb-ai', () => toggleAi(), 'Ask AI: plain language or files (a schedule, a sheet, a photo) to changes (A)');
     // Breaks: each ends when the next entry starts. Phones show both; wide
     // screens one Break button (the kind used last) with ▾ for the other.
     const paidBtn = withIcon('cup', 'Paid', 'sb-break sb-paid', () => takeBreak('paid'), 'Paid break: counts toward hours and pay (/break-paid)');
@@ -321,9 +321,9 @@
     tabbar.hidden = true;
     const tabs = {};
     for (const [key, label, ico, run] of [
-      ['timeline', 'Timeline', 'clock', () => { closeSheet(); opts.home(); }],
+      ['timeline', 'Timeline', 'clock', () => { closeSheet(); closeAi(); opts.home(); }],
       ['todo', 'To-do', 'check', () => todoSheet()],
-      ['ai', 'AI', 'spark', () => aiSheet()],
+      ['ai', 'AI', 'spark', () => toggleAi()],
       ['find', 'Find', 'search', () => findForm()],
       ['menu', 'Menu', 'menu', () => openMenu()],
     ]) {
@@ -335,7 +335,7 @@
     }
     dockEl.append(tabbar);
     function markTab() {
-      const now = !sheetName ? 'timeline' : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : /^(Ask AI|Set up AI)/.test(sheetName) ? 'ai' : '';
+      const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
       for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
     }
     function updateTabs(st) {
@@ -356,7 +356,7 @@
       ['O', 'Off'],
       ['D', 'Done: the to-do being worked on'],
       ['R', 'Resume, or back to work after a break'],
-      ['A', 'Ask AI'],
+      ['A', 'Ask AI (Esc closes it)'],
       ['/', 'Find'],
       ['?', 'This list'],
       ['Enter / Esc', 'In the fields: start / cancel'],
@@ -373,6 +373,7 @@
       if (t && t.closest && t.closest('input, textarea, select, [contenteditable], .entry-card')) return;
       if (sheetEl || document.querySelector('.entry-card')) return;
       const k = e.key;
+      if (k === 'Escape' && aiOpen()) { e.preventDefault(); closeAi(); return; }
       const mode = bar.dataset.mode;
       const visible = (b) => b.offsetParent !== null && !b.disabled;
       let act = null;
@@ -383,7 +384,7 @@
       else if ((k === 'd' || k === 'D') && state && state.todo) act = () => opts.run('/done');
       else if ((k === 'r' || k === 'R') && (visible(resumeBtn) || visible(backBtn))) act = () => resume();
       else if (k === '/') act = () => findForm();
-      else if (k === 'a' || k === 'A') act = () => aiSheet();
+      else if (k === 'a' || k === 'A') act = () => toggleAi();
       else if (k === '?') act = () => showShortcuts();
       if (!act) return;
       e.preventDefault();
@@ -803,88 +804,135 @@
         await quietly(async () => { await opts.run(`/aikey ${v.key}`); await opts.run(`/aimodel ${v.model}`); });
         if (shell.ai.ready()) {
           toast(`AI is set up · ${shell.ai.model()}`, 'ok');
-          setTimeout(aiSheet, 200);
+          setTimeout(openAi, 200);
         }
       });
     }
 
-    function aiSheet(draft = { text: '', files: [] }) {
-      if (!shell.ai.ready()) return aiSetup();
-      const box = el('div', 'gai');
-      const text = el('textarea', 'gai-text');
-      text.rows = 3;
-      text.placeholder = 'e.g. 10-2 LOF finishing, lunch, then HCTF conform till 6\nor attach a schedule: "link the work orders"';
-      text.value = draft.text;
-      text.setAttribute('aria-label', 'What to do');
-      let files = draft.files.slice();
-      const chips = el('div', 'gai-chips');
-      const max = shell.ai.maxFiles();
-      const drawChips = () => {
-        chips.replaceChildren();
-        chips.hidden = !files.length;
-        files.forEach((f, i) => {
-          const chip = el('div', 'gai-chip');
-          const x = button('', 'gai-chip-x', () => { files.splice(i, 1); drawChips(); }, `Remove ${f.name}`);
-          x.append(icon('x'));
-          chip.append(icon('paperclip'), el('span', null, f.name), x);
-          chips.append(chip);
-        });
-        attach.disabled = files.length >= max;
-      };
-      const attach = button('', 'gai-attach', () => {
-        const picker = document.createElement('input');
-        picker.type = 'file';
-        picker.multiple = true;
-        picker.hidden = true;
-        picker.addEventListener('change', async () => {
-          const list = [...(picker.files || [])];
-          picker.remove();
-          const bad = [];
-          for (const file of list) {
-            const why = shell.ai.check({ name: file.name, type: file.type, size: file.size });
-            if (why) { bad.push(why); continue; }
-            if (files.length >= max) { bad.push(`${max} files at most`); break; }
-            files.push({ name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
-          }
-          drawChips();
-          if (bad.length) toast(bad.join(' · '), 'err');
-        });
-        document.body.append(picker);
-        picker.click();
-      }, 'Attach files: a schedule, a sheet, a document or a photo');
-      attach.append(icon('paperclip'), el('span', null, 'Attach files'));
-      drawChips();
-      const go = button('', 'gai-go', () => send(), 'Ask (Ctrl/Cmd+Enter)');
-      go.append(icon('spark'), el('span', null, 'Ask'));
-      const model = button(shell.ai.model(), 'gai-model', () => aiSetup(), 'Change the model or key');
-      const row = el('div', 'gai-row');
-      row.append(attach, model, go);
-      box.append(text, chips, row);
-      text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } });
-      sheet('Ask AI', box);
-      if (!window.matchMedia('(pointer: coarse)').matches) text.focus();
+    // Ask AI is a panel above the start bar, not a sheet: the timeline stays
+    // in view. It keeps what was typed and attached while closed.
+    const aiPanel = el('div', 'aipanel');
+    aiPanel.hidden = true;
+    aiPanel.setAttribute('role', 'region');
+    aiPanel.setAttribute('aria-label', 'Ask AI');
+    const aiHead = el('div', 'aip-head');
+    const aiModel = el('select', 'aip-model');
+    aiModel.setAttribute('aria-label', 'Model');
+    aiModel.title = 'Model (billed to your API key)';
+    aiModel.addEventListener('change', () => quietly(() => opts.run(`/aimodel ${aiModel.value}`)));
+    const aiClose = button('', 'aip-close', () => closeAi(), 'Close (Esc)');
+    aiClose.append(icon('x'));
+    const aiTitle = el('span', 'aip-title');
+    aiTitle.append(icon('spark'), el('span', null, 'Ask AI'));
+    aiHead.append(aiTitle, aiModel, aiClose);
+    const aiBody = el('div', 'aip-body');
+    aiPanel.append(aiHead, aiBody);
+    aiPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeAi(); } });
+    dockEl.insertBefore(aiPanel, bar);
 
-      async function send() {
-        const words = text.value.trim();
-        if (!words && !files.length) { text.focus(); return; }
-        const keep = { text: text.value, files };
-        const names = files.map((f) => f.name).join(', ');
-        box.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${names ? ` about ${names}` : ''}…`));
-        const r = await shell.ai.ask({ text: words, files });
-        if (!sheetEl || sheetName !== 'Ask AI') return; // closed while waiting
-        if (r.error) {
-          box.replaceChildren(el('p', 'gsheet-text err', r.error));
-          box.append(button('Back', 'gform-range', () => aiSheet(keep)));
-          return;
+    const aiText = el('textarea', 'gai-text');
+    aiText.rows = 2;
+    aiText.placeholder = 'e.g. 9-12 ACME drawings, lunch, then a client call till 2 · or attach a schedule';
+    aiText.setAttribute('aria-label', 'What to do');
+    aiText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); aiSend(); } });
+    let aiFiles = [];
+    let aiBusy = 0; // which request is on its way (0: none)
+    const aiChips = el('div', 'gai-chips');
+    const aiAttach = button('', 'gai-attach', () => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.multiple = true;
+      picker.hidden = true;
+      picker.addEventListener('change', async () => {
+        const list = [...(picker.files || [])];
+        picker.remove();
+        const max = shell.ai.maxFiles();
+        const bad = [];
+        for (const file of list) {
+          const why = shell.ai.check({ name: file.name, type: file.type, size: file.size });
+          if (why) { bad.push(why); continue; }
+          if (aiFiles.length >= max) { bad.push(`${max} files at most`); break; }
+          aiFiles.push({ name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
         }
-        showPlan(r, keep);
-      }
+        drawAiChips();
+        if (bad.length) toast(bad.join(' · '), 'err');
+      });
+      document.body.append(picker);
+      picker.click();
+    }, 'Attach files: a schedule, a sheet, a document or a photo');
+    aiAttach.append(icon('paperclip'), el('span', null, 'Attach files'));
+    const aiGo = button('', 'gai-go', () => aiSend(), 'Ask (Ctrl/Cmd+Enter)');
+    aiGo.append(icon('spark'), el('span', null, 'Ask'));
+    const aiRow = el('div', 'gai-row');
+    aiRow.append(aiAttach, aiGo);
+
+    function drawAiChips() {
+      aiChips.replaceChildren();
+      aiChips.hidden = !aiFiles.length;
+      aiFiles.forEach((f, i) => {
+        const chip = el('div', 'gai-chip');
+        const x = button('', 'gai-chip-x', () => { aiFiles.splice(i, 1); drawAiChips(); }, `Remove ${f.name}`);
+        x.append(icon('x'));
+        chip.append(icon('paperclip'), el('span', null, f.name), x);
+        aiChips.append(chip);
+      });
+      aiAttach.disabled = aiFiles.length >= shell.ai.maxFiles();
     }
 
-    function showPlan(r, keep) {
+    function aiCompose() {
+      aiBusy = 0;
+      drawAiChips();
+      aiBody.replaceChildren(aiText, aiChips, aiRow);
+    }
+
+    function aiOpen() { return !aiPanel.hidden; }
+    function openAi() {
+      if (!shell.ai.ready()) return aiSetup();
+      closeSheet();
+      aiModel.replaceChildren(...shell.ai.models().map(([k, label]) => {
+        const o = el('option', null, label.replace(/^Claude /, ''));
+        o.value = k;
+        return o;
+      }));
+      aiModel.value = shell.ai.modelKey();
+      if (!aiBusy && !aiBody.children.length) aiCompose();
+      aiPanel.hidden = false;
+      aiBtn.setAttribute('aria-pressed', 'true');
+      markTab();
+      if (aiBody.contains(aiText) && !window.matchMedia('(pointer: coarse)').matches) aiText.focus();
+    }
+    function closeAi() {
+      if (aiPanel.hidden) return;
+      aiPanel.hidden = true;
+      aiBtn.setAttribute('aria-pressed', 'false');
+      markTab();
+    }
+    function toggleAi() { return aiOpen() ? closeAi() : openAi(); }
+
+    async function aiSend() {
+      const words = aiText.value.trim();
+      if (!words && !aiFiles.length) { aiText.focus(); return; }
+      const names = aiFiles.map((f) => f.name).join(', ');
+      const ticket = Date.now();
+      aiBusy = ticket;
+      aiBody.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${names ? ` about ${names}` : ''}…`));
+      const r = await shell.ai.ask({ text: words, files: aiFiles });
+      if (aiBusy !== ticket) return; // Cancelled meanwhile.
+      aiBusy = 0;
+      if (r.error) {
+        const back = button('Back', 'gform-range', () => aiCompose());
+        const row = el('div', 'gai-row');
+        row.append(back);
+        aiBody.replaceChildren(el('p', 'gsheet-text err', r.error), row);
+        return;
+      }
+      showPlan(r);
+    }
+
+    function showPlan(r) {
       const { plan } = r;
-      const out = el('div', 'gai');
-      if (r.message) out.append(el('p', 'gai-msg', r.message));
+      const out = [];
+      if (r.message) out.push(el('p', 'gai-msg', r.message));
       const list = el('div', 'gai-list');
       for (const line of plan.preview) {
         const kind = line.startsWith('+') ? 'add' : line.startsWith('~') ? 'edit' : line.startsWith('-') ? 'del' : 'other';
@@ -893,23 +941,27 @@
         list.append(rowEl);
       }
       for (const x of plan.skipped) list.append(el('div', 'gai-change skipped', `skipped: ${x}`));
-      if (plan.preview.length || plan.skipped.length) out.append(list);
+      if (plan.preview.length || plan.skipped.length) out.push(list);
       const row = el('div', 'gai-row');
+      const back = button('Back', 'gform-range', () => aiCompose());
       if (plan.preview.length) {
         const n = plan.preview.length;
         const apply = button('', 'gai-go', async () => {
-          closeSheet();
+          aiText.value = '';
+          aiFiles = [];
+          aiCompose();
+          closeAi();
           await quietly(() => shell.ai.apply(plan));
           toast(`Applied ${n} change${n === 1 ? '' : 's'}`, 'ok', plan.ops.length ? { label: 'Undo', run: async () => { await quietly(() => shell.ai.undo()); toast('Undone', 'dim'); } } : null);
         });
         apply.append(icon('check'), el('span', null, `Apply ${n === 1 ? '1 change' : `${n} changes`}`));
-        row.append(button('Back', 'gform-range', () => aiSheet(keep)), apply);
+        row.append(back, apply);
       } else {
-        if (!r.message) out.append(el('p', 'gai-msg', 'No changes.'));
-        row.append(button('Back', 'gform-range', () => aiSheet(keep)));
+        if (!r.message) out.push(el('p', 'gai-msg', 'No changes.'));
+        row.append(back);
       }
-      out.append(row);
-      sheet('Ask AI', out);
+      out.push(row);
+      aiBody.replaceChildren(...out);
     }
 
     function findForm() {
@@ -1127,6 +1179,7 @@
         bar.hidden = true;
         tabbar.hidden = true;
         closeSheet();
+        closeAi();
       },
       output,
       update,

@@ -1438,6 +1438,47 @@ button.gui-day {
 .startbar[data-mode="break"] { grid-template-columns: auto auto 1fr auto auto auto; grid-template-areas: "menu ai card brk off back"; }
 
 .gai { display: flex; flex-direction: column; gap: 10px; }
+/* The Ask AI panel: sits on top of the start bar, part of the dock. */
+.aipanel {
+  max-width: 1200px;
+  margin: 10px auto 0;
+  padding: 10px 12px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  animation: aip-in 0.16s ease-out;
+}
+.aipanel[hidden] { display: none; }
+@keyframes aip-in { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .aipanel { animation: none; } }
+.aip-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.aip-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; margin-right: auto; }
+.aip-title .icon { display: inline-flex; color: var(--accent); }
+.aip-title .icon svg { width: 16px; height: 16px; }
+.aip-model {
+  height: 30px;
+  padding: 0 26px 0 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 9px center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.aip-model:hover { color: var(--fg); }
+.aip-model:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); border-color: var(--accent); }
+.aip-close { display: inline-flex; padding: 5px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
+.aip-close:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.aip-close .icon svg { width: 16px; height: 16px; }
+.aip-body { display: flex; flex-direction: column; gap: 8px; }
+.aip-body .gai-text { min-height: 3.2em; }
+.aip-body .gai-list { max-height: 38vh; overflow-y: auto; }
+.aip-body .gai-wait { margin: 10px 0; }
+.sb-ai[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); }
 .gai-text {
   width: 100%;
   min-height: 5.5em;
@@ -1454,11 +1495,9 @@ button.gui-day {
 }
 .gai-text:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--card); }
 .gai-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.gai-attach, .gai-model, .gai-go { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; }
+.gai-attach, .gai-go { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; }
 .gai-attach .icon, .gai-go .icon { display: inline-flex; }
 .gai-attach .icon svg, .gai-go .icon svg { width: 16px; height: 16px; }
-.gai-model { border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
-.gai-model:hover { color: var(--fg); }
 .gai-go { margin-left: auto; }
 .gai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .gai-chips[hidden] { display: none; }

@@ -1879,10 +1879,10 @@
       },
       name: {
         usage: '/name <category> [full name|off]',
-        about: 'full names that mean a category (as on schedules), for /ai: /name SILENTPARTNER Silent Partner Productions',
+        about: 'full names that mean a category (as on schedules), for /ai: /name NORTHSTAR Northstar Pictures',
         run(args) {
           const cat = (args[0] || '').replace(/^\/+/, '');
-          if (!cat) return print('usage: /name <category> <full name>, e.g. /name SILENTPARTNER Silent Partner Productions · /names lists them', 'err');
+          if (!cat) return print('usage: /name <category> <full name>, e.g. /name NORTHSTAR Northstar Pictures · /names lists them', 'err');
           const key = Object.keys(fullNames()).find((k) => k.toLowerCase() === cat.toLowerCase()) || cat;
           const rest = args.slice(1).join(' ').trim();
           if (!rest) {

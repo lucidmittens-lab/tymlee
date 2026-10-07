@@ -1426,3 +1426,88 @@ button.gui-day {
 }
 .home-hint span { flex: 1; }
 .home-hint button { display: inline-flex; padding: 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
+
+/* ---- Ask AI ------------------------------------------------------------------- */
+.sb-ai { grid-area: ai; display: flex !important; }
+.startbar .sb-ai {
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: var(--accent);
+  font-weight: 600;
+}
+.startbar .sb-ai:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 20%, var(--card)); border-color: var(--accent); }
+.startbar[data-mode="idle"] { grid-template-columns: auto auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu ai cat title resume start"; }
+.startbar[data-mode="compose"] { grid-template-columns: auto auto minmax(8em, 14em) 1fr auto auto; grid-template-areas: "menu ai cat title cancel start"; }
+.startbar[data-mode="running"] { grid-template-columns: auto auto 1fr auto auto auto auto; grid-template-areas: "menu ai card done brk off new"; }
+.startbar[data-mode="running"][data-todo="0"] { grid-template-columns: auto auto 1fr auto auto auto auto; grid-template-areas: "menu ai card brk brk off new"; }
+.startbar[data-mode="break"] { grid-template-columns: auto auto 1fr auto auto auto; grid-template-areas: "menu ai card brk off back"; }
+
+.gai { display: flex; flex-direction: column; gap: 10px; }
+.gai-text {
+  width: 100%;
+  min-height: 5.5em;
+  resize: vertical;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  outline: none;
+}
+.gai-text:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--card); }
+.gai-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gai-attach, .gai-model, .gai-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.gai-model { color: var(--muted); font-size: 12.5px; border-color: transparent; background: transparent; }
+.gai-model:hover { color: var(--fg); }
+.gai-go { margin-left: auto; background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.gai-go:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+.gai-chip { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 13px; font-weight: 500; }
+.gai-chip[hidden] { display: none; }
+.gai-chip-x { display: inline-flex; padding: 2px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.gai-chip-x .icon svg, .gai-chip .icon svg { width: 14px; height: 14px; }
+.gai-wait { margin: 18px 0; color: var(--muted); text-align: center; animation: gai-pulse 1.4s ease-in-out infinite; }
+@keyframes gai-pulse { 50% { opacity: 0.45; } }
+.gai-msg { margin: 0; font-size: 14.5px; }
+.gai-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; }
+.gai-change { display: flex; gap: 10px; padding: 8px 12px; font-family: var(--mono); font-size: 12.5px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.gai-change:first-child { border-top: 0; }
+.gai-mark { flex: none; width: 1ch; font-weight: 700; }
+.gai-change.add .gai-mark { color: var(--s3); }
+.gai-change.edit .gai-mark { color: var(--accent); }
+.gai-change.del .gai-mark { color: var(--warn); }
+.gai-change.skipped { color: var(--muted); font-style: italic; font-family: var(--font); }
+@media (max-width: 600px) {
+  /* Phones: AI is the raised tab in the middle of the tab bar. */
+  #app.pure-mode .startbar .sb-ai { display: none !important; }
+  #app.pure-mode .tabbar:not([hidden]) { grid-template-columns: repeat(5, 1fr); }
+  .tab[data-tab="ai"] .icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-top: -20px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 0 4px var(--card);
+  }
+  .tab[data-tab="ai"] .icon svg { width: 22px; height: 22px; }
+  .tab[data-tab="ai"] { color: var(--accent); font-weight: 600; }
+  .gai-text { font-size: 16px; }
+}

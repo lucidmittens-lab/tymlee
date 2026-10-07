@@ -834,43 +834,54 @@
       return plan;
     }
 
-    async function runAi(args) {
+    // Ask Claude; resolves to { error } or { label, message, plan }. Used by
+    // /ai and by the GUI's Ask AI sheet.
+    async function aiAsk({ text, pdf, name }) {
       const key = aiSettings().key;
-      if (!key) return print('no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)', 'err');
-      if (!io.ai) return print('/ai is not available here', 'err');
-      if ((args[0] || '').toLowerCase() === 'undo') return undoAi();
-      const got = await io.ai.pdf(args);
-      if (!got) return undefined;
-      const text = got.rest.join(' ').trim();
-      if (!text && !got.pdf) return print(`usage: /ai <what to do>, e.g. /ai 9-11 ACME drawings, lunch, then mtg till 3 · ${io.ai.pdfUsage} to add a schedule PDF`, 'err');
+      if (!key) return { error: 'no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)' };
+      if (!io.ai) return { error: '/ai is not available here' };
       const now = Date.now();
       const A = io.ai.module;
       const model = aiSettings().model || A.DEFAULT_MODEL;
       const context = A.contextText({ T, now, entries: store.entries, names: fullNames(), todos: todos().filter((t) => !t.done) });
-      const req = A.buildRequest({ model, context, text, pdf: got.pdf });
-      print(`asking ${A.MODELS[model].label}${got.name ? ` about ${got.name}` : ''}…`, 'dim');
+      const req = A.buildRequest({ model, context, text, pdf });
       let res;
       try {
         const client = await io.ai.client(key);
         res = await A.send(client, req);
       } catch (err) {
         const status = err && err.status;
-        if (status === 401 || status === 403) return print('Anthropic refused the API key · /aikey to change it', 'err');
-        if (status === 429) return print('too many requests for this key right now; try again in a minute', 'err');
-        if (status === 529 || status >= 500) return print('Claude is busy or unavailable right now; try again shortly', 'err');
-        if (status === 400) return print(`Claude couldn't take that request: ${(err && err.message) || 'bad request'}`, 'err');
-        return print(`couldn't reach Claude (offline?): ${(err && err.message) || err}`, 'err');
+        if (status === 401 || status === 403) return { error: 'Anthropic refused the API key · /aikey to change it' };
+        if (status === 429) return { error: 'too many requests for this key right now; try again in a minute' };
+        if (status === 529 || status >= 500) return { error: 'Claude is busy or unavailable right now; try again shortly' };
+        if (status === 400) return { error: `Claude couldn't take that request: ${(err && err.message) || 'bad request'}` };
+        return { error: `couldn't reach Claude (offline?): ${(err && err.message) || err}` };
       }
       const reply = A.readReply(res);
-      if (reply.error) return print(reply.error, 'err');
-      const plan = aiPlan(reply.changes, Date.now());
-      const head = reply.message ? `Claude: ${reply.message}` : '';
+      if (reply.error) return reply;
+      return { label: A.MODELS[model].label, name, message: reply.message, plan: aiPlan(reply.changes, Date.now()) };
+    }
+
+    async function runAi(args) {
+      if (!aiSettings().key) return print('no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)', 'err');
+      if (!io.ai) return print('/ai is not available here', 'err');
+      if ((args[0] || '').toLowerCase() === 'undo') return undoAi();
+      const got = await io.ai.pdf(args);
+      if (!got) return undefined;
+      const text = got.rest.join(' ').trim();
+      if (!text && !got.pdf) return print(`usage: /ai <what to do>, e.g. /ai 9-11 ACME drawings, lunch, then mtg till 3 · ${io.ai.pdfUsage} to add a schedule PDF`, 'err');
+      const A = io.ai.module;
+      print(`asking ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label}${got.name ? ` about ${got.name}` : ''}…`, 'dim');
+      const r = await aiAsk({ text, pdf: got.pdf, name: got.name });
+      if (r.error) return print(r.error, 'err');
+      const { plan } = r;
+      const head = r.message ? `Claude: ${r.message}` : '';
       if (!plan.preview.length) return print([head || 'Claude: no changes', ...plan.skipped.map((x) => `  skipped: ${x}`)].join('\n'), 'report');
       print([head, ...plan.preview.map((l) => `  ${l}`), ...plan.skipped.map((x) => `  skipped: ${x}`)].filter(Boolean).join('\n'), 'report');
       const n = plan.preview.length;
       const yes = await io.ask(`apply ${n === 1 ? 'this change' : `these ${n} changes`}? y/n`, '', 'yesno');
       if (!yes || !/^y/i.test(yes.trim())) return print('nothing changed', 'dim');
-      applyAiPlan(plan);
+      return applyAiPlan(plan);
     }
 
     function applyAiPlan(plan) {
@@ -2117,6 +2128,16 @@
         if (t) doTodo(t.n);
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
+      // The GUI's Ask AI sheet.
+      ai: {
+        ready: () => Boolean(aiSettings().key) && Boolean(io.ai),
+        model: () => (io.ai ? io.ai.module.MODELS[aiSettings().model || io.ai.module.DEFAULT_MODEL].label : ''),
+        models: () => (io.ai ? Object.entries(io.ai.module.MODELS).map(([k, m]) => [k, m.label]) : []),
+        modelKey: () => aiSettings().model || (io.ai ? io.ai.module.DEFAULT_MODEL : ''),
+        ask: (o) => aiAsk(o),
+        apply: (plan) => applyAiPlan(plan),
+        undo: () => undoAi(),
+      },
       dueCount,
       formQuestions,
       presetAnswers,

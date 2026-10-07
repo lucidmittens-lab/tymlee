@@ -40,6 +40,8 @@
     left: '<path d="M15 6l-6 6 6 6"/>',
     right: '<path d="M9 6l6 6-6 6"/>',
     minus: '<path d="M6 12h12"/>',
+    spark: '<path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9z" fill="currentColor" stroke="none"/><path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" stroke="none"/>',
+    paperclip: '<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
@@ -121,6 +123,7 @@
     const newBtn = withIcon('swap', 'New task', 'sb-new', () => setComposing(true), 'Start something else, which ends what is running (N)');
     const doneBtn = withIcon('check', 'Done', 'sb-done', () => opts.run('/done'), 'Mark the to-do done; the timer keeps going (D)');
     const offBtn = withIcon('stop', 'Off', 'sb-off', () => off(), 'Clock out (O)');
+    const aiBtn = withIcon('spark', 'AI', 'sb-ai', () => aiSheet(), 'Ask AI: plain language or a schedule PDF to changes (A)');
     // Breaks: each ends when the next entry starts. Phones show both; wide
     // screens one Break button (the kind used last) with ▾ for the other.
     const paidBtn = withIcon('cup', 'Paid', 'sb-break sb-paid', () => takeBreak('paid'), 'Paid break: counts toward hours and pay (/break-paid)');
@@ -141,7 +144,7 @@
       breakMenu.append(b);
     }
     breakSplit.append(breakBtn, breakMore, breakMenu);
-    bar.append(card, catWrap, title, doneBtn, paidBtn, unpaidBtn, breakSplit, offBtn, cancelBtn, resumeBtn, backBtn, newBtn, startBtn, menuBtn);
+    bar.append(card, catWrap, title, doneBtn, paidBtn, unpaidBtn, breakSplit, offBtn, cancelBtn, resumeBtn, backBtn, newBtn, startBtn, menuBtn, aiBtn);
     dockEl.insertBefore(bar, dockEl.querySelector('#status'));
 
     const BREAK_KEY = 'tymlee.lastBreak';
@@ -320,6 +323,7 @@
     for (const [key, label, ico, run] of [
       ['timeline', 'Timeline', 'clock', () => { closeSheet(); opts.home(); }],
       ['todo', 'To-do', 'check', () => todoSheet()],
+      ['ai', 'AI', 'spark', () => aiSheet()],
       ['find', 'Find', 'search', () => findForm()],
       ['menu', 'Menu', 'menu', () => openMenu()],
     ]) {
@@ -331,7 +335,7 @@
     }
     dockEl.append(tabbar);
     function markTab() {
-      const now = !sheetName ? 'timeline' : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : '';
+      const now = !sheetName ? 'timeline' : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : /^(Ask AI|Set up AI)/.test(sheetName) ? 'ai' : '';
       for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
     }
     function updateTabs(st) {
@@ -352,6 +356,7 @@
       ['O', 'Off'],
       ['D', 'Done: the to-do being worked on'],
       ['R', 'Resume, or back to work after a break'],
+      ['A', 'Ask AI'],
       ['/', 'Find'],
       ['?', 'This list'],
       ['Enter / Esc', 'In the fields: start / cancel'],
@@ -378,6 +383,7 @@
       else if ((k === 'd' || k === 'D') && state && state.todo) act = () => opts.run('/done');
       else if ((k === 'r' || k === 'R') && (visible(resumeBtn) || visible(backBtn))) act = () => resume();
       else if (k === '/') act = () => findForm();
+      else if (k === 'a' || k === 'A') act = () => aiSheet();
       else if (k === '?') act = () => showShortcuts();
       if (!act) return;
       e.preventDefault();
@@ -766,6 +772,137 @@
       sheet('Accent color', grid, reset);
     }
 
+    // ---- Ask AI ----------------------------------------------------------------
+
+    // Run something without its console messages showing (the GUI says it
+    // its own way). Errors still show.
+    async function quietly(fn) {
+      capture = [];
+      try {
+        return await fn();
+      } finally {
+        const got = capture;
+        capture = null;
+        for (const g of got) if (/\berr\b/.test(g.cls)) toast(g.text, g.cls);
+      }
+    }
+    // Type what happened (or attach a schedule PDF); Claude answers with
+    // changes, shown here; Apply makes them (Undo in the toast takes them back).
+
+    function aiSetup() {
+      const models = shell.ai.models();
+      form('Set up AI', {
+        intro: 'tymlee uses your own Claude API key: create one at console.anthropic.com (set a monthly limit there). It is kept with your encrypted settings, on your devices only. Usage is billed to you: about 0.1¢ a request on Haiku, 1¢ on Opus.',
+        fields: [
+          { name: 'key', label: 'API key', type: 'password', placeholder: 'sk-ant-…' },
+          { name: 'model', label: 'Model', choices: models, value: shell.ai.modelKey() },
+        ],
+        submit: 'Save',
+      }, async (v) => {
+        if (!v.key) return;
+        await quietly(async () => { await opts.run(`/aikey ${v.key}`); await opts.run(`/aimodel ${v.model}`); });
+        if (shell.ai.ready()) {
+          toast(`AI is set up · ${shell.ai.model()}`, 'ok');
+          setTimeout(aiSheet, 200);
+        }
+      });
+    }
+
+    function aiSheet(draft = { text: '', pdf: null, name: '' }) {
+      if (!shell.ai.ready()) return aiSetup();
+      const box = el('div', 'gai');
+      const text = el('textarea', 'gai-text');
+      text.rows = 3;
+      text.placeholder = 'e.g. 10-2 LOF finishing, lunch, then HCTF conform till 6\nor attach a schedule: "link the work orders"';
+      text.value = draft.text;
+      text.setAttribute('aria-label', 'What to do');
+      let pdf = draft.pdf;
+      let pdfName = draft.name;
+      const chip = el('div', 'gai-chip');
+      const drawChip = () => {
+        chip.replaceChildren();
+        chip.hidden = !pdf;
+        if (!pdf) return;
+        const x = button('', 'gai-chip-x', () => { pdf = null; pdfName = ''; drawChip(); }, 'Remove the PDF');
+        x.append(icon('x'));
+        chip.append(icon('paperclip'), el('span', null, pdfName), x);
+      };
+      drawChip();
+      const attach = button('', 'gai-attach', () => {
+        const picker = document.createElement('input');
+        picker.type = 'file';
+        picker.accept = '.pdf,application/pdf';
+        picker.hidden = true;
+        picker.addEventListener('change', () => {
+          const file = picker.files && picker.files[0];
+          picker.remove();
+          if (!file) return;
+          if (file.size > 20 * 1024 * 1024) return toast(`${file.name} is too large (20 MB at most)`, 'err');
+          const reader = new FileReader();
+          reader.onload = () => { pdf = String(reader.result).replace(/^data:[^,]*,/, ''); pdfName = file.name; drawChip(); };
+          reader.readAsDataURL(file);
+        });
+        document.body.append(picker);
+        picker.click();
+      }, 'Attach a schedule PDF');
+      attach.append(icon('paperclip'), el('span', null, 'Attach PDF'));
+      const go = button('', 'gai-go', () => send(), 'Ask (Ctrl/Cmd+Enter)');
+      go.append(icon('spark'), el('span', null, 'Ask'));
+      const model = button(shell.ai.model(), 'gai-model', () => aiSetup(), 'Change the model or key');
+      const row = el('div', 'gai-row');
+      row.append(attach, model, go);
+      box.append(text, chip, row);
+      text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } });
+      sheet('Ask AI', box);
+      if (!window.matchMedia('(pointer: coarse)').matches) text.focus();
+
+      async function send() {
+        const words = text.value.trim();
+        if (!words && !pdf) { text.focus(); return; }
+        const keep = { text: text.value, pdf, name: pdfName };
+        box.replaceChildren(el('p', 'gai-wait', `Asking ${shell.ai.model()}${pdfName ? ` about ${pdfName}` : ''}…`));
+        const r = await shell.ai.ask({ text: words, pdf, name: pdfName });
+        if (!sheetEl || sheetName !== 'Ask AI') return; // closed while waiting
+        if (r.error) {
+          box.replaceChildren(el('p', 'gsheet-text err', r.error));
+          box.append(button('Back', 'gform-range', () => aiSheet(keep)));
+          return;
+        }
+        showPlan(r, keep);
+      }
+    }
+
+    function showPlan(r, keep) {
+      const { plan } = r;
+      const out = el('div', 'gai');
+      if (r.message) out.append(el('p', 'gai-msg', r.message));
+      const list = el('div', 'gai-list');
+      for (const line of plan.preview) {
+        const kind = line.startsWith('+') ? 'add' : line.startsWith('~') ? 'edit' : line.startsWith('-') ? 'del' : 'other';
+        const rowEl = el('div', `gai-change ${kind}`);
+        rowEl.append(el('span', 'gai-mark', { add: '+', edit: '~', del: '−', other: '•' }[kind]), el('span', null, kind === 'other' ? line : line.slice(2)));
+        list.append(rowEl);
+      }
+      for (const x of plan.skipped) list.append(el('div', 'gai-change skipped', `skipped: ${x}`));
+      if (plan.preview.length || plan.skipped.length) out.append(list);
+      const row = el('div', 'gai-row');
+      if (plan.preview.length) {
+        const n = plan.preview.length;
+        const apply = button('', 'gai-go', async () => {
+          closeSheet();
+          await quietly(() => shell.ai.apply(plan));
+          toast(`Applied ${n} change${n === 1 ? '' : 's'}`, 'ok', plan.ops.length ? { label: 'Undo', run: async () => { await quietly(() => shell.ai.undo()); toast('Undone', 'dim'); } } : null);
+        });
+        apply.append(icon('check'), el('span', null, `Apply ${n === 1 ? '1 change' : `${n} changes`}`));
+        row.append(button('Back', 'gform-range', () => aiSheet(keep)), apply);
+      } else {
+        if (!r.message) out.append(el('p', 'gai-msg', 'No changes.'));
+        row.append(button('Back', 'gform-range', () => aiSheet(keep)));
+      }
+      out.append(row);
+      sheet('Ask AI', out);
+    }
+
     function findForm() {
       form('Find', {
         intro: 'Searches entry text, notes, file paths, work orders, equipment and to-dos.',
@@ -898,6 +1035,7 @@
           ['Keyboard shortcuts', () => showShortcuts()],
           [T.clockMode() === '12' ? '24-hour clock' : '12-hour clock', () => runMenu('Clock', `/clock ${T.clockMode() === '12' ? '24' : '12'}`)],
           ['Accent color', () => accentSheet()],
+          ['AI key and model', () => aiSetup()],
         ]],
       ];
     }

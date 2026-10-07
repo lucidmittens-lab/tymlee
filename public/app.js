@@ -247,6 +247,7 @@
     appEl,
     dockEl: $('dock'),
     run: runLine,
+    readAiFile: (f) => readAiFile(f),
     // The Timeline tab: today, at the top of the view.
     home: () => showUnit(guiUnit || 'day', 0),
     // /edit and /restore need the text box: the CLI view, then back.
@@ -1044,7 +1045,32 @@
   }
 
   function readFiles(list) {
-    return Promise.all(list.map(async (f) => ({ name: f.name, type: f.type, bytes: new Uint8Array(await f.arrayBuffer()) })));
+    return Promise.all(list.map(readAiFile));
+  }
+
+  // A picked file as /ai takes it: { name, type, bytes }. Photos are shrunk
+  // to the size Claude reads them at (longest side 1568px) and sent as JPEG,
+  // which also turns iPhone HEIC photos into something it reads. A photo
+  // that can't be decoded goes as it is (and is checked like any file).
+  const PHOTO = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i;
+  async function readAiFile(file) {
+    if (/^image\//.test(file.type) || PHOTO.test(file.name)) {
+      try {
+        const bmp = await createImageBitmap(file);
+        const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(bmp.width * scale);
+        canvas.height = Math.round(bmp.height * scale);
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#fff'; // transparent PNGs: a white page, not black
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        g.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        if (bmp.close) bmp.close();
+        const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+        if (blob) return { name: file.name.replace(/\.[^.]+$/, '') + '.jpg', type: 'image/jpeg', bytes: new Uint8Array(await blob.arrayBuffer()) };
+      } catch (_) { /* not decodable here: as it is */ }
+    }
+    return { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) };
   }
 
   function toBase64(bytes) {

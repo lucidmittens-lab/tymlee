@@ -1499,6 +1499,9 @@ button.gui-day {
 .gai-attach .icon, .gai-go .icon { display: inline-flex; }
 .gai-attach .icon svg, .gai-go .icon svg { width: 16px; height: 16px; }
 .gai-go { margin-left: auto; }
+/* The camera button only where there's a camera to hand: phones and tablets. */
+.gai-photo { display: none; }
+@media (pointer: coarse) { .gai-row .gai-photo { display: inline-flex; } }
 .gai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .gai-chips[hidden] { display: none; }
 .gai-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); font-size: 13px; }

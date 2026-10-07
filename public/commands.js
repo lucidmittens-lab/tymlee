@@ -677,14 +677,18 @@
       const now = Date.now();
       const today = T.ymd(now);
       const all = todos();
-      const list = all.filter((t) => (which === 'all' || !t.done) && (which !== 'today' || (t.due && t.due <= today)));
+      // Done ones are archived: shown by /todos done (newest first) and all.
+      const list = which === 'done'
+        ? all.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
+        : all.filter((t) => (which === 'all' || !t.done) && (which !== 'today' || (t.due && t.due <= today)));
       const open = all.filter((t) => !t.done).length;
       if (which === 'today' && !list.length) return 'nothing due today';
+      if (which === 'done' && !list.length) return 'no done to-dos yet';
       if (!list.length) return which === 'all' ? 'no to-dos yet · /todo <category> <what to do> adds one' : `nothing to do${open ? '' : ' · /todo <category> <what to do> adds one'}`;
       const catWidth = Math.min(16, Math.max(...list.map((t) => t.category.length)));
       const running = runningTodo();
       const late = all.filter((t) => !t.done && t.due && t.due < today).length;
-      const lines = [which === 'today' ? `due today: ${list.length}` : `to-do: ${open} open${which === 'all' ? `, ${all.length - open} done` : ''}${late ? `, ${late} overdue` : ''}`];
+      const lines = [which === 'done' ? `done: ${list.length} · /undone <TD> opens one again` : which === 'today' ? `due today: ${list.length}` : `to-do: ${open} open${which === 'all' ? `, ${all.length - open} done` : ''}${late ? `, ${late} overdue` : ''}`];
       for (const t of list) {
         const tail = [];
         if (t.done && t.doneAt) tail.push(`done ${T.ymd(t.doneAt).slice(5)}`);
@@ -1780,11 +1784,11 @@
         },
       },
       todos: {
-        usage: '/todos [all|today]',
-        about: 'the open to-dos (all: the done ones too; today: due today or overdue)',
+        usage: '/todos [today|done|all]',
+        about: 'the open to-dos (today: due today or overdue; done: the archive of done ones, newest first; all: both)',
         run(args) {
           const a = (args[0] || '').toLowerCase();
-          print(formatTodos(a === 'all' ? 'all' : a === 'today' ? 'today' : 'open'), 'report');
+          print(formatTodos(['all', 'today', 'done'].includes(a) ? a : 'open'), 'report');
         },
       },
       due: {

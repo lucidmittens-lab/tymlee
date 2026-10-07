@@ -41,6 +41,7 @@
     right: '<path d="M9 6l6 6-6 6"/>',
     minus: '<path d="M6 12h12"/>',
     spark: '<path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9z" fill="currentColor" stroke="none"/><path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" stroke="none"/>',
+    camera: '<path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.3l1.5-2.2h7.4L17.2 7h2.3A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/>',
     paperclip: '<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
@@ -335,7 +336,7 @@
     }
     dockEl.append(tabbar);
     function markTab() {
-      const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : sheetName === 'Menu' ? 'menu' : sheetName.startsWith('To-do') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
+      const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : sheetName === 'Menu' ? 'menu' : (sheetName.startsWith('To-do') || sheetName === 'Done') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
       for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
     }
     function updateTabs(st) {
@@ -501,7 +502,7 @@
 
     // A list of tick boxes. rows() -> [{ label, sub, done }]; onToggle(row,
     // done) saves a tick, and the list is shown again. `more` adds buttons.
-    function tickSheet(heading, rows, onToggle, more = []) {
+    function tickSheet(heading, rows, onToggle, more = [], empty = 'Nothing here yet.', count = true) {
       const list = el('div', 'gtick');
       const panel = sheet(heading, list, ...(more.length ? [el('div', 'gtick-more')] : []));
       if (more.length) panel.querySelector('.gtick-more').append(...more.map(([label, run]) => button(label, 'gform-range', run)));
@@ -527,21 +528,26 @@
           }
           list.append(row);
         }
-        if (!shown.length) list.append(el('p', 'gform-intro', 'Nothing here yet.'));
+        if (!shown.length) list.append(el('p', 'gform-intro', empty));
         const done = shown.filter((r) => r.done).length;
-        panel.querySelector('.gsheet-title').textContent = shown.length ? `${heading} · ${done}/${shown.length}` : heading;
+        panel.querySelector('.gsheet-title').textContent = !shown.length ? heading : count ? `${heading} · ${done}/${shown.length}` : `${heading} · ${shown.length}`;
       };
       render();
     }
 
-    // The to-do list: open ones first (the soonest due first), then done
-    // ones. ▶ starts a timer for one; ticking it off leaves the timer running.
+    // The to-do list: the open ones, the soonest due first. Done ones are
+    // archived (Done, at the bottom); one ticked off here stays, struck
+    // through, until the sheet closes, so a mis-tap can be unticked. ▶ starts
+    // a timer for one; ticking it off leaves the timer running.
     function todoSheet() {
+      const ticked = new Set();
+      const archived = shell.todoList().filter((t) => t.done).length;
       tickSheet('To-do', () => {
         const now = Date.now();
         const running = shell.runningTodoId();
         const order = (t) => (t.done ? 2 : t.due ? 0 : 1);
         return shell.todoList()
+          .filter((t) => !t.done || ticked.has(t.id))
           .sort((a, b) => order(a) - order(b) || (!a.done && a.due && b.due ? a.due.localeCompare(b.due) : 0) || a.sid - b.sid)
           .map((t) => {
             const due = !t.done && t.due ? T.dueLabel(t.due, now) : null;
@@ -550,8 +556,27 @@
               play: t.done || t.id === running ? null : () => shell.doTodo(t.id) };
           });
       },
-      (r, done) => shell.setTodoDone(r.id, done),
-      [['Add a to-do', () => addTodoForm()]]);
+      (r, done) => { if (done) ticked.add(r.id); shell.setTodoDone(r.id, done); },
+      [['Add a to-do', () => addTodoForm()], ...(archived ? [[`Done · ${archived}`, () => doneSheet()]] : [])],
+      'Nothing to do.');
+    }
+
+    // The archive of done to-dos, the latest first. Unticking one opens it
+    // again (it stays here until the sheet closes).
+    function doneSheet() {
+      const reopened = new Set();
+      tickSheet('Done', () => shell.todoList()
+        .filter((t) => t.done || reopened.has(t.id))
+        .sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
+        .map((t) => ({
+          id: t.id,
+          label: t.note || t.category,
+          sub: [t.tag, t.category, t.done && t.doneAt && `done ${new Date(t.doneAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`].filter(Boolean).join(' · '),
+          done: t.done,
+        })),
+      (r, done) => { if (!done) reopened.add(r.id); shell.setTodoDone(r.id, done); },
+      [['Back to the list', () => todoSheet()]],
+      'Nothing done yet.', false);
     }
 
     function addTodoForm() {
@@ -838,33 +863,46 @@
     let aiFiles = [];
     let aiBusy = 0; // which request is on its way (0: none)
     const aiChips = el('div', 'gai-chips');
-    const aiAttach = button('', 'gai-attach', () => {
+    function pickAiFiles(camera = false) {
       const picker = document.createElement('input');
       picker.type = 'file';
-      picker.multiple = true;
       picker.hidden = true;
+      if (camera) {
+        picker.accept = 'image/*';
+        picker.setAttribute('capture', 'environment');
+      } else {
+        picker.multiple = true;
+      }
       picker.addEventListener('change', async () => {
         const list = [...(picker.files || [])];
         picker.remove();
         const max = shell.ai.maxFiles();
         const bad = [];
         for (const file of list) {
-          const why = shell.ai.check({ name: file.name, type: file.type, size: file.size });
-          if (why) { bad.push(why); continue; }
           if (aiFiles.length >= max) { bad.push(`${max} files at most`); break; }
-          aiFiles.push({ name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
+          // Photos are shrunk first (and HEIC becomes JPEG), so check after.
+          const quick = !/^image\//.test(file.type) && shell.ai.check({ name: file.name, type: file.type, size: file.size });
+          if (quick) { bad.push(quick); continue; }
+          const f = await opts.readAiFile(file);
+          const why = shell.ai.check({ name: f.name, type: f.type, size: f.bytes.length });
+          if (why) { bad.push(why); continue; }
+          aiFiles.push(f);
         }
         drawAiChips();
         if (bad.length) toast(bad.join(' · '), 'err');
       });
       document.body.append(picker);
       picker.click();
-    }, 'Attach files: a schedule, a sheet, a document or a photo');
+    }
+    const aiAttach = button('', 'gai-attach', () => pickAiFiles(), 'Attach files: a schedule, a sheet, a document or a photo');
     aiAttach.append(icon('paperclip'), el('span', null, 'Attach files'));
+    // Phones: straight to the camera (a page of notes, a schedule on a wall).
+    const aiPhoto = button('', 'gai-attach gai-photo', () => pickAiFiles(true), 'Take a photo');
+    aiPhoto.append(icon('camera'), el('span', null, 'Photo'));
     const aiGo = button('', 'gai-go', () => aiSend(), 'Ask (Ctrl/Cmd+Enter)');
     aiGo.append(icon('spark'), el('span', null, 'Ask'));
     const aiRow = el('div', 'gai-row');
-    aiRow.append(aiAttach, aiGo);
+    aiRow.append(aiAttach, aiPhoto, aiGo);
 
     function drawAiChips() {
       aiChips.replaceChildren();
@@ -876,7 +914,7 @@
         chip.append(icon('paperclip'), el('span', null, f.name), x);
         aiChips.append(chip);
       });
-      aiAttach.disabled = aiFiles.length >= shell.ai.maxFiles();
+      aiAttach.disabled = aiPhoto.disabled = aiFiles.length >= shell.ai.maxFiles();
     }
 
     function aiCompose() {

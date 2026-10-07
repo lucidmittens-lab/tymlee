@@ -76,6 +76,7 @@
     '- add_name: category, name. When a schedule or the person uses a full name (e.g. "Northstar Pictures") that you matched to a category (NORTHSTAR), suggest it so it is known next time. Never repeat a name already listed.',
     '',
     'Attachments: the person may attach files (schedules, emails, spreadsheets, notes, photos). Read them for what the request asks; if they asked for nothing in particular, use them as below.',
+    'Handwritten notes and photos of lists: read them as written. When asked for to-dos, each line or bullet is one add_todo. Skip items that are ticked, checked or crossed out (they are done). Do not guess at a word you cannot read: leave that item out and quote what you could read in the message. Pick each to-do\'s category from what it mentions, as for entries; a date written next to an item is its due day.',
     'Schedules: an attached schedule (e.g. an operator schedule) lists bookings like "WO#4410027 - Northstar Pictures LLC Project: Northstar Final Mix" with a date, start, end, status (Confirmed, Second Hold, ...) and room. Bookings are plans, often overlapping, not time worked, so unless asked otherwise:',
     '- Link each booking\'s work order to its category for that date (link_wo). The work order is the digits after "WO#" (4410027).',
     '- Match the category by the project name first, then the client, using the categories and full names listed below.',

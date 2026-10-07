@@ -1655,7 +1655,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    MAX_FILES, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

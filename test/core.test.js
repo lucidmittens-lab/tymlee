@@ -937,3 +937,30 @@ test('file paths: a folder then its files, commas or spaces, carried across line
   assert.equal(T.parseFiles(T.groupFiles(full).join('\n')).join('\n'), full); // shown, then read back: the same
   assert.equal(T.filesList(full), '/Volumes/Work/SP/\n  stems.zip\n  mix_v7.wav\n/Other/one.wav');
 });
+
+test('/ai request: structured output, effort by task, fallbacks only where supported; replies are checked', () => {
+  const A = require('../public/ai.js');
+  const r = A.buildRequest({ model: 'opus', context: 'ctx', text: 'do it', pdf: null });
+  assert.equal(r.model, 'claude-opus-5-5');
+  assert.equal(r.output_config.format.type, 'json_schema');
+  assert.equal(r.output_config.effort, 'low');
+  assert.deepEqual(r.betas, ['server-side-fallback-2026-07-01']);
+  assert.equal(r.fallbacks, 'default');
+  assert.equal(r.messages[0].content.at(-1).text, 'ctx\n\nRequest: do it');
+  const p = A.buildRequest({ model: 'opus', context: 'ctx', text: '', pdf: 'QUJD' });
+  assert.equal(p.messages[0].content[0].type, 'document');
+  assert.equal(p.output_config.effort, 'medium');
+  const h = A.buildRequest({ model: 'haiku', context: 'ctx', text: 'x', pdf: null });
+  assert.equal(h.model, 'claude-haiku-4-5');
+  assert.equal(h.output_config.effort, undefined);
+  assert.equal(h.betas, undefined);
+  const msg = (text, stop = 'end_turn') => ({ stop_reason: stop, content: [{ type: 'text', text }] });
+  const ok = A.readReply(msg(JSON.stringify({ message: ' hi ', changes: [{ action: 'off', time: '16:00' }, { action: 'rm -rf', id: '1' }] })));
+  assert.equal(ok.message, 'hi');
+  assert.equal(ok.changes.length, 1); // an unknown action is dropped
+  assert.equal(ok.changes[0].time, '16:00');
+  assert.equal(ok.changes[0].category, ''); // missing fields become ""
+  assert.match(A.readReply(msg('not json')).error, /unexpected/);
+  assert.match(A.readReply(msg('{}', 'refusal')).error, /declined/);
+  assert.match(A.readReply(msg('{"mess', 'max_tokens')).error, /cut off/);
+});

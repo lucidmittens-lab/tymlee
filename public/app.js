@@ -184,6 +184,21 @@
         return chooseBackupFile();
       },
       restoreUsage: '/restore [file]',
+      // /ai: the Claude SDK loads the first time it's used; requests go from
+      // this browser straight to Anthropic with the person's own key.
+      ai: {
+        module: window.TymleeAi,
+        pdfUsage: '/ai file [what to do]',
+        async client(key) {
+          await loadScript('vendor/anthropic.js');
+          return new window.TymleeAnthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+        },
+        async pdf(args) {
+          if ((args[0] || '').toLowerCase() !== 'file') return { pdf: null, name: '', rest: args };
+          const file = await choosePdf();
+          return file ? { ...file, rest: args.slice(1) } : null;
+        },
+      },
       keys: [
         'Keys:   Tab / Right   complete category (Tab again to cycle)',
         '        Up / Down     previous inputs',
@@ -995,6 +1010,46 @@
   }
 
   // Let the user pick a backup file; resolves with its text.
+  // A script loaded on demand (once).
+  const loading = new Map();
+  function loadScript(src) {
+    if (!loading.has(src)) {
+      loading.set(src, new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.onload = resolve;
+        el.onerror = () => { loading.delete(src); reject(new Error('could not load the Claude library (offline?)')); };
+        document.head.append(el);
+      }));
+    }
+    return loading.get(src);
+  }
+
+  // A PDF (a schedule) for /ai: { pdf: base64, name }, or null.
+  function choosePdf() {
+    return new Promise((resolve) => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = '.pdf,application/pdf';
+      picker.hidden = true;
+      picker.addEventListener('change', () => {
+        const file = picker.files && picker.files[0];
+        picker.remove();
+        if (!file) return resolve(null);
+        if (file.size > 20 * 1024 * 1024) {
+          print(`${file.name} is too large (20 MB at most)`, 'err');
+          return resolve(null);
+        }
+        const reader = new FileReader();
+        reader.onload = () => resolve({ pdf: String(reader.result).replace(/^data:[^,]*,/, ''), name: file.name });
+        reader.onerror = () => { print(`could not read ${file.name}`, 'err'); resolve(null); };
+        reader.readAsDataURL(file);
+      });
+      document.body.append(picker);
+      picker.click();
+    });
+  }
+
   function chooseBackupFile() {
     return new Promise((resolve) => {
       const picker = document.createElement('input');
@@ -1147,7 +1202,8 @@
   function ask(label, initial, name) {
     return new Promise((resolve) => {
       const multiline = name === 'notes';
-      modal = { kind: 'ask', label, multiline, resolve };
+      const yesno = name === 'yesno'; // Apply / Cancel buttons; y + Enter too
+      modal = { kind: 'ask', label, multiline, yesno, resolve };
       if (multiline) {
         input.hidden = true;
         ghost.hidden = true;
@@ -1163,7 +1219,7 @@
         return;
       }
       input.value = initial || '';
-      input.placeholder = 'Enter: save · Esc: cancel';
+      input.placeholder = yesno ? 'y + Enter: apply · Esc: cancel' : 'Enter: save · Esc: cancel';
       renderHints();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
@@ -1217,7 +1273,7 @@
       matchesEl.replaceChildren(
         hintButton(modal.label, 'sel', () => {}),
         ...(modal.multiline ? [hintButton('new line', 'btn', newNotesLine)] : []),
-        hintButton('save', 'btn', () => submitPrompt()),
+        ...(modal.yesno ? [hintButton('apply', 'btn', () => endModal('y'))] : [hintButton('save', 'btn', () => submitPrompt())]),
         hintButton('cancel', 'btn', () => endModal(null)),
       );
     }

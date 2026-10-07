@@ -10,6 +10,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
     "@supabase/supabase-js": "2.117.1"
   },
   "license": "MIT",

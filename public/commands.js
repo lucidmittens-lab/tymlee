@@ -29,6 +29,10 @@
 //   showTimeline(range)  draw /timeline graphically (website); without it,
 //                        /timeline prints text, colored by paint(slot, text)
 //   paint, width()       for the text timeline (terminal)
+//   ai                   /ai: { module (ai.js), client(key) -> Promise<SDK
+//                        client>, pdf(args) -> Promise<{ pdf, name, rest }>
+//                        (a schedule PDF named in args or picked; pdf is
+//                        base64, or null with rest = args), pdfUsage }
 (function (root) {
   'use strict';
 
@@ -709,6 +713,182 @@
         saveTodo(t, { done, doneAt: done ? Date.now() : null });
         print(`${done ? '[x]' : '[ ]'} ${t.tag} ${t.text}`, 'ok');
       }
+    }
+
+    // ---- /ai: plain language with your own Claude API key -------------------------
+    // Settings (synced, encrypted): ai = { key, model }, names = { CATEGORY:
+    // [full names] }. Claude answers with changes (ai.js); they're shown,
+    // and applied only when confirmed. /ai undo takes back the last batch.
+
+    const aiSettings = () => store.settings.ai || {};
+    const fullNames = () => store.settings.names || {};
+    let lastAi = null; // { ops: undo ops for entries, label }
+
+    function setAi(changes) {
+      const next = { ...aiSettings(), ...changes };
+      for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
+      const { ai, ...rest } = store.settings;
+      store.setSettings(Object.keys(next).length ? { ...rest, ai: next } : rest);
+    }
+
+    function addFullName(category, name) {
+      const names = { ...fullNames() };
+      const key = Object.keys(names).find((k) => k.toLowerCase() === category.toLowerCase()) || category;
+      const list = names[key] || [];
+      if (list.some((n) => n.toLowerCase() === name.toLowerCase())) return false;
+      names[key] = [...list, name];
+      store.setSettings({ ...store.settings, names });
+      return true;
+    }
+
+    const maskKey = (k) => (k ? `${k.slice(0, 7)}…${k.slice(-4)}` : '');
+
+    // A date ("" = today) and HH:MM -> a timestamp, or null.
+    function aiTime(date, time, now) {
+      const m = String(time).match(/^(\d{1,2}):(\d{2})$/);
+      if (!m || +m[1] > 23 || +m[2] > 59) return null;
+      const day = date ? T.parseRange(date, now) : { from: T.startOfDay(now) };
+      if (!day || !Number.isFinite(day.from)) return null;
+      const d = new Date(day.from);
+      d.setHours(+m[1], +m[2], 0, 0);
+      return d.getTime();
+    }
+
+    // Claude's changes -> what to do: entry ops (one batch, undoable),
+    // command lines (links, to-dos), full names; and preview lines.
+    // Changes that don't make sense are listed as skipped.
+    function aiPlan(changes, now) {
+      const spans = T.withSpans(store.entries, now);
+      const plan = { ops: [], lines: [], names: [], preview: [], skipped: [] };
+      const word = (c) => String(c || '').replace(/^\/+/, '').replace(/\s+/g, '-');
+      const label = (s) => `${T.idTag(s.n)} ${T.ymd(s.ts) === T.ymd(now) ? '' : `${T.ymd(s.ts)} `}${T.clock(s.ts)} ${describe(s)}`;
+      for (const c of changes) {
+        const ts = c.time ? aiTime(c.date, c.time, now) : null;
+        if (c.action === 'add_entry' || c.action === 'break' || c.action === 'off') {
+          if (ts == null) { plan.skipped.push(`${c.action} without a time`); continue; }
+          let text;
+          if (c.action === 'off') text = T.OFF;
+          else if (c.action === 'break') text = c.kind === 'unpaid' ? T.BREAK_UNPAID : T.BREAK_PAID;
+          else {
+            if (!word(c.category)) { plan.skipped.push('an entry without a category'); continue; }
+            text = c.note ? `${word(c.category)} ${c.note}` : word(c.category);
+          }
+          const extra = {};
+          if (c.action === 'add_entry' && c.wo && T.validWo(c.wo)) Object.assign(extra, { wo: c.wo, wl: false });
+          const eq = c.action === 'add_entry' && c.eq ? T.normalizeEq(c.eq) : '';
+          if (eq) Object.assign(extra, { eq, ql: false });
+          const entry = T.makeEntry({ id: T.uuid(), ts, text }, extra);
+          plan.ops.push({ op: 'put', entry, undo: { op: 'del', id: entry.id } });
+          plan.preview.push(`+ ${T.ymd(ts) === T.ymd(now) ? '' : `${T.ymd(ts)} `}${T.clock(ts)}  ${T.isMarker(text) ? T.MARKERS[text] : text}${extra.wo ? `  ${T.woTag(extra.wo)}` : ''}${eq ? `  ${T.eqTag(eq)}` : ''}`);
+        } else if (c.action === 'edit_entry' || c.action === 'delete_entry') {
+          const s = c.id && T.findById(spans, c.id.replace(/^id:/i, ''));
+          const current = s && store.entries.find((e) => e.id === s.id);
+          if (!current) { plan.skipped.push(`no entry ${c.id || '(no ID)'}`); continue; }
+          if (c.action === 'delete_entry') {
+            plan.ops.push({ op: 'del', id: current.id, undo: { op: 'put', entry: current } });
+            plan.preview.push(`- ${label(s)}`);
+            continue;
+          }
+          const parsed = T.parseInput(current.text);
+          const cat = c.category ? word(c.category) : parsed.category;
+          const note = c.note || parsed.note;
+          const fields = {};
+          if (!T.isMarker(current.text) && (c.category || c.note)) fields.text = note ? `${cat} ${note}` : cat;
+          if (c.time) {
+            const t2 = aiTime(c.date || T.ymd(current.ts), c.time, now);
+            if (t2 != null) fields.ts = t2;
+          }
+          if (c.wo && T.validWo(c.wo)) Object.assign(fields, { wo: c.wo, wl: false });
+          if (c.eq && T.normalizeEq(c.eq)) Object.assign(fields, { eq: T.normalizeEq(c.eq), ql: false });
+          if (!Object.keys(fields).length) { plan.skipped.push(`nothing to change on ${T.idTag(s.n)}`); continue; }
+          const { ts: newTs, text: newText, ...extra } = fields;
+          const entry = T.makeEntry({ id: current.id, ts: newTs || current.ts, text: newText || current.text, sid: current.sid }, { ...current, ...extra });
+          plan.ops.push({ op: 'put', entry, undo: { op: 'put', entry: current } });
+          const what = [newTs ? `${T.clock(current.ts)} → ${T.clock(newTs)}` : '', newText ? `"${current.text}" → "${newText}"` : '', extra.wo ? T.woTag(extra.wo) : '', extra.eq ? T.eqTag(extra.eq) : ''].filter(Boolean).join(', ');
+          plan.preview.push(`~ ${label(s)}: ${what}`);
+        } else if (c.action === 'link_wo' || c.action === 'link_eq') {
+          const v = c.action === 'link_wo' ? c.wo : c.eq;
+          if (!word(c.category) || !v) { plan.skipped.push(`a ${c.action === 'link_wo' ? 'work order' : 'equipment'} link without a category or value`); continue; }
+          const date = c.date || T.ymd(now);
+          plan.lines.push(`/${c.action === 'link_wo' ? 'wo' : 'eq'}link ${word(c.category)} ${date} ${v.replace(/\s+/g, c.action === 'link_wo' ? '' : ' ')}`);
+          plan.preview.push(`link ${c.action === 'link_wo' ? T.woTag(v) : T.eqTag(v)} → ${word(c.category)}${date === T.ymd(now) ? '' : ` on ${date}`}`);
+        } else if (c.action === 'add_todo') {
+          if (!word(c.category)) { plan.skipped.push('a to-do without a category'); continue; }
+          const due = c.due ? T.parseDue(c.due, now) : null;
+          plan.lines.push(`/todo ${word(c.category)} ${c.note}${due ? ` due:${due}` : ''}`.trim());
+          plan.preview.push(`to-do ${word(c.category)} ${c.note}${due ? ` (${T.dueLabel(due, now).text})` : ''}`);
+        } else if (c.action === 'add_name') {
+          if (!word(c.category) || !c.name) continue;
+          const known = (fullNames()[word(c.category)] || []).some((n) => n.toLowerCase() === c.name.toLowerCase());
+          if (known) continue;
+          plan.names.push([word(c.category), c.name]);
+          plan.preview.push(`name ${word(c.category)} = ${c.name}`);
+        }
+      }
+      return plan;
+    }
+
+    async function runAi(args) {
+      const key = aiSettings().key;
+      if (!key) return print('no API key yet · /aikey sk-ant-… adds yours (from console.anthropic.com; usage is billed to you)', 'err');
+      if (!io.ai) return print('/ai is not available here', 'err');
+      if ((args[0] || '').toLowerCase() === 'undo') return undoAi();
+      const got = await io.ai.pdf(args);
+      if (!got) return undefined;
+      const text = got.rest.join(' ').trim();
+      if (!text && !got.pdf) return print(`usage: /ai <what to do>, e.g. /ai 9-11 ACME drawings, lunch, then mtg till 3 · ${io.ai.pdfUsage} to add a schedule PDF`, 'err');
+      const now = Date.now();
+      const A = io.ai.module;
+      const model = aiSettings().model || A.DEFAULT_MODEL;
+      const context = A.contextText({ T, now, entries: store.entries, names: fullNames(), todos: todos().filter((t) => !t.done) });
+      const req = A.buildRequest({ model, context, text, pdf: got.pdf });
+      print(`asking ${A.MODELS[model].label}${got.name ? ` about ${got.name}` : ''}…`, 'dim');
+      let res;
+      try {
+        const client = await io.ai.client(key);
+        res = await A.send(client, req);
+      } catch (err) {
+        const status = err && err.status;
+        if (status === 401 || status === 403) return print('Anthropic refused the API key · /aikey to change it', 'err');
+        if (status === 429) return print('too many requests for this key right now; try again in a minute', 'err');
+        if (status === 529 || status >= 500) return print('Claude is busy or unavailable right now; try again shortly', 'err');
+        if (status === 400) return print(`Claude couldn't take that request: ${(err && err.message) || 'bad request'}`, 'err');
+        return print(`couldn't reach Claude (offline?): ${(err && err.message) || err}`, 'err');
+      }
+      const reply = A.readReply(res);
+      if (reply.error) return print(reply.error, 'err');
+      const plan = aiPlan(reply.changes, Date.now());
+      const head = reply.message ? `Claude: ${reply.message}` : '';
+      if (!plan.preview.length) return print([head || 'Claude: no changes', ...plan.skipped.map((x) => `  skipped: ${x}`)].join('\n'), 'report');
+      print([head, ...plan.preview.map((l) => `  ${l}`), ...plan.skipped.map((x) => `  skipped: ${x}`)].filter(Boolean).join('\n'), 'report');
+      const n = plan.preview.length;
+      const yes = await io.ask(`apply ${n === 1 ? 'this change' : `these ${n} changes`}? y/n`, '', 'yesno');
+      if (!yes || !/^y/i.test(yes.trim())) return print('nothing changed', 'dim');
+      applyAiPlan(plan);
+    }
+
+    function applyAiPlan(plan) {
+      if (plan.ops.length) {
+        store.apply(withLinkedWorkOrders(plan.ops.map(({ undo, ...op }) => op)));
+        lastAi = { ops: plan.ops.map((o) => o.undo).reverse() };
+      } else {
+        lastAi = null;
+      }
+      for (const [c, name] of plan.names) addFullName(c, name);
+      const after = [];
+      for (const line of plan.lines) after.push(line);
+      const done = `applied ${plan.preview.length} change${plan.preview.length === 1 ? '' : 's'}${plan.ops.length ? ' · /ai undo takes back the entry changes' : ''}`;
+      return (async () => {
+        for (const line of after) await run(line);
+        print(done, 'ok');
+      })();
+    }
+
+    function undoAi() {
+      if (!lastAi || !lastAi.ops.length) return print('nothing from /ai to undo (links, to-dos and names stay; /deltodo and /wolink change them)', 'dim');
+      store.apply(lastAi.ops);
+      lastAi = null;
+      print('took back the last /ai entry changes', 'ok');
     }
 
     // ---- the clock ---------------------------------------------------------------
@@ -1622,6 +1802,73 @@
           print(`clock: ${arg}-hour, e.g. ${T.clock(Date.now())}`, 'ok');
         },
       },
+      ai: {
+        usage: `/ai <what to do>  or  ${io.ai ? io.ai.pdfUsage : '/ai file'}`,
+        about: `plain language to changes, with your Claude API key: /ai 9-11 ACME drawings, lunch, mtg till 3 · ${io.ai ? io.ai.pdfUsage : '/ai file'} reads a schedule PDF · /ai undo`,
+        run(args) { return runAi(args); },
+      },
+      aikey: {
+        usage: '/aikey [key|off]',
+        about: 'your Claude API key for /ai (kept with your encrypted settings; usage is billed to you)',
+        run(args) {
+          const a = (args[0] || '').trim();
+          if (!a) {
+            const k = aiSettings().key;
+            const m = io.ai ? io.ai.module.MODELS[aiSettings().model || io.ai.module.DEFAULT_MODEL] : null;
+            return print(k ? `API key ${maskKey(k)}${m ? ` · model ${m.label} (/aimodel)` : ''}` : 'no API key · /aikey sk-ant-… (create one at console.anthropic.com)', 'ok');
+          }
+          if (a.toLowerCase() === 'off') {
+            setAi({ key: '' });
+            return print('API key removed', 'ok');
+          }
+          if (!/^sk-ant-[\w-]{20,}$/.test(a)) return print('that does not look like a Claude API key (they start with sk-ant-)', 'err');
+          setAi({ key: a });
+          print(`API key ${maskKey(a)} saved${store.user ? ' with your encrypted settings, on your devices only' : ' on this device'} · try /ai`, 'ok');
+        },
+      },
+      aimodel: {
+        usage: '/aimodel [opus|sonnet|haiku]',
+        about: 'which Claude /ai uses: opus (best, ~1¢ a request), sonnet (~½¢), haiku (~0.1¢)',
+        run(args) {
+          const A = io.ai && io.ai.module;
+          if (!A) return print('/ai is not available here', 'err');
+          const a = (args[0] || '').toLowerCase();
+          if (!a) return print(`model: ${A.MODELS[aiSettings().model || A.DEFAULT_MODEL].label} · choose opus, sonnet or haiku`, 'ok');
+          if (!A.MODELS[a]) return print('usage: /aimodel opus, /aimodel sonnet or /aimodel haiku', 'err');
+          setAi({ model: a === A.DEFAULT_MODEL ? '' : a });
+          print(`model: ${A.MODELS[a].label}`, 'ok');
+        },
+      },
+      name: {
+        usage: '/name <category> [full name|off]',
+        about: 'full names that mean a category (as on schedules), for /ai: /name SILENTPARTNER Silent Partner Productions',
+        run(args) {
+          const cat = (args[0] || '').replace(/^\/+/, '');
+          if (!cat) return print('usage: /name <category> <full name>, e.g. /name SILENTPARTNER Silent Partner Productions · /names lists them', 'err');
+          const key = Object.keys(fullNames()).find((k) => k.toLowerCase() === cat.toLowerCase()) || cat;
+          const rest = args.slice(1).join(' ').trim();
+          if (!rest) {
+            const list = fullNames()[key] || [];
+            return print(list.length ? `${key} = ${list.join(' | ')}` : `${key} has no full names yet`, 'ok');
+          }
+          if (rest.toLowerCase() === 'off') {
+            const { [key]: gone, ...names } = fullNames();
+            store.setSettings({ ...store.settings, names });
+            return print(gone ? `${key}: full names removed` : `${key} had no full names`, 'ok');
+          }
+          print(addFullName(key, rest) ? `${key} = ${(fullNames()[key] || []).join(' | ')}` : `${key} already has "${rest}"`, 'ok');
+        },
+      },
+      names: {
+        usage: '/names',
+        about: 'every category with its full names',
+        run() {
+          const names = fullNames();
+          const keys = Object.keys(names).sort();
+          if (!keys.length) return print('no full names yet · /name <category> <full name>', 'dim');
+          print(keys.map((k) => `${k} = ${names[k].join(' | ')}`).join('\n'), 'report');
+        },
+      },
       accent: {
         usage: '/accent [color]',
         about: `the website's accent color: ${Object.keys(T.ACCENTS).join(', ')}, any #rrggbb, or default`,
@@ -1658,6 +1905,7 @@
       ['todo', 'To-dos and checklists', ['todos', 'to-do', 'checklist', 'checklists'], ['todo', 'todos', 'do', 'done', 'undone', 'due', 'deltodo', 'checklist', 'check', 'newchecklist', 'editchecklist', 'delchecklist', 'delcheck']],
       ['forms', 'Forms', ['form'], ['form', 'newform', 'editform', 'delform']],
       ['pay', 'Pay', ['rate', 'overtime'], ['rate', 'otmin', 'otrate']],
+      ['ai', 'AI (your own Claude API key)', ['claude', 'names'], ['ai', 'aikey', 'aimodel', 'name', 'names']],
       ['backup', 'Backup', ['restore', 'import'], ['backup', 'restore', 'import', 'save']],
       ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
       ['more', 'More', ['other', 'display', 'view'], ['clock', 'accent']],

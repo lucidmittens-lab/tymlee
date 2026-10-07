@@ -300,6 +300,7 @@ function ask(label, initial, name) {
     const why = {
       confirm: 'confirming needs the tymlee shell; or type /reset-encryption DELETE',
       form: 'this form asks questions (%{ask:...}); fill it in from the tymlee shell',
+      yesno: '/ai shows its changes and asks before applying; run it from the tymlee shell',
     };
     print(why[name] || 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
     return Promise.resolve(null);
@@ -310,8 +311,8 @@ function ask(label, initial, name) {
     // which edits the last one. Option/Alt+Enter moves on to a new line.
     const lines = multiline ? (initial || '').split('\n') : [];
     const current = multiline ? lines.pop() : initial || '';
-    modal = { kind: 'ask', multiline, lines, name: name || 'answer', resolve };
-    print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}Enter: save · Esc: cancel`, 'dim');
+    modal = { kind: 'ask', multiline, lines, name: name === 'yesno' ? 'apply' : name || 'answer', resolve };
+    print(`${label} · ${multiline ? 'Option/Alt+Enter: new line · ' : ''}${name === 'yesno' ? 'y + Enter: apply' : 'Enter: save'} · Esc: cancel`, 'dim');
     for (const line of lines) print(`${sgr('90', `${modal.name} ›`)} ${line}`);
     rl.setPrompt(sgr('32', `${modal.name} › `));
     promptShown = true;
@@ -605,6 +606,30 @@ const shell = createShell({
     storage,
     place: 'this computer',
     compact: () => (stdout.columns || 80) < 70,
+    // /ai: requests go from this computer straight to Anthropic with the
+    // person's own key. A schedule PDF is named in the line:
+    //   /ai ~/Downloads/schedule.pdf link today's work orders
+    ai: {
+      module: require('../public/ai.js'),
+      pdfUsage: '/ai ~/path/schedule.pdf [what to do]',
+      async client(key) {
+        const SDK = require('@anthropic-ai/sdk');
+        const Anthropic = SDK.default || SDK;
+        return new Anthropic({ apiKey: key });
+      },
+      async pdf(args) {
+        const first = args[0] || '';
+        if (!/\.pdf$/i.test(first)) return { pdf: null, name: '', rest: args };
+        const file = path.resolve(first.replace(/^~(?=\/|$)/, os.homedir()));
+        try {
+          if (fs.statSync(file).size > 20 * 1024 * 1024) { print(`${first} is too large (20 MB at most)`, 'err'); return null; }
+          return { pdf: fs.readFileSync(file).toString('base64'), name: path.basename(file), rest: args.slice(1) };
+        } catch (_) {
+          print(`could not read ${first}`, 'err');
+          return null;
+        }
+      },
+    },
     async save(name, body) {
       const file = uniquePath(process.cwd(), name);
       fs.writeFileSync(file, body);

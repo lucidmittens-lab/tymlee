@@ -73,7 +73,7 @@
     '- Do not add entries for bookings unless asked.',
     '- Include holds (e.g. "Second Hold") but name them in the message, since they may not happen.',
     '- tymlee links one work order per category per day. If two bookings fall on the same category and day, link the first and name the other in the message.',
-    '- When no category fits, make one: a single word, upper case, from the project\'s main title (e.g. "Line of Fire Finishing Season 1" -> LINEOFFIRE). Say in the message which categories are new.',
+    '- When no category fits, make one in the style of the existing ones: upper case, one word, from the project\'s main title; initials for a title of three or more words ("Line of Fire" -> LOF, "Here Comes the Flood" -> HCTF), the words run together for shorter ones ("Ha-Chan" -> HACHAN, "IX XI" -> IXXI, "Silent Partner" -> SILENTPARTNER). Say in the message which categories are new.',
     '- For every booking you matched or made, suggest add_name with the project title as written (e.g. "Silent Partner") unless it is listed already.',
     '',
     'Rules:',

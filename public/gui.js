@@ -1031,15 +1031,10 @@
       });
       aiAttach.disabled = aiPhoto.disabled = aiFiles.length + aiSent.length >= shell.ai.maxFiles();
     }
-    function aiEmpty() {
-      const hint = el('div', 'chat-empty');
-      hint.append(el('p', null, 'Tell it what happened, or attach a schedule, a sheet or a photo of your notes.'), el('p', 'chat-eg', 'e.g. 9-12 ACME drawings, lunch, then a client call till 2'));
-      return hint;
-    }
     function drawAi() {
       aiNew.hidden = !aiHistory.length && !aiBusy;
       aiText.placeholder = aiHistory.length ? 'Reply…' : 'Message…';
-      if (!aiThread.children.length) aiThread.append(aiEmpty());
+      aiThread.hidden = !aiThread.children.length;
       aiThread.scrollTop = aiThread.scrollHeight;
     }
     // A new chat, empty.
@@ -1085,7 +1080,7 @@
     function bubble(who, ...content) {
       const b = el('div', `chat-msg ${who}`);
       b.append(...content);
-      aiThread.querySelector('.chat-empty')?.remove();
+      aiThread.hidden = false;
       aiThread.append(b);
       aiThread.scrollTop = aiThread.scrollHeight;
       return b;

@@ -992,6 +992,18 @@ button.gui-day {
   box-shadow: var(--shadow);
 }
 .startbar[hidden] { display: none; }
+.startbar { position: relative; } /* for the + menu */
+/* + on the card: add a note, work order, equipment or files. */
+.sb-add { flex: none; align-self: center; display: none; align-items: center; justify-content: center; width: 28px; height: 28px; box-sizing: border-box; margin-right: -6px; padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: var(--radius); background: var(--card); color: var(--accent); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.startbar:is([data-mode="running"], [data-mode="break"]) .sb-add { display: inline-flex; }
+.sb-add .icon { display: inline-flex; }
+.sb-add .icon svg { width: 16px; height: 16px; }
+.sb-add[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+@media (hover: hover) { .sb-add:hover { border-color: var(--accent); } }
+.sb-add:active { transform: scale(0.94); }
+.sb-add:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+.sb-addmenu { right: auto; }
+.sb-popup-item[hidden] { display: none !important; }
 #app.pure-mode #dock { padding: 0 14px; }
 .startbar > * { min-width: 0; }
 .sb-menu { grid-area: menu; }
@@ -1502,6 +1514,7 @@ button.gui-day {
 /* The camera button only where there's a camera to hand: phones and tablets. */
 .gai-photo { display: none; }
 @media (pointer: coarse) { .gai-row .gai-photo { display: inline-flex; } }
+@media (max-width: 600px) { .startbar .sb-add { width: 38px; height: 38px; margin-right: 0; } .sb-add .icon svg { width: 18px; height: 18px; } }
 .gai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .gai-chips[hidden] { display: none; }
 .gai-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); font-size: 13px; }

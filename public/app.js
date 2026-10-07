@@ -248,6 +248,14 @@
     dockEl: $('dock'),
     run: runLine,
     readAiFile: (f) => readAiFile(f),
+    // The + on the running entry → Edit entry: its card, on today's timeline.
+    editEntry(id) {
+      const find = () => [...guiEl.querySelectorAll('.tl-block')].filter((x) => x.dataset.id === id).pop();
+      if (!find()) showUnit('day', 0);
+      const block = find();
+      const b = block && T.withSpans(store.entries, Date.now()).find((x) => x.id === id);
+      if (b) openEntryEditor(b, block);
+    },
     // The Timeline tab: today, at the top of the view.
     home: () => showUnit(guiUnit || 'day', 0),
     // /edit and /restore need the text box: the CLI view, then back.

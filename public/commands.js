@@ -2109,6 +2109,8 @@
         category: T.isMarker(cur.text) ? '' : cur.category,
         note: T.isMarker(cur.text) ? '' : cur.note,
         wo: cur.wo || '',
+        eq: cur.eq || '',
+        id: cur.id, // the entry, for the GUI's + (note, work order, files)
         clock: T.formatClock(cur.duration),
         money,
         ot,
@@ -2153,6 +2155,26 @@
         if (t) doTodo(t.n);
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
+      // The GUI's + on the running entry: set its work order or equipment
+      // ('' clears). Resolves to an error message, or '' when done.
+      async setTags(id, { wo, eq }) {
+        const current = store.entries.find((e) => e.id === id);
+        if (!current) return 'that entry is gone';
+        for (const [field, v] of [['wo', wo], ['eq', eq]]) {
+          if (v != null && v !== '' && !(await store.supports(field))) return field === 'eq' ? 'equipment needs encryption on (/encrypt)' : 'work orders need the latest supabase/schema.sql on the server';
+        }
+        const r = T.editEntry(current, {
+          time: T.hhmm(current.ts),
+          wo: wo == null ? current.wo : wo,
+          eq: eq == null ? current.eq : eq,
+          text: current.text,
+          notes: current.notes,
+          files: T.groupFiles(current.files).join('\n'),
+        }, Date.now());
+        if (r.error) return r.error;
+        if (r.changed) store.apply([{ op: 'put', entry: r.entry }]);
+        return '';
+      },
       // The GUI's Ask AI sheet.
       ai: {
         ready: () => Boolean(aiSettings().key) && Boolean(io.ai),

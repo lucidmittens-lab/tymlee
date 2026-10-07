@@ -45,6 +45,10 @@
     paperclip: '<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
+    note: '<path d="M6 4.5h12A1.5 1.5 0 0 1 19.5 6v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5z"/><path d="M8.5 9.5h7M8.5 13h7M8.5 16.5h4"/>',
+    hash: '<path d="M9.5 4L8 20M16 4l-1.5 16M5 9h15M4 15h15"/>',
+    tool: '<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5"/><path d="M14.5 6.5L17 4l3 3-2.5 2.5"/>',
+    pencil: '<path d="M15.5 5.5l3 3L8 19H5v-3z"/><path d="M13.5 7.5l3 3"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   };
   function icon(name) {
@@ -89,7 +93,12 @@
     const what = el('span', 'sb-what');
     cardWords.append(clock, what);
     const tdTag = el('span', 'sb-td');
-    card.append(dot, cardWords, tdTag);
+    // + on the card: add to what's running (a note, work order, equipment,
+    // files), or open the whole entry.
+    const addBtn = button('', 'sb-add', () => toggleAddMenu(), 'Add to this entry: a note, work order, equipment or files (+)');
+    addBtn.append(icon('plus'));
+    addBtn.setAttribute('aria-haspopup', 'menu');
+    card.append(dot, cardWords, tdTag, addBtn);
     const catWrap = el('div', 'sb-cat');
     const cat = el('input');
     cat.type = 'text';
@@ -145,7 +154,18 @@
       breakMenu.append(b);
     }
     breakSplit.append(breakBtn, breakMore, breakMenu);
-    bar.append(card, catWrap, title, doneBtn, paidBtn, unpaidBtn, breakSplit, offBtn, cancelBtn, resumeBtn, backBtn, newBtn, startBtn, menuBtn, aiBtn);
+    const addMenu = el('div', 'sb-popup sb-addmenu');
+    addMenu.hidden = true;
+    addMenu.setAttribute('role', 'menu');
+    const addItems = {};
+    for (const [key, label, ico] of [['note', 'Note', 'note'], ['wo', 'Work order', 'hash'], ['eq', 'Equipment', 'tool'], ['files', 'Files', 'paperclip'], ['edit', 'Edit entry', 'pencil']]) {
+      const b = button('', 'sb-popup-item', () => { toggleAddMenu(false); addTo(key); });
+      b.setAttribute('role', 'menuitem');
+      b.append(icon(ico), el('span', null, label), el('span', 'sb-popup-hint'));
+      addItems[key] = b;
+      addMenu.append(b);
+    }
+    bar.append(card, catWrap, title, doneBtn, paidBtn, unpaidBtn, breakSplit, offBtn, cancelBtn, resumeBtn, backBtn, newBtn, startBtn, menuBtn, aiBtn, addMenu);
     dockEl.insertBefore(bar, dockEl.querySelector('#status'));
 
     const BREAK_KEY = 'tymlee.lastBreak';
@@ -161,6 +181,52 @@
       breakMore.setAttribute('aria-expanded', String(show));
     }
     document.addEventListener('mousedown', (e) => { if (!breakSplit.contains(e.target)) toggleBreakMenu(false); });
+
+    function toggleAddMenu(show = addMenu.hidden) {
+      if (show && state) {
+        // What's there already, as hints; a break has no work order or kit.
+        const brk = Boolean(state.brk);
+        addItems.wo.hidden = addItems.eq.hidden = brk;
+        addItems.wo.querySelector('.sb-popup-hint').textContent = state.wo ? T.woTag(state.wo) : '';
+        addItems.eq.querySelector('.sb-popup-hint').textContent = state.eq ? 'set' : '';
+        // Under the +, kept inside the bar.
+        const b = bar.getBoundingClientRect();
+        const r = addBtn.getBoundingClientRect();
+        addMenu.style.left = `${Math.max(8, Math.min(r.right - b.left - 220, b.width - 228))}px`;
+        addMenu.style.right = 'auto';
+      }
+      addMenu.hidden = !show;
+      addBtn.setAttribute('aria-expanded', String(show));
+    }
+    document.addEventListener('mousedown', (e) => { if (!addMenu.contains(e.target) && !addBtn.contains(e.target)) toggleAddMenu(false); });
+
+    async function addTo(what) {
+      const id = state && state.id;
+      if (!id) return;
+      if (what === 'note') {
+        return form('Add a note', {
+          intro: 'Goes on the running entry, as a new line.',
+          fields: [{ name: 'text', label: 'Note', placeholder: 'client asked for a recut of reel 2' }], submit: 'Add',
+        }, (v) => v.text && runMenu('Note', `/note ${v.text}`));
+      }
+      if (what === 'files') {
+        return form('Add files', {
+          intro: 'A folder, then the files in it; or full paths. They go on the running entry.',
+          fields: [{ name: 'files', label: 'Files', placeholder: '/Volumes/Work/ mix.wav stems.zip' }], submit: 'Add',
+        }, (v) => v.files && runMenu('Files', `/file ${v.files}`, { brief: true }));
+      }
+      if (what === 'edit') return opts.editEntry(id);
+      const wo = what === 'wo';
+      return form(wo ? 'Work order' : 'Equipment', {
+        intro: `For the running entry only${wo ? ' (a work order linked to the category for the day is in Menu → Work orders)' : ''}. Leave it empty to clear it.`,
+        fields: [{ name: 'v', label: wo ? 'Work order' : 'Equipment', value: wo ? state.wo : state.eq, placeholder: wo ? '4471' : 'ler-resolve-07' }],
+        submit: 'Save',
+      }, async (v) => {
+        const err = await shell.setTags(id, wo ? { wo: v.v } : { eq: v.v });
+        if (err) return toast(err, 'err');
+        toast(v.v ? `${wo ? `Work order ${T.woTag(v.v.replace(/^\[|\]$/g, ''))}` : 'Equipment'} on this entry` : `${wo ? 'Work order' : 'Equipment'} cleared`, 'ok');
+      });
+    }
 
     function setComposing(on) {
       composing = on;
@@ -358,6 +424,7 @@
       ['D', 'Done: the to-do being worked on'],
       ['R', 'Resume, or back to work after a break'],
       ['A', 'Ask AI (Esc closes it)'],
+      ['+', 'Add a note, work order, equipment or files to the running entry'],
       ['/', 'Find'],
       ['?', 'This list'],
       ['Enter / Esc', 'In the fields: start / cancel'],
@@ -374,6 +441,7 @@
       if (t && t.closest && t.closest('input, textarea, select, [contenteditable], .entry-card')) return;
       if (sheetEl || document.querySelector('.entry-card')) return;
       const k = e.key;
+      if (k === 'Escape' && !addMenu.hidden) { e.preventDefault(); toggleAddMenu(false); return; }
       if (k === 'Escape' && aiOpen()) { e.preventDefault(); closeAi(); return; }
       const mode = bar.dataset.mode;
       const visible = (b) => b.offsetParent !== null && !b.disabled;
@@ -386,6 +454,7 @@
       else if ((k === 'r' || k === 'R') && (visible(resumeBtn) || visible(backBtn))) act = () => resume();
       else if (k === '/') act = () => findForm();
       else if (k === 'a' || k === 'A') act = () => toggleAi();
+      else if ((k === '+' || k === '=') && (mode === 'running' || mode === 'break')) act = () => toggleAddMenu();
       else if (k === '?') act = () => showShortcuts();
       if (!act) return;
       e.preventDefault();
@@ -701,13 +770,18 @@
 
     // Run command lines one after another; show what they printed: a sheet
     // for anything long, a toast for a line or two.
-    async function runMenu(heading, lines) {
+    // brief: only each message's last line, as a toast (no sheet).
+    async function runMenu(heading, lines, { brief = false } = {}) {
       capture = [];
       try {
         for (const line of [].concat(lines)) await opts.run(line);
       } finally {
         const got = capture;
         capture = null;
+        if (brief) {
+          for (const g of got) toast(g.text.split('\n').pop(), g.cls);
+          return;
+        }
         const long = got.some((g) => /\b(report|key)\b/.test(g.cls) || g.text.includes('\n'));
         if (long) textSheet(heading, got);
         else for (const g of got) toast(g.text, g.cls);

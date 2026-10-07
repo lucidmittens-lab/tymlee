@@ -116,6 +116,7 @@
 
     function wireBlock(block, b, title) {
       block.setAttribute('aria-label', title);
+      block.dataset.id = b.id;
       block.addEventListener('click', (e) => {
         e.stopPropagation();
         hideTip();

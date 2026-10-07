@@ -79,6 +79,8 @@
     'Rules:',
     '- Use existing categories and their full names to match. Only invent a category when nothing fits, and say so in the message.',
     '- Times are 24-hour HH:MM. "Lunch" is an unpaid break. "Until 3" means the next thing (or off) starts at 15:00.',
+    '- There are no end times: something ends when the next thing starts. Never add or move anything to a time later than now (given at the top); tymlee refuses it.',
+    '- An interruption to what is running now: add the interruption at its start time. If it has already ended, also add an entry that resumes what was running (same category and note) at the time it ended. If it is still going, add only the interruption.',
     '- Only edit or delete entries listed below, by their ID. Never invent IDs.',
     '- If the request is unclear, return no changes and ask one short question in the message.',
     '- Keep the message short. Do not list the changes in it; tymlee shows them.',

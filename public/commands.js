@@ -762,10 +762,15 @@
       const plan = { ops: [], lines: [], names: [], preview: [], skipped: [] };
       const word = (c) => String(c || '').replace(/^\/+/, '').replace(/\s+/g, '-');
       const label = (s) => `${T.idTag(s.n)} ${T.ymd(s.ts) === T.ymd(now) ? '' : `${T.ymd(s.ts)} `}${T.clock(s.ts)} ${describe(s)}`;
+      // Nothing may start after now: the log is what happened, and an entry
+      // only ends when the next one starts.
+      const future = (t) => t > now + 60000;
+      const when = (t) => `${T.ymd(t) === T.ymd(now) ? '' : `${T.ymd(t)} `}${T.clock(t)}`;
       for (const c of changes) {
         const ts = c.time ? aiTime(c.date, c.time, now) : null;
         if (c.action === 'add_entry' || c.action === 'break' || c.action === 'off') {
           if (ts == null) { plan.skipped.push(`${c.action} without a time`); continue; }
+          if (future(ts)) { plan.skipped.push(`${c.action === 'add_entry' ? `${word(c.category)} ${c.note}`.trim() : c.action} at ${when(ts)}: that's later than now`); continue; }
           let text;
           if (c.action === 'off') text = T.OFF;
           else if (c.action === 'break') text = c.kind === 'unpaid' ? T.BREAK_UNPAID : T.BREAK_PAID;
@@ -796,6 +801,7 @@
           if (!T.isMarker(current.text) && (c.category || c.note)) fields.text = note ? `${cat} ${note}` : cat;
           if (c.time) {
             const t2 = aiTime(c.date || T.ymd(current.ts), c.time, now);
+            if (t2 != null && future(t2)) { plan.skipped.push(`moving ${T.idTag(s.n)} to ${when(t2)}: that's later than now`); continue; }
             if (t2 != null) fields.ts = t2;
           }
           if (c.wo && T.validWo(c.wo)) Object.assign(fields, { wo: c.wo, wl: false });

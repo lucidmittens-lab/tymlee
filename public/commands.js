@@ -1226,7 +1226,7 @@
           // "/note 12" or "/note #12 [text]" names an entry; any other text is
           // a new line of notes for the current entry, whatever it is (a
           // break or /off too: "/note lunch with the client").
-          const named = args.length && (/^(?:#|id:)\d+$/i.test(args[0]) || (args.length === 1 && /^\d+$/.test(args[0])));
+          const named = args.length && (/^(?:#|id:)\d+(?:-\d{1,3})?$/i.test(args[0]) || (args.length === 1 && /^\d+(?:-\d{1,3})?$/.test(args[0])));
           let chosen;
           let text = '';
           if (named) {
@@ -1266,7 +1266,7 @@
         async run(args) {
           if (busy()) return;
           if (!shown().length) return print('no entries to add a file path to', 'err');
-          const named = args.length && /^(?:#|id:)\d+$/i.test(args[0]);
+          const named = args.length && /^(?:#|id:)\d+(?:-\d{1,3})?$/i.test(args[0]);
           let chosen;
           let path = '';
           if (named) {

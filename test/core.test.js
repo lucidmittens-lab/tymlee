@@ -783,11 +783,25 @@ test('entry IDs: a log without them is numbered by position x10; new ones get th
   assert.deepEqual(spans.map((s) => s.n), ['000010', '000011', '000012', '000020', '000030', '000040']);
 });
 
-test('entry IDs: no room in between means the next ten; duplicates get a new one', () => {
+test('entry IDs: no whole number left in between means a code after the one before (000015-001); duplicates get a new one', () => {
   const log = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((sid, i) => ({ id: `e${i}`, ts: at('2026-09-24T09:00:00Z') + i * 60000, sid, text: 'dev x' }));
   log.push({ id: 'new', ts: at('2026-09-24T09:05:30Z'), text: 'dev squeezed' });
+  log.push({ id: 'new2', ts: at('2026-09-24T09:05:40Z'), text: 'dev squeezed again' });
   const r = T.assignIds(T.sortEntries(log));
-  assert.deepEqual(r.changed.map((e) => e.sid), [30]);
+  assert.deepEqual(r.changed.map((e) => e.sid), [15.001, 15.002]);
+  assert.deepEqual(r.changed.map((e) => T.idText(e.sid)), ['000015-001', '000015-002']);
+  // An eleventh between 40 and 50: 41 ... 49 first, then 49-001.
+  const gap = [40, 50].map((sid, i) => ({ id: `g${i}`, ts: i * 100000, sid, text: 'dev x' }));
+  for (let i = 1; i <= 11; i++) gap.push({ id: `n${String(i).padStart(2, '0')}`, ts: i * 1000, text: 'dev in between' });
+  const g = T.assignIds(T.sortEntries(gap));
+  assert.deepEqual(g.changed.map((e) => T.idText(e.sid)), ['000041', '000042', '000043', '000044', '000045', '000046', '000047', '000048', '000049', '000049-001', '000049-002']);
+  // Read back as typed: in full, by the last digits, and in /edit.
+  const spans = T.withSpans(T.applyOps(gap, g.changed.map((e) => ({ op: 'put', entry: e }))), 200000);
+  assert.equal(T.findById(spans, '000049-002').text, 'dev in between');
+  assert.equal(T.findById(spans, '49-1').id, 'n10');
+  assert.equal(T.findById(spans, '49').id, 'n09', '49 alone is 000049, not a coded one');
+  assert.equal(T.idValue('000049-002'), 49.002);
+  assert.ok(T.validSid(49.002) && T.validSid(49) && !T.validSid(49.0005) && !T.validSid(0));
   // Two devices both made 000020 offline: the lower internal id keeps it.
   const dup = [
     { id: 'x', ts: at('2026-09-24T09:00:00Z'), sid: 10, text: 'dev a' },
@@ -1105,4 +1119,21 @@ test('enqueueAll: the same queue as enqueue one at a time, in one pass', () => {
   const t = Date.now();
   assert.equal(T.enqueueAll([], many, 0).length, 20000);
   assert.ok(Date.now() - t < 500, 'a long log queues quickly');
+});
+
+test('entry IDs with a code (000049-002): /edit keeps them, and so does encryption', async () => {
+  const V = require('../public/vault.js');
+  const now = at('2026-09-24T12:00:00Z');
+  const es = [
+    { id: 'a', ts: at('2026-09-24T09:00:00Z'), text: 'dev one', sid: 40 },
+    { id: 'b', ts: at('2026-09-24T09:30:00Z'), text: 'dev two', sid: 49.002 },
+    { id: 'c', ts: at('2026-09-24T10:00:00Z'), text: 'dev three', sid: 50 },
+  ];
+  const ed = T.formatEditable(es, { from: at('2026-09-24T00:00:00Z'), to: at('2026-09-25T00:00:00Z') }, now);
+  assert.match(ed.text, /ID:000049-002 {2}09:30 {2}dev two/);
+  const r = T.parseEditable(ed.text.replace('dev two', 'dev two edited'), ed.items, now);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.ops.map((o) => [o.op, o.entry && o.entry.sid, o.entry && o.entry.text]), [['put', 49.002, 'dev two edited']], 'kept, not deleted');
+  const key = await V.importMasterKey(V.newMasterKey());
+  assert.equal((await V.openEntry(key, 'b', await V.sealEntry(key, 'b', es[1]))).sid, 49.002);
 });

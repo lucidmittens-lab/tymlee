@@ -203,7 +203,7 @@
     // full download (so a log from before IDs is numbered like on every other
     // device).
     let idsReady = false;
-    const hasIds = () => entries.some((e) => Number.isInteger(e.sid));
+    const hasIds = () => entries.some((e) => T.validSid(e.sid));
 
     // Give entries without an ID one; returns the changes, for the queue.
     function idOps() {

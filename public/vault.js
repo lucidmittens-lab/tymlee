@@ -179,7 +179,7 @@
       entry.eq = q;
       if (k) entry.ql = true;
     }
-    if (Number.isInteger(i) && i > 0) entry.sid = i;
+    if (typeof i === 'number' && Number.isFinite(i) && i > 0) entry.sid = i; // 49 or 49.002 ("000049-002")
     if (typeof p === 'string' && p) entry.files = p;
     return entry;
   }

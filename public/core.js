@@ -59,9 +59,24 @@
   // Entry IDs: a number each entry keeps for good, shown with six digits
   // ("015620"). New entries get the next multiple of 10; one added between
   // two others (in /edit, or from a backup) takes the next free number after
-  // the one before it (015621 ... 015629) when there is room.
-  const validSid = (n) => Number.isInteger(n) && n > 0;
-  const idText = (n) => String(n).padStart(6, '0');
+  // the one before it (015621 ... 015629) when there is room, and after
+  // those, a three-digit code after the one before it: 015629-001, -002 ...
+  // (stored as 15629.001, so IDs still sort as numbers).
+  const sidBase = (n) => Math.floor(n + 1e-9);
+  const sidSub = (n) => Math.round((n - sidBase(n)) * 1000);
+  const validSid = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 1
+    && Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-6;
+  const idText = (n) => {
+    const v = Number(n);
+    const sub = sidSub(v);
+    return `${String(sidBase(v)).padStart(6, '0')}${sub ? `-${String(sub).padStart(3, '0')}` : ''}`;
+  };
+  // "000049-002" (as shown, or typed: "49-2") -> 49.002; NaN if it isn't one.
+  const idValue = (text) => {
+    const m = String(text).match(/^(\d+)(?:-(\d{1,3}))?$/);
+    return m ? +m[1] + (m[2] ? +m[2] / 1000 : 0) : NaN;
+  };
+  const ID_PATTERN = '\\d+(?:-\\d{1,3})?'; // for building regexes that read IDs
   // How an ID is shown: labelled, so it isn't taken for a work order.
   const idTag = (n) => `ID:${n}`;
 
@@ -102,13 +117,22 @@
       const next = nextKeep[i];
       let sid = null;
       if (next) {
-        for (let c = prev + 1; c % 10 !== 0; c++) {
+        for (let c = sidBase(prev) + 1; c % 10 !== 0; c++) {
           if (c >= next.sid) break;
           if (!owner.has(c)) { sid = c; break; }
         }
+        // No whole number left before the next one: a code after the one
+        // before it (49 -> 49-001, 49-002 ...).
+        if (sid == null && prev >= 1) {
+          for (let sub = sidSub(prev) + 1; sub <= 999; sub++) {
+            const c = Math.round(sidBase(prev) * 1000 + sub) / 1000;
+            if (c >= next.sid) break;
+            if (!owner.has(c)) { sid = c; break; }
+          }
+        }
       }
       if (sid == null) {
-        sid = Math.floor(max / 10) * 10 + 10;
+        sid = Math.floor(sidBase(max) / 10) * 10 + 10;
         max = sid;
       }
       owner.set(sid, e);
@@ -122,9 +146,16 @@
   // match; fewer for the latest entry whose ID ends with them ("450").
   function findById(spans, typed) {
     const t = String(typed == null ? '' : typed).trim().replace(/^(?:#|id:?)/i, '');
-    if (!/^\d+$/.test(t)) return null;
-    if (t.length >= 6) return spans.find((s) => Number(s.n) === Number(t)) || null;
-    for (let i = spans.length - 1; i >= 0; i--) if (spans[i].n.endsWith(t)) return spans[i];
+    const m = t.match(/^(\d+)(?:-(\d{1,3}))?$/);
+    if (!m) return null;
+    if (m[1].length >= 6) return spans.find((s) => idValue(s.n) === idValue(t)) || null;
+    // Fewer digits: the latest whose number ends with them (and has the same
+    // code after the dash, or none).
+    const sub = m[2] ? +m[2] : 0;
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const [base, code] = spans[i].n.split('-');
+      if (base.endsWith(m[1]) && (code ? +code : 0) === sub) return spans[i];
+    }
     return null;
   }
 
@@ -1184,7 +1215,7 @@
   // Turn edited text back into operations against the original entries.
   // Returns { ops, errors, changed, added, removed }; ops is empty on error.
   function parseEditable(text, items, now) {
-    const byN = new Map(items.map((it) => [Number(it.n), it]));
+    const byN = new Map(items.map((it) => [idValue(it.n), it]));
     const seen = new Set();
     const errors = [];
     const records = []; // one per entry line, with the notes lines under it
@@ -1218,7 +1249,7 @@
         return;
       }
 
-      const m = line.match(/^(?:(?:ID:|#)?(\d+)\s+)?(?:\[([^\]]*)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/i);
+      const m = line.match(/^(?:(?:ID:|#)?(\d+(?:-\d{1,3})?)\s+)?(?:\[([^\]]*)\]\s+)?(\d{1,2}):(\d{2})\s+(\S.*)$/i);
       if (!m) {
         errors.push(`${where}: expected "HH:MM text", e.g. "14:30 dev code review"`);
         return;
@@ -1250,7 +1281,7 @@
 
       let it = null;
       if (m[1] != null) {
-        const n = +m[1];
+        const n = idValue(m[1]);
         it = byN.get(n);
         if (!it) {
           errors.push(`${where}: there is no entry ${idTag(m[1])} in this list (remove the ID to add a new entry)`);
@@ -1302,7 +1333,7 @@
 
     let removed = 0;
     for (const it of items) {
-      if (!seen.has(Number(it.n))) {
+      if (!seen.has(idValue(it.n))) {
         ops.push({ op: 'del', id: it.id });
         removed++;
       }
@@ -1404,7 +1435,7 @@
     // The phone layout of /log has two lines an entry (ID, start, duration,
     // work order; then what it was): join them back into one row.
     const T12 = '\\d{1,2}:\\d{2}(?:am|pm)?';
-    const phoneRow = new RegExp(`^\\s*(?:ID:)?\\d+\\s+(${T12})\\s+(-|\\d+:\\d{2})(?:\\s+(\\[[^\\]\\s]+\\]))?\\s*$`);
+    const phoneRow = new RegExp(`^\\s*(?:ID:)?${ID_PATTERN}\\s+(${T12})\\s+(-|\\d+:\\d{2})(?:\\s+(\\[[^\\]\\s]+\\]))?\\s*$`);
     for (let i = 0; i + 1 < lines.length; i++) {
       const m = lines[i].match(phoneRow);
       const next = lines[i + 1].trim();
@@ -1454,9 +1485,9 @@
 
       // Report row:  3  [4471]  09:00  09:45    0:45  dev  note
       // (work order and end columns optional)
-      const row = line.match(/^(?:ID:)?\d+\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(?:(?:\d{1,2}:\d{2}(?:am|pm)?|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
+      const row = line.match(/^(?:ID:)?\d+(?:-\d{1,3})?\s+(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(?:(?:\d{1,2}:\d{2}(?:am|pm)?|now)\s+)?(?:-|\d+:\d{2})\s+(\S+)(?:\s+(.*))?$/);
       // /edit line:  3  [4471]  09:00  dev note   or   09:00 dev note
-      const edit = !row && line.match(/^(?:(?:ID:)?\d+\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
+      const edit = !row && line.match(/^(?:(?:ID:)?\d+(?:-\d{1,3})?\s+)?(?:\[([^\]\s]+)\]\s+)?(\d{1,2}):(\d{2})(am|pm)?\s+(\S.*)$/);
       if (!row && !edit) {
         // Per-category summary lines:  dev   0:57   79%
         if (/^(?:\S+|\([a-z ]+\))\s+\d+:\d{2}(?:\s+\d+%)?$/.test(line)) return;
@@ -1677,7 +1708,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, hourLabel,
-    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idTag, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idValue, idTag, validSid, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

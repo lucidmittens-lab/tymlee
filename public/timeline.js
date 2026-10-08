@@ -37,7 +37,6 @@
     return `${T.idTag(b.n)} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
   }
 
-  const DAY_MS = 86400000;
   const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Every day of a (finite) range, with the days that have entries filled in.

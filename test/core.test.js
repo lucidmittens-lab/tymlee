@@ -1082,3 +1082,27 @@ test('_headers: the content policy allows index.html\'s one inline style, by its
   assert.ok(!/<script>/.test(html), 'no inline scripts (script-src is self only)');
   assert.match(headers, /frame-ancestors 'none'/);
 });
+
+test('enqueueAll: the same queue as enqueue one at a time, in one pass', () => {
+  let seed = 7;
+  const rand = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let round = 0; round < 200; round++) {
+    const ops = Array.from({ length: 12 }, () => {
+      const id = `e${rand(5)}`;
+      return rand(3) ? { op: 'put', entry: { id, ts: rand(100), text: 'x' } } : { op: 'del', id };
+    });
+    const start = ops.slice(0, rand(6));
+    let one = [];
+    for (const op of start) one = T.enqueue(one, op);
+    const locked = Math.min(rand(3), one.length); // ops being sent: always the queue's first ones
+    let all = one.slice();
+    const more = ops.slice(start.length);
+    for (const op of more) one = T.enqueue(one, op, locked);
+    all = T.enqueueAll(all, more, locked);
+    assert.deepEqual(all, one);
+  }
+  const many = Array.from({ length: 20000 }, (_, i) => ({ op: 'put', entry: { id: `id${i}`, ts: i, text: 'x' } }));
+  const t = Date.now();
+  assert.equal(T.enqueueAll([], many, 0).length, 20000);
+  assert.ok(Date.now() - t < 500, 'a long log queues quickly');
+});

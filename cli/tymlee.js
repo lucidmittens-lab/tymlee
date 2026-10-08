@@ -13,7 +13,7 @@ const zlib = require('node:zlib');
 const readline = require('node:readline');
 const { spawnSync } = require('node:child_process');
 
-const { T, V, WEB, configDir, ensureDir, loadConfig, fileStorage, nodeEnv } = require('./env.js');
+const { T, V, configDir, ensureDir, loadConfig, fileStorage, nodeEnv } = require('./env.js');
 const { createStore } = require('../public/store.js');
 const { createShell } = require('../public/commands.js');
 
@@ -228,6 +228,13 @@ function editorCommand() {
 
 // Open text in your editor; resolves with the saved text (null if it failed).
 function editText(text) {
+  // Without a terminal (tymlee run from a script), the default vi has nowhere
+  // to show and would wait forever. An editor you set yourself may be a
+  // window that waits (code --wait), so that one is still tried.
+  if (!stdin.isTTY && !process.env.VISUAL && !process.env.EDITOR) {
+    print('editing needs a terminal: run tymlee, then the command (or set $EDITOR)', 'err');
+    return Promise.resolve(null);
+  }
   const file = path.join(os.tmpdir(), `tymlee-${process.pid}-${Date.now()}.txt`);
   fs.writeFileSync(file, text, { mode: 0o600 });
   const wasOn = statusOn;

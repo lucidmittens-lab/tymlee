@@ -46,12 +46,38 @@
 
   // ---- output --------------------------------------------------------------
 
+  // Like a terminal's scrollback, the console keeps the last SCROLLBACK
+  // lines or so: otherwise a session of big reports (a year's /log) makes
+  // every later command slower, as the page lays all of it out again. The
+  // newest output always stays whole.
+  const SCROLLBACK = 5000;
+  let scrollbackLines = 0;
+  function trimScrollback(pre, text) {
+    const n = text.split('\n').length;
+    pre.dataset.lines = String(n);
+    scrollbackLines += n;
+    let first = out.firstElementChild;
+    while (scrollbackLines > SCROLLBACK && first && first !== pre) {
+      const next = first.nextElementSibling;
+      if (first.tagName === 'PRE') {
+        scrollbackLines -= Number(first.dataset.lines) || 1;
+        first.remove();
+      }
+      first = next;
+    }
+  }
+
   function print(text, cls) {
     const pre = document.createElement('pre');
     if (cls) pre.className = cls;
-    if (/\breport\b/.test(cls || '')) appendLines(pre, text);
+    // Reports wrap under their last column, a line at a time; past a couple
+    // of thousand lines (a year's /log) that costs seconds, so they're plain.
+    const lineCount = text.split('\n', 2001).length;
+    if (lineCount > 2000) appendChunks(pre, text);
+    else if (/\breport\b/.test(cls || '')) appendLines(pre, text);
     else pre.textContent = text;
     out.append(pre);
+    trimScrollback(pre, text);
     if (gui) gui.output(text, cls); // the GUI view shows it as a toast or a sheet
     // In the GUI view, bigger output (reports, help, keys) shows in the
     // console tray from its top; the tray keeps its size (scroll to read on).
@@ -72,6 +98,20 @@
     const width = probe.getBoundingClientRect().width / 20;
     probe.remove();
     return width && box.clientWidth ? Math.floor((box.clientWidth - padding) / width) : 80;
+  }
+
+  // Very long output in blocks of lines the browser only lays out when
+  // they're on screen (CSS content-visibility), so a year's /log prints fast.
+  function appendChunks(pre, text) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 250) {
+      const part = lines.slice(i, i + 250);
+      const chunk = document.createElement('span');
+      chunk.className = 'chunk';
+      chunk.textContent = part.join('\n') + (i + 250 < lines.length ? '\n' : '');
+      chunk.style.setProperty('contain-intrinsic-size', `auto ${(part.length * 1.45).toFixed(1)}em`);
+      pre.append(chunk);
+    }
   }
 
   function appendLines(pre, text, box, padding) {
@@ -965,7 +1005,7 @@
       b.setAttribute('aria-label', what);
       b.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the prompt
       b.addEventListener('click', () => {
-        if (mode === v) return;
+        if (shell.applyClock() === v) return;
         shell.setClock(v);
         renderStatus();
         refreshTimelines();
@@ -979,6 +1019,7 @@
   // /help, ...) switched to the CLI view to show its output.
   function clearScreen() {
     out.replaceChildren();
+    scrollbackLines = 0;
     pinned = null;
     if (editor) out.append(editor.el, ...(editor.bar ? [editor.bar] : [])); // keep an open editor
     else if (view !== chosenView) setView(chosenView, { save: false });
@@ -1559,6 +1600,27 @@
   }
   darkScreen.addEventListener('change', () => applyAccent(true));
 
+  // Put `next` in `parent`, reusing what's there when only text or a few
+  // attributes changed (the clock, every second): its buttons stay the same
+  // elements, so they keep keyboard focus and a click that spans a tick isn't
+  // lost. Event handlers stay those of the first build, so they must read
+  // state when clicked, not capture it.
+  function patchChildren(parent, next) {
+    const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 3 || (a.tagName === b.tagName && a.className === b.className
+      && a.childNodes.length === b.childNodes.length && [...a.childNodes].every((c, i) => same(c, b.childNodes[i]))));
+    const copy = (a, b) => {
+      if (a.nodeType === 3) { if (a.data !== b.data) a.data = b.data; return; }
+      for (const attr of ['aria-pressed', 'title', 'aria-label']) {
+        const v = b.getAttribute(attr);
+        if (a.getAttribute(attr) !== v) { if (v == null) a.removeAttribute(attr); else a.setAttribute(attr, v); }
+      }
+      a.childNodes.forEach((c, i) => copy(c, b.childNodes[i]));
+    };
+    const cur = [...parent.childNodes];
+    if (cur.length === next.length && cur.every((c, i) => same(c, next[i]))) cur.forEach((c, i) => copy(c, next[i]));
+    else parent.replaceChildren(...next);
+  }
+
   function renderStatus() {
     applyAccent();
     const st = shell.status(Date.now());
@@ -1581,7 +1643,7 @@
     }
     const right = span('sync sync-' + st.sync.status, st.sync.label);
     const due = st.due ? statusLink('due', `${st.due} due`, '/todos today', 'To-dos due today or overdue') : null;
-    statusEl.replaceChildren(...[left, due, today, right, clockToggle(), viewToggle()].filter(Boolean));
+    patchChildren(statusEl, [left, due, today, right, clockToggle(), viewToggle()].filter(Boolean));
     if (gui) gui.update(st);
     const h = `${statusEl.offsetHeight}px`;
     if (h !== lastStatusHeight) $('dock').style.setProperty('--status-h', (lastStatusHeight = h));

@@ -222,7 +222,7 @@
       toTrash(ops);
       entries = T.applyOps(entries, ops);
       ops = ops.concat(idOps());
-      for (const op of ops) queue = owner === LOCAL ? [] : T.enqueue(queue, op, inFlight);
+      queue = owner === LOCAL ? [] : T.enqueueAll(queue, ops, inFlight);
       persist();
       onChange();
       if (user) schedule(flush);
@@ -485,11 +485,11 @@
       // newer local change for it is already waiting to be sent.
       const waiting = new Set(queue.map((q) => (q.op === 'put' ? q.entry.id : q.id)));
       const reseal = opened.filter((o) => o.reseal && !waiting.has(o.entry.id));
-      for (const o of reseal) queue = T.enqueue(queue, { op: 'put', entry: o.entry }, inFlight);
+      queue = T.enqueueAll(queue, reseal.map((o) => ({ op: 'put', entry: o.entry })), inFlight);
       entries = T.applyOps(base, queue);
       if (!incremental && since == null) idsReady = true;
       const numbered = idOps();
-      for (const op of numbered) queue = T.enqueue(queue, op, inFlight);
+      queue = T.enqueueAll(queue, numbered, inFlight);
       persist();
       if (seen.unreadable) {
         onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
@@ -886,7 +886,7 @@
     // so its copy of the log is uploaded again under the new key.
     function keyWasReset() {
       storage.removeItem(key(owner, 'key'));
-      for (const e of entries) queue = T.enqueue(queue, { op: 'put', entry: e }, inFlight);
+      queue = T.enqueueAll(queue, entries.map((e) => ({ op: 'put', entry: e })), inFlight);
       if (Object.keys(settings).length) settingsDirty = true;
       persist();
       persistSettings();
@@ -1164,7 +1164,7 @@
       const local = read(key(LOCAL, 'entries'), []).filter(valid);
       const have = new Set(entries.map((e) => e.id));
       const fresh = local.filter((e) => !have.has(e.id));
-      for (const e of fresh) queue = T.enqueue(queue, { op: 'put', entry: e }, inFlight);
+      queue = T.enqueueAll(queue, fresh.map((e) => ({ op: 'put', entry: e })), inFlight);
       entries = T.applyOps(entries, fresh.map((e) => ({ op: 'put', entry: e })));
       persist();
       clearOwner(LOCAL);

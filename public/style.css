@@ -122,6 +122,8 @@ body {
 
 /* The console (scrollback, prompt, completions) and printed reports stay
    monospaced, so their columns line up. */
+/* Long output: blocks laid out only when on screen (app.js appendChunks). */
+#out pre .chunk { display: block; content-visibility: auto; }
 #out, #dock .col, .gsheet-text, .tl-tip {
   font-family: var(--mono);
   font-size: 13px;

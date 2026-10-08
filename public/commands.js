@@ -85,6 +85,18 @@
     // Entries you can see (not /wolink's hidden links).
     const shown = () => T.visible(store.entries);
 
+    // The log with each entry's span (T.withSpans), worked out once per change
+    // to the log rather than on every call: the status line asks every second.
+    // Only the running entry's end moves with the clock.
+    let spanCache = { of: null, base: [] };
+    function spansAt(now) {
+      if (spanCache.of !== store.entries) spanCache = { of: store.entries, base: T.withSpans(store.entries, 0) };
+      const list = spanCache.base.slice();
+      const last = list[list.length - 1];
+      if (last) list[list.length - 1] = { ...last, end: now, duration: Math.max(0, now - last.ts) };
+      return list;
+    }
+
     const sameCategory = (a, b) => a.toLowerCase() === b.toLowerCase();
 
     // The /wolink link for a category on the day of `ts`, if any.
@@ -189,7 +201,7 @@
     // /off, /break-paid, /break-unpaid: end the current entry with a marker
     // entry that lasts until the next one.
     function stopFor(marker, word) {
-      const before = T.withSpans(store.entries, Date.now());
+      const before = spansAt(Date.now());
       const cur = before[before.length - 1];
       if (!cur || (cur.off && marker === T.OFF && cur.text === T.OFF)) return print('not clocked in', 'err');
       if (cur.text === marker) return print(`already on ${word === 'off' ? 'off' : `${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}`} since ${T.clock(cur.ts)}`, 'dim');
@@ -387,7 +399,7 @@
       if (!range) return;
       const now = Date.now();
       const template = forms()[found];
-      if (!T.withSpans(store.entries, now).some((s) => !s.off && s.ts >= range.from && s.ts < range.to)) {
+      if (!spansAt(now).some((s) => !s.off && s.ts >= range.from && s.ts < range.to)) {
         return print(`no entries (${range.label}) · nothing to fill ${found} in from`, 'dim');
       }
       const questions = T.formQuestions(template, store.entries, range, now);
@@ -633,7 +645,7 @@
 
     // The entry running now, if it's a task (not off or a break).
     function runningEntry() {
-      const cur = T.withSpans(shown(), Date.now()).pop();
+      const cur = spansAt(Date.now()).pop();
       return cur && !cur.off && !T.isMarker(cur.text) ? cur : null;
     }
 
@@ -764,7 +776,7 @@
     // Changes that don't make sense are listed as skipped.
     // notesOk: whether the server keeps notes (see /note).
     function aiPlan(changes, now, notesOk = true) {
-      const spans = T.withSpans(store.entries, now);
+      const spans = spansAt(now);
       const plan = { ops: [], lines: [], names: [], preview: [], skipped: [] };
       const word = (c) => String(c || '').replace(/^\/+/, '').replace(/\s+/g, '-');
       const label = (s) => `${T.idTag(s.n)} ${T.ymd(s.ts) === T.ymd(now) ? '' : `${T.ymd(s.ts)} `}${T.clock(s.ts)} ${describe(s)}`;
@@ -981,7 +993,7 @@
     // Returns the chosen span, or null (after explaining why).
     // `withOff`: /off entries and unpaid breaks can be chosen too (notes).
     async function chooseEntry(args, usage, name, withOff = false) {
-      const spans = T.withSpans(store.entries, Date.now()).filter((s) => withOff || !s.off);
+      const spans = spansAt(Date.now()).filter((s) => withOff || !s.off);
       if (!spans.length) {
         print('no entries yet', 'err');
         return null;
@@ -1222,7 +1234,7 @@
             if (!chosen) return undefined;
             text = args.slice(1).join(' ');
           } else if (args.length) {
-            const spans = T.withSpans(store.entries, Date.now());
+            const spans = spansAt(Date.now());
             chosen = spans[spans.length - 1];
             text = args.join(' ');
           } else {
@@ -1262,7 +1274,7 @@
             if (!chosen) return undefined;
             path = args.slice(1).join(' ');
           } else if (args.length) {
-            const spans = T.withSpans(store.entries, Date.now());
+            const spans = spansAt(Date.now());
             chosen = spans[spans.length - 1];
             path = args.join(' ');
           } else {
@@ -1312,10 +1324,10 @@
         run() {
           if (!shown().length) return print('nothing to undo', 'err');
           const now = Date.now();
-          const last = T.withSpans(store.entries, now).pop();
+          const last = spansAt(now).pop();
           store.remove(last.id);
           const msg = [`undid ${T.idTag(last.n)} ${T.clock(last.ts)} ${describe(last)}`];
-          const cur = T.withSpans(store.entries, now).pop();
+          const cur = spansAt(now).pop();
           if (cur) msg.push(cur.text === T.OFF ? 'still off' : `resumed ${describe(cur)}`);
           print(msg.join('  '), 'ok');
         },
@@ -1339,7 +1351,7 @@
         usage: '/rm <ID>',
         about: 'delete an entry by its ID, or the ID\'s last digits (its time goes to the one before)',
         run(args) {
-          const s = T.findById(T.withSpans(store.entries, Date.now()), args[0]);
+          const s = T.findById(spansAt(Date.now()), args[0]);
           if (!s) return print('usage: /rm <ID>   (an entry ID from /log, or its last digits: /rm 650)', 'err');
           store.remove(s.id);
           print(`removed ${T.idTag(s.n)} ${T.ymd(s.ts)} ${T.clock(s.ts)} ${describe(s)}`, 'ok');
@@ -2083,7 +2095,7 @@
       applyClock();
       const sync = { status: store.status, label: syncLabel() };
       if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync, due: dueCount() };
-      const spans = T.withSpans(store.entries, now);
+      const spans = spansAt(now);
       const cur = spans[spans.length - 1];
       // Same rule as the report: an entry counts toward the day it started on.
       const dayStart = T.startOfDay(now);
@@ -2094,7 +2106,10 @@
       let ot = false;
       const pay = loadPay();
       if (T.hasPay(pay)) {
-        const earned = T.earnings(store.entries, pay, now);
+        // Overtime counts per week (Sunday to Saturday): this week's entries
+        // are all it needs, however long the log is.
+        const week = T.weekStart(Math.min(now, cur.ts)); // a shift running since last week counts there
+        const earned = T.earnings(store.entries.filter((e) => e.ts >= week), pay, now);
         const mine = earned.get(cur.id);
         if (!cur.off && mine && mine.money != null) {
           money = T.formatMoney(mine.money);

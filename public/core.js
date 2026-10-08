@@ -83,7 +83,15 @@
     if (!owner.size) {
       return { changed: list.map((e, i) => makeEntry(e, { sid: (i + 1) * 10 })), renumbered: 0 };
     }
-    let max = Math.max(...owner.keys());
+    let max = 0;
+    for (const sid of owner.keys()) if (sid > max) max = sid;
+    // The next entry keeping its ID, after each position (worked out once:
+    // looking ahead from every entry would be slow for a long log).
+    const nextKeep = new Array(list.length);
+    for (let i = list.length - 1, ahead = null; i >= 0; i--) {
+      nextKeep[i] = ahead;
+      if (keeps(list[i])) ahead = list[i];
+    }
     const changed = [];
     let prev = 0;
     list.forEach((e, i) => {
@@ -91,7 +99,7 @@
         prev = e.sid;
         return;
       }
-      const next = list.slice(i + 1).find(keeps);
+      const next = nextKeep[i];
       let sid = null;
       if (next) {
         for (let c = prev + 1; c % 10 !== 0; c++) {
@@ -1625,16 +1633,30 @@
   // The first `locked` operations may already be on their way to the server
   // and are left untouched.
   function enqueue(queue, op, locked) {
+    return enqueueAll(queue, [op], locked);
+  }
+
+  // enqueue for many operations at once, in one pass over the queue (one
+  // at a time, a long log's worth would take minutes). Same rules: a newer
+  // operation for an entry replaces any waiting one and goes to the end.
+  function enqueueAll(queue, ops, locked) {
+    const idOf = (q) => (q.op === 'put' ? q.entry.id : q.id);
     const head = queue.slice(0, locked || 0);
-    let tail = queue.slice(locked || 0);
-    const id = op.op === 'put' ? op.entry.id : op.id;
-    const hadPut = tail.some((q) => q.op === 'put' && q.entry.id === id);
-    tail = tail.filter((q) => (q.op === 'put' ? q.entry.id : q.id) !== id);
-    // Deleting an entry the server has never seen needs no request at all,
-    // unless an earlier (locked) put for it may already have been sent.
-    const sentBefore = head.some((q) => q.op === 'put' && q.entry.id === id);
-    if (!(op.op === 'del' && hadPut && !sentBefore)) tail.push(op);
-    return head.concat(tail);
+    const sentBefore = new Set(head.filter((q) => q.op === 'put').map((q) => q.entry.id));
+    const tail = new Map(); // id -> its waiting operation, in queue order
+    for (const q of queue.slice(locked || 0)) {
+      tail.delete(idOf(q));
+      tail.set(idOf(q), q);
+    }
+    for (const op of ops) {
+      const id = idOf(op);
+      const had = tail.get(id);
+      tail.delete(id);
+      // Deleting an entry the server has never seen needs no request at all,
+      // unless an earlier (locked) put for it may already have been sent.
+      if (!(op.op === 'del' && had && had.op === 'put' && !sentBefore.has(id))) tail.set(id, op);
+    }
+    return head.concat([...tail.values()]);
   }
 
   // The next run of same-kind operations to send in a single request.
@@ -1650,7 +1672,7 @@
     parseInput, knownCategories, suggest, withSpans, summarize,
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
     parseRange, parseDue, dueLabel, ACCENTS, DEFAULT_ACCENT, accentColors, formatReport, toCSV,
-    uuid, sortEntries, applyOps, mergeRecent, enqueue, nextBatch,
+    uuid, sortEntries, applyOps, mergeRecent, enqueue, enqueueAll, nextBatch,
     formatEditable, parseEditable,
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,

@@ -8,7 +8,6 @@
 (function (root) {
   'use strict';
 
-  const T = root.Tymlee;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -796,11 +795,11 @@
         capture = null;
         if (brief) {
           for (const g of got) toast(g.text.split('\n').pop(), g.cls);
-          return;
+        } else if (got.some((g) => /\b(report|key)\b/.test(g.cls) || g.text.includes('\n'))) {
+          textSheet(heading, got);
+        } else {
+          for (const g of got) toast(g.text, g.cls);
         }
-        const long = got.some((g) => /\b(report|key)\b/.test(g.cls) || g.text.includes('\n'));
-        if (long) textSheet(heading, got);
-        else for (const g of got) toast(g.text, g.cls);
       }
     }
 

@@ -1566,3 +1566,47 @@ button.gui-day {
   #app.pure-mode .tabbar[data-ai="0"]:not([hidden]) { grid-template-columns: repeat(4, 1fr); }
   .gai-text { font-size: 16px; }
 }
+
+/* Short phone screens (a browser's own bars take ~180px that a Home Screen
+   app doesn't lose): a tighter header, the running card on one line, all the
+   actions in one row, a slimmer tab bar. The timeline gets the room. */
+@media (max-width: 600px) and (max-height: 740px) {
+  #app.pure-mode .tl-top { padding-top: 6px; padding-bottom: 4px; margin-bottom: 2px; }
+  #app.pure-mode .gui-bar { margin-bottom: 4px; }
+  #app.pure-mode .gui-bar .gui-step { height: 30px; width: 32px; }
+  #app.pure-mode .gui-bar .gui-presets button { padding-top: 4px; padding-bottom: 4px; }
+  #app.pure-mode #gui { padding-bottom: 4px; }
+
+  #app.pure-mode .startbar { padding: 6px; gap: 6px; margin-bottom: 4px; }
+  #app.pure-mode .startbar[data-mode="running"],
+  #app.pure-mode .startbar[data-mode="running"][data-todo="0"] {
+    grid-template-columns: 1fr 1fr 1.3fr 1fr 1.9fr;
+    grid-template-areas: "card card card card card" "done paid unpaid off new";
+  }
+  #app.pure-mode .startbar[data-mode="break"] {
+    grid-template-columns: 1fr 1.3fr 1fr 2.2fr;
+    grid-template-areas: "card card card card" "paid unpaid off back";
+  }
+  #app.pure-mode .startbar[data-mode="compose"] {
+    grid-template-columns: 1fr 1.6fr 1fr;
+    grid-template-areas: "card card card" "cat title title" "cancel start start";
+  }
+  #app.pure-mode .startbar[data-mode="idle"] {
+    grid-template-columns: 1fr 1.6fr 1fr;
+    grid-template-areas: "cat title title" "resume start start";
+  }
+  #app.pure-mode .startbar[data-mode="idle"] > .sb-card { display: none; }
+  #app.pure-mode .startbar .sb-card { min-height: 0; height: auto; padding: 5px 8px 5px 10px; }
+  #app.pure-mode .startbar .sb-card-words { flex-direction: row; align-items: baseline; gap: 8px; }
+  #app.pure-mode .startbar .sb-clock { font-size: 17px; }
+  #app.pure-mode .startbar .sb-what { font-size: 14px; }
+  #app.pure-mode .startbar .sb-add { width: 32px; height: 32px; }
+  #app.pure-mode .startbar :is(.sb-done, .sb-paid, .sb-unpaid, .sb-off, .sb-new, .sb-back, .sb-start, .sb-resume, .sb-cancel) {
+    height: 38px; font-size: 13px; padding: 0 4px; gap: 4px;
+  }
+  #app.pure-mode .startbar :is(.sb-done, .sb-paid, .sb-unpaid, .sb-off, .sb-new, .sb-back, .sb-start, .sb-resume, .sb-cancel) .icon svg { width: 15px; height: 15px; }
+  #app.pure-mode .startbar input { height: 36px; }
+
+  #app.pure-mode .tab { padding: 4px 0 3px; gap: 0; font-size: 10px; }
+  #app.pure-mode .tab .icon svg { width: 20px; height: 20px; }
+}

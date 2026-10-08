@@ -91,7 +91,12 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   const m = await open({ ...devices['iPhone 13'] });
   await m.locator('#status .view-toggle button[aria-label="GUI"]').tap(); await m.waitForTimeout(300);
   const bar = await m.locator('#startbar').boundingBox();
-  ok(bar.height > 190 && bar.height < 250, `phone, nothing running: card, two fields, Resume and Start (${Math.round(bar.height)}px)`);
+  // iPhone 13's 664px is a browser's height: the compact bar.
+  ok(bar.height > 80 && bar.height < 120, `phone in a browser, nothing running: two fields, Resume and Start, compact (${Math.round(bar.height)}px)`);
+  const tall = await open({ ...devices['iPhone 13'], viewport: { width: 390, height: 800 } });
+  await tall.locator('#status .view-toggle button[aria-label="GUI"]').tap(); await tall.waitForTimeout(300);
+  const tallBar = await tall.locator('#startbar').boundingBox();
+  ok(tallBar.height > 190 && tallBar.height < 250, `phone at full height (Home Screen): card, two fields, Resume and Start (${Math.round(tallBar.height)}px)`);
   await m.locator('.sb-cat input').tap(); await m.keyboard.type('gym'); await m.locator('.sb-start').tap(); await m.waitForTimeout(400);
   ok((await m.entries()).join() === 'gym', 'phone: start with just a category');
   ok(await m.evaluate(() => !document.activeElement || !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)), 'phone: the keyboard goes away after Start');

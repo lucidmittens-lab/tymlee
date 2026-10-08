@@ -1290,6 +1290,7 @@
           [T.clockMode() === '12' ? '24-hour clock' : '12-hour clock', () => runMenu('Clock', `/clock ${T.clockMode() === '12' ? '24' : '12'}`)],
           ['Accent color', () => accentSheet()],
           [shell.ai.ready() ? 'AI key and model' : 'Set up AI (optional)', () => aiSetup()],
+          ['Siri and Shortcuts', () => runMenu('Siri and Shortcuts', '/siri')],
         ]],
       ];
     }
@@ -1382,6 +1383,13 @@
       openTodos: () => todoSheet(),
       // The phone's entry card takes the same place: it closes these first.
       closePanels() { closeSheet(); closeAi(); },
+      // A spoken line that needs the AI (from a Siri link): ask it in the panel.
+      askAi(text) {
+        if (!shell.ai.ready()) return;
+        openAi();
+        aiText.value = text;
+        aiSend();
+      },
       get active() { return active; },
     };
   }

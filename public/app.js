@@ -200,6 +200,7 @@
     V,
     io: {
       print,
+      siteUrl: location.origin + location.pathname,
       storage: window.localStorage,
       place: 'this browser',
       compact: () => narrow.matches,
@@ -1696,5 +1697,28 @@
     try { saved = localStorage.getItem(VIEW_KEY) || 'gui'; } catch (_) { /* default view */ }
     chosenView = ['cli', 'gui', 'pure'].includes(saved) ? saved : 'gui';
     if (chosenView !== 'cli') setView(chosenView, { save: false });
+    runFromLink();
   });
+
+  // A link that says what to do, from Siri or a Shortcut: ?say=<anything
+  // spoken> or ?do=<exact line>. Taken off the address first, so reloading
+  // doesn't do it twice.
+  function runFromLink() {
+    const params = new URLSearchParams(location.search);
+    const said = params.get('say');
+    const exact = params.get('do');
+    if (said == null && exact == null) return;
+    params.delete('say');
+    params.delete('do');
+    const rest = params.toString();
+    window.history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    const r = said != null ? shell.spoken(said) : shell.linkLine(exact);
+    if (said != null) print(`from Siri: "${said}"`, 'dim');
+    if (r.error) return print(r.error, 'err');
+    if (r.ai) {
+      if (gui && gui.active && gui.askAi) return gui.askAi(r.ai);
+      return submit(`/ai ${r.ai}`);
+    }
+    submit(r.line);
+  }
 })();

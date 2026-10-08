@@ -1927,6 +1927,32 @@
           print(addFullName(key, rest) ? `${key} = ${(fullNames()[key] || []).join(' | ')}` : `${key} already has "${rest}"`, 'ok');
         },
       },
+      siri: {
+        usage: '/siri',
+        about: 'set up "Hey Siri, tymlee" (or a Home Screen button): say what you are doing, it is logged',
+        run() {
+          const site = io.siteUrl || 'https://your-tymlee-site/';
+          print([
+            'Siri and Shortcuts: say "Hey Siri, tymlee", then what you are doing.',
+            '',
+            'Set up once, in the Shortcuts app on your iPhone:',
+            '  1. New shortcut (+), named tymlee',
+            '  2. Add the action Dictate Text',
+            `  3. Add the action URL: ${site}?say=  then insert Dictated Text after it`,
+            '  4. Add the action Open URL',
+            '',
+            'Then "Hey Siri, tymlee", and say: ACME drawings · north star mix revisions · lunch ·',
+            'break · back · off · note called the client back · or anything with a time in it',
+            '("I got pulled into a call at 2 for half an hour"), which goes to Ask AI if it is set up.',
+            'Categories are matched to the ones you use, so a misheard name still lands right.',
+            '',
+            "The link opens tymlee in Safari (the iPhone sends links there, not to the Home Screen",
+            'app), so sign in there once: /login, /code, then /link. Its changes sync to the app.',
+            `Exact commands work too: ${site}?do=/off  (links only start entries, breaks, /off,`,
+            '/note, /done and /todo, never anything that removes or resets).',
+          ].join('\n'), 'report');
+        },
+      },
       names: {
         usage: '/names',
         about: 'every category with its full names',
@@ -2013,6 +2039,80 @@
         }
       }
       return d[a.length][b.length];
+    }
+
+    // ---- spoken lines (Siri, Shortcuts) -------------------------------------------
+
+    // What a spoken (or dictated) line means: { line } to run, { ai } to hand
+    // to Ask AI, or { error }. Short phrases map to commands; a category in use
+    // (matched loosely: Siri hears "Acme" or "north star") starts an entry;
+    // anything else, or anything with a time in it, goes to the AI when it's
+    // set up, and without it is logged as said.
+    const SPOKEN = [
+      [/^(?:off|clock(?:ing)? (?:out|off)|stop(?: the clock| tracking| the timer)?|done for the day|i'?m off|signing off|end of (?:the )?day)$/i, () => '/off'],
+      [/^(?:lunch|lunch break|unpaid(?: break)?|going to lunch)$/i, () => '/break-unpaid'],
+      [/^(?:(?:a )?break|paid break|coffee(?: break)?|taking a break)$/i, () => '/break-paid'],
+      [/^(?:back|i'?m back|back to work|resume|continue)$/i, () => 'resume'],
+      [/^(?:done|mark (?:it )?done|finished(?: it| that)?|that'?s done)$/i, () => '/done'],
+      [/^(?:add (?:a )?)?note(?: that)?[:,]?\s+(.+)$/i, (m) => `/note ${m[1]}`],
+    ];
+    const TIMEISH = /\d|\b(?:yesterday|ago|half an hour|minutes?|hours?|noon|morning|afternoon|earlier)\b/i;
+
+    function matchCategory(words) {
+      const cats = T.knownCategories(store.entries);
+      const flat = (x) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const names = fullNames();
+      // The first one to three words, run together: a category ("north star"
+      // -> NORTHSTAR) or one of its full names (/name).
+      for (let k = Math.min(3, words.length); k >= 1; k--) {
+        const said = flat(words.slice(0, k).join(' '));
+        if (!said) continue;
+        const cat = cats.find((c) => flat(c) === said)
+          || Object.keys(names).find((c) => (names[c] || []).some((n) => flat(n) === said));
+        if (cat) return { category: cat, rest: words.slice(k) };
+      }
+      // Misheard by a letter or two ("acne" for ACME).
+      const first = flat(words[0] || '');
+      if (first.length >= 4) {
+        const near = cats.filter((c) => editDistance(flat(c), first) <= (first.length >= 7 ? 2 : 1));
+        if (near.length === 1) return { category: near[0], rest: words.slice(1) };
+      }
+      return null;
+    }
+
+    function spoken(raw) {
+      const text = String(raw || '').trim().replace(/[.!?]+$/, '').replace(/\s+/g, ' ');
+      if (!text) return { error: 'nothing was said' };
+      for (const [re, to] of SPOKEN) {
+        const m = text.match(re);
+        if (!m) continue;
+        const line = to(m);
+        if (line !== 'resume') return { line };
+        const last = lastTask();
+        return last ? { line: last.text } : { error: 'nothing to go back to yet' };
+      }
+      const aiReady = Boolean(aiSettings().key && io.ai);
+      if (TIMEISH.test(text) && aiReady) return { ai: text };
+      const words = text.replace(/^(?:start(?:ing)?|switch(?:ing)? to|now|working on|i'?m (?:now )?(?:working )?on)\s+/i, '').split(' ');
+      const hit = matchCategory(words);
+      // Not a category in use: rather than guess, the AI makes sense of it
+      // (it knows the categories and their full names). Without it, logged
+      // as said.
+      if (!hit && aiReady) return { ai: text };
+      const category = hit ? hit.category : words[0].replace(/[^\w-]/g, '') || words[0];
+      const rest = (hit ? hit.rest : words.slice(1)).join(' ');
+      return { line: rest ? `${category} ${rest}` : category };
+    }
+
+    // Exact commands a link may run (?do=): starting entries and these. Never
+    // anything that removes or resets.
+    const LINK_COMMANDS = ['off', 'break-paid', 'break-unpaid', 'note', 'done', 'todo'];
+    function linkLine(raw) {
+      const line = String(raw || '').trim();
+      if (!line) return { error: 'the link had no command' };
+      if (!line.startsWith('/')) return { line };
+      const word = line.slice(1).split(/\s+/)[0].toLowerCase();
+      return LINK_COMMANDS.includes(ALIASES[word] || word) ? { line } : { error: `links can't run /${word} (only starting entries, breaks, /off, /note, /done and /todo)` };
     }
 
     // ---- running lines ---------------------------------------------------------
@@ -2184,6 +2284,8 @@
         if (t) doTodo(t.n);
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
+      spoken: (text) => spoken(text),
+      linkLine: (text) => linkLine(text),
       // The GUI's + on the running entry: set its work order or equipment
       // ('' clears). Resolves to an error message, or '' when done.
       async setTags(id, { wo, eq }) {

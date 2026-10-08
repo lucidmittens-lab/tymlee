@@ -58,6 +58,8 @@ async function drag(p, sel, dy, steps = 8) {
     await p.locator('.gset-seg button', { hasText: '12h' }).tap(); await p.waitForTimeout(500);
     ok((await p.locator('.sb-what, .tl-times').first().textContent()) !== null && (await p.locator('.tl-hour').first().textContent()).match(/am|pm|a|p/), `${tag}: the clock switches`);
     await p.evaluate(() => { localStorage.setItem('tymlee.menuSection', ''); });
+    ok(await p.locator('.tab[data-tab="find"]').evaluate((t) => document.elementFromPoint(t.getBoundingClientRect().x + 5, t.getBoundingClientRect().y + 5).closest('.gsheet-full') !== null), `${tag}: Settings covers the tabs`);
+    await p.locator('.gsheet-close').tap(); await p.waitForTimeout(300);
     await p.locator('.tab[data-tab="find"]').tap(); await p.waitForTimeout(400);
     ok((await p.locator('.gsheet-title').textContent()) === 'Find', `${tag}: Find tab`);
     await p.locator('.gsheet-close').tap(); await p.waitForTimeout(300);

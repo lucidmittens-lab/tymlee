@@ -37,6 +37,8 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
     ok(await p.locator('.gset-seg button[aria-pressed="true"]', { hasText: 'GUI' }).count() === 1, `${dev}: the current view is marked`);
     ok((await p.locator('.gset-row', { hasText: 'Save a full backup' }).locator('.gset-value').textContent()) === 'never on this device', `${dev}: backup shows when it was last saved`);
     await p.screenshot({ path: `${S}/menu-${dev}-settings.png` });
+    const box = await p.locator('.gsheet').boundingBox(); const vp = p.viewportSize();
+    ok(dev === 'phone' ? box.y <= 1 && box.height >= vp.height - 2 : box.height < vp.height * 0.7, `${dev}: Settings ${dev === 'phone' ? 'covers the whole screen' : 'stays a panel above the start bar'} (${Math.round(box.y)}+${Math.round(box.height)} of ${vp.height})`);
     await p.locator('.gset-seg button', { hasText: '24h' }).click(); await p.waitForTimeout(400);
     ok(await p.locator('.gset-seg button[aria-pressed="true"]', { hasText: '24h' }).count() === 1 && (await p.locator('.gsheet-title').textContent()) === 'Settings', `${dev}: 24h applies and Settings stays open`);
     await p.locator('.gset-seg button', { hasText: '12h' }).click(); await p.waitForTimeout(300);

@@ -1625,3 +1625,20 @@ button.gui-day {
 .gset-choice { cursor: default; }
 .gset-seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .gtrash-row { align-items: center; cursor: default; }
+
+/* Phones: Settings takes the whole screen (over the timeline, start bar,
+   tabs and the Home Screen hint; toasts still show above it). */
+@media (max-width: 600px) {
+  .gsheet-wrap.gsheet-full {
+    position: fixed;
+    inset: 0;
+    z-index: 26;
+    margin: 0;
+    max-width: none;
+    display: flex;
+    background: var(--card);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  body:has(.gsheet-full) .toasts { z-index: 27; }
+  .gsheet-wrap.gsheet-full .gsheet { flex: 1; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+}

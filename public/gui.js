@@ -1346,6 +1346,7 @@
       about.append(`tymlee v${version}${build ? ` · ${build}` : ''} · `, link);
       page.append(about);
       sheet('Settings', page);
+      sheetEl.classList.add('gsheet-full'); // phones: the whole screen
     }
 
     function signIn() {

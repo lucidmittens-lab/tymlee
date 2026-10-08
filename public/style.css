@@ -1178,7 +1178,7 @@ button.gui-day {
 
 .gmenu { display: flex; flex-direction: column; }
 /* Most used, on top: big tiles. */
-.gmenu-quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.gmenu-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
 .gmenu-tile {
   position: relative;
   display: flex;
@@ -1610,3 +1610,18 @@ button.gui-day {
   #app.pure-mode .tab { padding: 4px 0 3px; gap: 0; font-size: 10px; }
   #app.pure-mode .tab .icon svg { width: 20px; height: 20px; }
 }
+
+/* Settings: grouped rows, each with its current value. */
+.gset { display: flex; flex-direction: column; gap: 14px; }
+.gset-title { margin: 10px 0 2px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.gset-group { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-card); padding: 0 12px; background: var(--bg); }
+.gset-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gset-group > .gset-row:last-child { border-bottom: 0; }
+.gset-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gset-value { color: var(--muted); font-size: 12.5px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gset-row > .icon svg { width: 14px; height: 14px; color: var(--muted); }
+.gset-row:not(.gset-choice):hover .gset-label { color: var(--accent); }
+.gset-row.danger .gset-label { color: var(--warn); }
+.gset-choice { cursor: default; }
+.gset-seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.gtrash-row { align-items: center; cursor: default; }

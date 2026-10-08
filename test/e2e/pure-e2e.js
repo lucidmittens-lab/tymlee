@@ -45,10 +45,12 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   ok((await p.entries()).pop() === '/off' && await p.locator('.sb-off').isHidden(), 'Off clocks out');
   // Menu
   await p.click('.sb-menu'); await p.waitForTimeout(200);
-  ok(await p.locator('.gmenu').isVisible() && (await p.locator('.gmenu-about').textContent()).startsWith('tymlee v'), 'the menu opens, with the version');
+  ok(await p.locator('.gmenu').isVisible(), 'the menu opens');
+  await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(350);
+  ok((await p.locator('.gmenu-about').textContent()).startsWith('tymlee v'), 'Settings shows the version');
   await p.getByRole('button', { name: 'Rate and overtime' }).click(); await p.waitForTimeout(300);
   await p.fill('input[name=rate]', '30'); await p.fill('input[name=otmin]', '40'); await p.click('.gform-go'); await p.waitForTimeout(500);
-  await p.click('.sb-menu'); await p.getByRole('button', { name: 'Rate and overtime' }).click(); await p.waitForTimeout(300);
+  await p.click('.sb-menu'); await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(350); await p.getByRole('button', { name: 'Rate and overtime' }).click(); await p.waitForTimeout(300);
   ok((await p.inputValue('input[name=rate]')) === '30' && (await p.inputValue('input[name=otmin]')) === '40', 'pay settings saved (the form shows them again)');
   await p.keyboard.press('Escape'); await p.waitForTimeout(200);
   ok(!(await p.locator('.gsheet').count()), 'Esc closes a sheet');
@@ -56,7 +58,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   await p.click('.sb-menu'); await p.getByRole('button', { name: 'Add a note' }).click(); await p.waitForTimeout(300);
   await p.fill('input[name=text]', 'from the menu'); await p.click('.gform-go'); await p.waitForTimeout(400);
   ok(await p.evaluate(() => JSON.parse(tymleeStorage.getItem('tymlee.v2.local.entries')).pop().notes === 'from the menu'), 'Note on the current entry');
-  await p.click('.sb-menu'); await p.getByRole('button', { name: 'Link to a category' }).first().click(); await p.waitForTimeout(300);
+  await p.click('.sb-menu'); await p.getByRole('button', { name: 'Link a work order' }).first().click(); await p.waitForTimeout(300);
   await p.fill('input[name=category]', 'dev'); await p.fill('input[name=wo]', '4471'); await p.click('.gform-go'); await p.waitForTimeout(400);
   ok(await p.evaluate(() => JSON.parse(tymleeStorage.getItem('tymlee.v2.local.entries')).filter((e) => e.wo === '4471').length >= 2), 'Link a work order');
   await p.click('.sb-menu'); await p.getByRole('button', { name: 'Log', exact: true }).click(); await p.waitForTimeout(300);

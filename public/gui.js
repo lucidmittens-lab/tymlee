@@ -45,6 +45,7 @@
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
     up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     note: '<path d="M6 4.5h12A1.5 1.5 0 0 1 19.5 6v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5z"/><path d="M8.5 9.5h7M8.5 13h7M8.5 16.5h4"/>',
     hash: '<path d="M9.5 4L8 20M16 4l-1.5 16M5 9h15M4 15h15"/>',
     tool: '<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5"/><path d="M14.5 6.5L17 4l3 3-2.5 2.5"/>',
@@ -404,7 +405,7 @@
     }
     dockEl.append(tabbar);
     function markTab() {
-      const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : sheetName === 'Menu' ? 'menu' : (sheetName.startsWith('To-do') || sheetName === 'Done') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
+      const now = !sheetName ? (aiOpen() ? 'ai' : 'timeline') : (sheetName === 'Menu' || sheetName === 'Settings' || sheetName === 'Trash') ? 'menu' : (sheetName.startsWith('To-do') || sheetName === 'Done') ? 'todo' : sheetName === 'Find' ? 'find' : sheetName === 'Set up AI' ? 'ai' : '';
       for (const [k, b] of Object.entries(tabs)) b.setAttribute('aria-current', String(k === now));
     }
     // AI shows only once it's set up (a key, here or synced from another
@@ -1164,22 +1165,17 @@
       }, (v) => v.q && runMenu('Find', `/find ${v.q}`));
     }
 
+    // The menu holds things to do; settings have their own page (Settings).
     function menuItems() {
-      const signedIn = Boolean(store.user);
-      const enc = store.encryption;
       const show = (heading, cmd) => form(heading, { range: true, submit: 'Show' }, (v) => runMenu(heading, `${cmd} ${v.range}`));
       return [
         ['Entries', [
-          ['Paid break', () => runMenu('Break', '/break-paid')],
-          ['Unpaid break', () => runMenu('Break', '/break-unpaid')],
           ['Add a note', () => form('Add a note', {
             intro: 'Goes on the current entry, as a new line.',
             fields: [{ name: 'text', label: 'Note', placeholder: 'called the client back' }], submit: 'Add',
           }, (v) => v.text && runMenu('Note', `/note ${v.text}`))],
           ['Edit entries', () => opts.openCli('/edit')],
-        ]],
-        ['Search', [
-          ['Find', () => findForm()],
+          ['Trash', () => trashSheet()],
         ]],
         ['Reports', [
           ['Log', () => show('Log', '/log')],
@@ -1191,8 +1187,8 @@
             submit: 'Download',
           }, (v) => runMenu('Export', `/export ${v.range}${v.format === 'csv' ? ' csv' : ''}`))],
         ]],
-        ['Work orders', [
-          ['Link to a category', () => form('Link a work order', {
+        ['Work orders and equipment', [
+          ['Link a work order', () => form('Link a work order', {
             intro: "Every entry in the category that day gets it, including ones you haven't started yet.",
             fields: [
               { name: 'category', label: 'Category', placeholder: 'dev' },
@@ -1201,9 +1197,7 @@
             ],
             submit: 'Link',
           }, (v) => v.category && v.wo && runMenu('Work order', `/wolink ${v.category} ${v.date ? `${v.date} ` : ''}${v.wo}`))],
-        ]],
-        ['Equipment', [
-          ['Link to a category', () => form('Link equipment', {
+          ['Link equipment', () => form('Link equipment', {
             intro: "Every entry in the category that day gets it, including ones you haven't started yet.",
             fields: [
               { name: 'category', label: 'Category', placeholder: 'dev' },
@@ -1225,10 +1219,6 @@
           ] : []),
           ['Tokens', () => runMenu('Form tokens', '/form')],
         ]],
-        ['To-do', [
-          ['To-do list', () => todoSheet()],
-          ['Add a to-do', () => addTodoForm()],
-        ]],
         ['Checklists', [
           ['Start a checklist', () => startChecklistForm()],
           ['Open checklists', () => openChecklists()],
@@ -1240,59 +1230,122 @@
             fields: [{ name: 'name', label: 'Checklist', choices: shell.checklistNames().map((n) => [n, n]) }], submit: 'Edit',
           }, (v) => opts.openCli(`/editchecklist ${v.name}`))]] : []),
         ]],
-        ['Pay', [
-          ['Rate and overtime', () => form('Pay', {
-            intro: 'Overtime counts per week, Sunday to Saturday. Clear a field to turn it off.',
-            fields: [
-              { name: 'rate', label: 'Hourly rate ($)', value: money('rate'), type: 'number', step: '0.01' },
-              { name: 'otmin', label: 'Overtime after (hours a week)', value: money('otmin'), type: 'number', step: '0.5' },
-              { name: 'otrate', label: 'Overtime pay (× rate)', value: money('otrate'), type: 'number', step: '0.05', placeholder: '1.5' },
-            ],
-            submit: 'Save',
-          }, (v) => {
-            const lines = [];
-            for (const k of ['rate', 'otmin', 'otrate']) {
-              if (v[k] === money(k)) continue;
-              lines.push(`/${k} ${v[k] || 'off'}`);
-            }
-            if (lines.length) runMenu('Pay', lines);
-          })],
-        ]],
-        ['Account', signedIn ? [
-          ['Account', () => runMenu('Account', '/whoami')],
-          ['Sync now', () => runMenu('Sync', '/sync')],
-          ['Sign out', () => form('Sign out', { intro: 'Your log stays in your account. This device forgets it, and its key.', submit: 'Sign out' }, () => runMenu('Sign out', '/logout'))],
-        ] : [
-          ['Sign in', () => signIn()],
-        ]],
-        ...(signedIn ? [['Encryption', [
-          ...(enc === 'ready' ? [
-            ['Link a device', () => runMenu('Link a device', '/link')],
-            ['New recovery key', () => form('New recovery key', { intro: 'Your old recovery key stops working.', submit: 'Make a new key' }, () => runMenu('Recovery key', '/recovery'))],
-          ] : [
-            ['Enter a link code', () => form('Link this device', { intro: 'On a device that is set up, choose Menu → Link a device, and type the code it shows.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))],
-            ['Use recovery key', () => form('Recovery key', { fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Unlock' }, (v) => v.key && runMenu('Recovery', `/recover ${v.key}`))],
-            ['Reset encryption', () => form('Reset encryption', {
-              intro: 'Only if no device has the key and the recovery key is lost. Your synced log and settings are deleted (nobody can read them without the key) and you get a new key.',
-              fields: [{ name: 'confirm', label: 'Type DELETE to confirm', placeholder: 'DELETE' }], submit: 'Delete and start over', danger: true,
-            }, (v) => (v.confirm === 'DELETE' ? runMenu('Reset encryption', '/reset-encryption DELETE') : toast('Reset cancelled. Nothing changed.', 'dim')))],
-          ]),
-        ]]] : []),
-        ['Backup', [
-          ['Save a full backup', () => runMenu('Backup', '/backup')],
-          ['Restore from a file', () => runMenu('Restore', '/restore file')],
-        ]],
-        ['View', [
-          ['CLI', () => opts.setView('cli')],
-          ['Hybrid', () => opts.setView('gui')],
+        ['Help', [
           ['Help', () => runMenu('Help', '/help')],
           ['Keyboard shortcuts', () => showShortcuts()],
-          [T.clockMode() === '12' ? '24-hour clock' : '12-hour clock', () => runMenu('Clock', `/clock ${T.clockMode() === '12' ? '24' : '12'}`)],
-          ['Accent color', () => accentSheet()],
-          [shell.ai.ready() ? 'AI key and model' : 'Set up AI (optional)', () => aiSetup()],
           ['Siri and Shortcuts', () => runMenu('Siri and Shortcuts', '/siri')],
         ]],
       ];
+    }
+
+    function payForm() {
+      form('Pay', {
+        intro: 'Overtime counts per week, Sunday to Saturday. Clear a field to turn it off.',
+        fields: [
+          { name: 'rate', label: 'Hourly rate ($)', value: money('rate'), type: 'number', step: '0.01' },
+          { name: 'otmin', label: 'Overtime after (hours a week)', value: money('otmin'), type: 'number', step: '0.5' },
+          { name: 'otrate', label: 'Overtime pay (× rate)', value: money('otrate'), type: 'number', step: '0.05', placeholder: '1.5' },
+        ],
+        submit: 'Save',
+      }, (v) => {
+        const lines = [];
+        for (const k of ['rate', 'otmin', 'otrate']) {
+          if (v[k] === money(k)) continue;
+          lines.push(`/${k} ${v[k] || 'off'}`);
+        }
+        if (lines.length) runMenu('Pay', lines);
+      });
+    }
+
+    // Deleted entries (30 days), each with Restore.
+    function trashSheet() {
+      const list = shell.trashList();
+      const box = el('div', 'gtick');
+      if (!list.length) box.append(el('p', 'gform-intro', 'The trash is empty. Deleted entries stay here for 30 days.'));
+      for (const t of list.slice().reverse()) {
+        const row = el('div', 'gtick-row gtrash-row');
+        const words = el('span', 'gtick-words');
+        words.append(el('span', 'gtick-text', t.what), el('span', 'gtick-sub', `${T.idTag(t.n)} · ${T.ymd(t.ts)} ${T.clock(t.ts)} · deleted ${T.ymd(t.deletedAt).slice(5)}`));
+        const restore = button('Restore', 'gform-range', async () => { await runMenu('Trash', `/untrash ${t.n}`); trashSheet(); });
+        row.append(words, restore);
+        box.append(row);
+      }
+      sheet('Trash', box);
+    }
+
+    // Settings: grouped rows, each showing its current value.
+    function settingsSheet() {
+      const signedIn = Boolean(store.user);
+      const enc = store.encryption;
+      const page = el('div', 'gset');
+      const group = (title, rows) => {
+        const g = el('section', 'gset-group');
+        g.append(el('h3', 'gset-title', title));
+        for (const r of rows) g.append(r);
+        page.append(g);
+      };
+      const row = (label, value, action, cls = '') => {
+        const b = button('', `gset-row ${cls}`.trim(), () => action());
+        b.append(el('span', 'gset-label', label));
+        if (value) b.append(el('span', 'gset-value', value));
+        b.append(icon('right'));
+        return b;
+      };
+      const choice = (label, options, current, pick) => {
+        const r = el('div', 'gset-row gset-choice');
+        r.append(el('span', 'gset-label', label));
+        const seg = el('div', 'gset-seg');
+        for (const [key, text] of options) {
+          const b = button(text, 'gform-range', async () => { await pick(key); settingsSheet(); });
+          b.setAttribute('aria-pressed', String(key === current));
+          seg.append(b);
+        }
+        r.append(seg);
+        return r;
+      };
+      const accent = (store.settings && store.settings.accent) || 'indigo';
+      group('Appearance', [
+        choice('View', [['cli', 'CLI'], ['gui', 'Hybrid'], ['pure', 'GUI']], opts.view(), (v) => opts.setView(v)),
+        choice('Clock', [['12', '12h'], ['24', '24h']], T.clockMode(), (v) => quietly(() => opts.run(`/clock ${v}`))),
+        row('Accent color', accent, () => accentSheet()),
+      ]);
+      const rate = money('rate');
+      const otmin = money('otmin');
+      group('Pay', [row('Rate and overtime', rate ? `$${rate}/h${otmin ? ` · OT after ${otmin}h` : ''}` : 'Off', () => payForm())]);
+      group('AI', [row(shell.ai.ready() ? 'Key and model' : 'Set up AI (optional)', shell.ai.ready() ? shell.ai.model().replace(/^Claude /, '') : 'Off', () => aiSetup())]);
+      group('Account', signedIn ? [
+        row(store.user.email, (state && state.sync && state.sync.label) || '', () => runMenu('Account', '/whoami')),
+        row('Sync now', '', () => runMenu('Sync', '/sync')),
+        row('Sign out', '', () => form('Sign out', { intro: 'Your log stays in your account. This device forgets it, and its key.', submit: 'Sign out' }, () => runMenu('Sign out', '/logout'))),
+      ] : [row('Sign in', 'to sync your devices', () => signIn())]);
+      if (signedIn) {
+        group('Security', enc === 'ready' ? [
+          row('Link a device', '', () => runMenu('Link a device', '/link')),
+          row('New recovery key', '', () => form('New recovery key', { intro: 'Your old recovery key stops working.', submit: 'Make a new key' }, () => runMenu('Recovery key', '/recovery'))),
+        ] : [
+          row('Enter a link code', '', () => form('Link this device', { intro: 'On a device that is set up, choose Settings → Link a device, and type the code it shows.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))),
+          row('Use recovery key', '', () => form('Recovery key', { fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Unlock' }, (v) => v.key && runMenu('Recovery', `/recover ${v.key}`))),
+          row('Reset encryption', '', () => form('Reset encryption', {
+            intro: 'Only if no device has the key and the recovery key is lost. Your synced log and settings are deleted (nobody can read them without the key) and you get a new key.',
+            fields: [{ name: 'confirm', label: 'Type DELETE to confirm', placeholder: 'DELETE' }], submit: 'Delete and start over', danger: true,
+          }, (v) => (v.confirm === 'DELETE' ? runMenu('Reset encryption', '/reset-encryption DELETE') : toast('Reset cancelled. Nothing changed.', 'dim'))), 'danger'),
+        ]);
+      }
+      const last = shell.lastBackup();
+      const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+      group('Data', [
+        row('Save a full backup', last ? (days ? `last ${days} day${days === 1 ? '' : 's'} ago` : 'last today') : 'never on this device', () => runMenu('Backup', '/backup')),
+        row('Restore from a file', '', () => runMenu('Restore', '/restore file')),
+      ]);
+      const about = el('div', 'gmenu-about');
+      const { version, build, repo } = opts.about;
+      const link = el('a', null, 'GitHub');
+      link.href = repo;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      about.append(`tymlee v${version}${build ? ` · ${build}` : ''} · `, link);
+      page.append(about);
+      sheet('Settings', page);
     }
 
     function signIn() {
@@ -1308,7 +1361,7 @@
     // open one at a time (the one left open is remembered on this device).
     const OPEN_KEY = 'tymlee.menuSection';
     function openSection() {
-      try { return localStorage.getItem(OPEN_KEY) ?? 'To-do'; } catch (_) { return 'To-do'; }
+      try { return localStorage.getItem(OPEN_KEY) ?? 'Entries'; } catch (_) { return 'Entries'; }
     }
     function setOpen({ wrap, head }, on) {
       wrap.classList.toggle('open', on);
@@ -1324,6 +1377,7 @@
         ['To-do', 'check', () => todoSheet(), due ? `${due} due` : ''],
         ['Find', 'search', () => findForm(), ''],
         ['Undo', 'back', () => runMenu('Undo', '/undo'), ''],
+        ['Settings', 'gear', () => settingsSheet(), ''],
       ]) {
         const b = button('', 'gmenu-tile', go(fn), label);
         b.append(icon(ico), el('span', null, label));
@@ -1349,14 +1403,6 @@
         groups.push({ wrap, head });
         setOpen({ wrap, head }, section === open);
       }
-      const about = el('div', 'gmenu-about');
-      const { version, build, repo } = opts.about;
-      const link = el('a', null, 'GitHub');
-      link.href = repo;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      about.append(`tymlee v${version}${build ? ` · ${build}` : ''} · `, link);
-      list.append(about);
       sheet('Menu', list);
     }
 

@@ -68,16 +68,12 @@ const seed = [
     await p.evaluate(() => localStorage.setItem('tymlee.view2', 'pure')); await p.reload(); await p.waitForTimeout(700);
     await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(200);
     await p.screenshot({ path: `${S}/breaks-${name}-menu.png` });
-    if (name === 'phone') {
-      await p.locator('.gmenu button', { hasText: 'Categories' }).click(); await p.waitForTimeout(200);
-      await p.screenshot({ path: `${S}/breaks-phone-ranges.png` });
-      await p.locator('.gform-range', { hasText: 'This week' }).click();
-      await p.click('.gform-go'); await p.waitForTimeout(400);
-      ok((await p.locator('.gsheet-text').allTextContents()).join('').includes('calweek'), 'GUI: This week works');
-    } else {
-      await p.locator('.gmenu button', { hasText: 'Unpaid break' }).click(); await p.waitForTimeout(400);
-      ok((await p.locator('#status').textContent()).includes('■ unpaid break'), 'GUI menu: Unpaid break');
-    }
+    // (Breaks from the start bar: breakbtn-e2e.js. The menu no longer has them.)
+    await p.locator('.gmenu button', { hasText: 'Categories' }).click(); await p.waitForTimeout(200);
+    if (name === 'phone') await p.screenshot({ path: `${S}/breaks-phone-ranges.png` });
+    await p.locator('.gform-range', { hasText: 'This week' }).click();
+    await p.click('.gform-go'); await p.waitForTimeout(400);
+    ok((await p.locator('.gsheet-text').allTextContents()).join('').includes('calweek'), `GUI ${name}: This week works`);
     await ctx.close();
   }
   ok(!errs.length, `no errors ${errs}`);

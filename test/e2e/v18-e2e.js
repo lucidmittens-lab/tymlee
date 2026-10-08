@@ -52,10 +52,10 @@ async function drag(p, sel, dy, steps = 8) {
     await drag(p, '.gsheet', 200); await p.waitForTimeout(500);
     ok(await p.locator('.gsheet').count() === 0 && await p.locator('.tab[aria-current="true"]').getAttribute('data-tab') === 'timeline', `${tag}: a long pull closes the sheet`);
     await p.locator('.tab[data-tab="menu"]').tap(); await p.waitForTimeout(400);
-    await p.locator('.gmenu-section', { hasText: 'View' }).tap(); await p.waitForTimeout(150);
-    ok(await p.locator('.gmenu-item', { hasText: '12-hour clock' }).isVisible() && await p.locator('.gmenu-item', { hasText: 'Hybrid' }).isVisible(), `${tag}: the clock and view switches are in Menu → View`);
+    await p.locator('.gmenu-tile', { hasText: 'Settings' }).tap(); await p.waitForTimeout(400);
+    ok(await p.locator('.gset-seg button', { hasText: '12h' }).isVisible() && await p.locator('.gset-seg button', { hasText: 'Hybrid' }).isVisible(), `${tag}: the clock and view switches are in Settings`);
     await p.screenshot({ path: `${S}/v18-${tag}-menu.png` });
-    await p.locator('.gmenu-item', { hasText: '12-hour clock' }).tap(); await p.waitForTimeout(500);
+    await p.locator('.gset-seg button', { hasText: '12h' }).tap(); await p.waitForTimeout(500);
     ok((await p.locator('.sb-what, .tl-times').first().textContent()) !== null && (await p.locator('.tl-hour').first().textContent()).match(/am|pm|a|p/), `${tag}: the clock switches`);
     await p.evaluate(() => { localStorage.setItem('tymlee.menuSection', ''); });
     await p.locator('.tab[data-tab="find"]').tap(); await p.waitForTimeout(400);

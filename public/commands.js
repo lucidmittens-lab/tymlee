@@ -2286,6 +2286,14 @@
       },
       runningTodoId: () => (runningTodo() || {}).id || null,
       spoken: (text) => spoken(text),
+      // The GUI's Trash and Settings.
+      trashList: () => trashed().map((t) => ({
+        n: T.idText(t.entry.sid || 0),
+        ts: t.entry.ts,
+        deletedAt: t.deletedAt,
+        what: T.isMarker(t.entry.text) ? T.withSpans([t.entry], t.entry.ts)[0].category : t.entry.text,
+      })),
+      lastBackup: () => lastBackup(),
       linkLine: (text) => linkLine(text),
       // The GUI's + on the running entry: set its work order or equipment
       // ('' clears). Resolves to an error message, or '' when done.

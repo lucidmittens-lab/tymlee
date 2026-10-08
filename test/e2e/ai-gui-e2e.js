@@ -37,9 +37,9 @@ const reply = (obj) => ({ id: 'm', type: 'message', role: 'assistant', model: 'c
       if (dev === 'desk') { await p.keyboard.press('a'); await p.waitForTimeout(200); ok(!(await p.locator('.aipanel').isVisible()), `${tag}: A does nothing yet`); }
       if (dev === 'phone') await p.locator('.tab[data-tab="menu"]').tap(); else await p.click('.sb-menu');
       await p.waitForTimeout(250);
-      await p.locator('.gmenu-section', { hasText: 'View' }).click(); await p.waitForTimeout(150);
-      await p.locator('.gmenu-item', { hasText: 'Set up AI' }).click(); await p.waitForTimeout(300);
-      ok((await p.locator('.gsheet-title').textContent()) === 'Set up AI', `${tag}: set up from Menu → View`);
+      await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(350);
+      await p.locator('.gset-row', { hasText: 'Set up AI' }).click(); await p.waitForTimeout(300);
+      ok((await p.locator('.gsheet-title').textContent()) === 'Set up AI', `${tag}: set up from Menu → Settings`);
       if (scheme === 'light') await p.screenshot({ path: `${S}/aig-${tag}-setup.png` });
       await p.fill('input[name=key]', 'sk-ant-api03-TESTKEY000000000000000000000abcd');
       await p.locator('.gform-range', { hasText: 'Haiku' }).click();

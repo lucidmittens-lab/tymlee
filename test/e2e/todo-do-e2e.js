@@ -59,7 +59,7 @@ const seed = [
     // The GUI: ▶ on a to-do.
     await p.evaluate(() => localStorage.setItem('tymlee.view2', 'pure')); await p.reload(); await p.waitForTimeout(600);
     await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(200);
-    await p.locator('.gmenu button', { hasText: 'To-do list' }).click(); await p.waitForTimeout(200);
+    await p.locator('.gmenu-tile', { hasText: 'To-do' }).click(); await p.waitForTimeout(200);
     const rows = await p.locator('.gtick-row .gtick-text').allTextContents();
     ok(rows[0] === 'invoice for September', `overdue first in the sheet: ${rows}`);
     ok(await p.locator('.gtick-row.late').count() === 1, 'the overdue one is marked');
@@ -71,7 +71,7 @@ const seed = [
     ok((await entries()).slice(-1)[0] === 'ACME call about the drawings', 'ticking it off leaves the timer running');
     await p.click('.gsheet-close'); await p.waitForTimeout(300);
     await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(200);
-    await p.locator('.gmenu button', { hasText: 'To-do list' }).click(); await p.waitForTimeout(200);
+    await p.locator('.gmenu-tile', { hasText: 'To-do' }).click(); await p.waitForTimeout(200);
     const after = await p.locator('.gtick-row .gtick-text').allTextContents();
     ok(!after.includes('call about the drawings') && !after.includes('send the stems to the label') && (await p.locator('.gform-range', { hasText: 'Done · 2' }).count()) === 1, `reopened, done ones are archived: ${after}`);
     await p.locator('.gform-range', { hasText: 'Done · 2' }).click(); await p.waitForTimeout(200);

@@ -30,7 +30,7 @@ const seed = [
       await p.locator('.gmenu-section', { hasText: 'Forms' }).click(); await p.waitForTimeout(100);
       ok(await p.locator('.gmenu-group.open').count() === 1 && (await p.locator('.gmenu-group.open .gmenu-section').textContent()) === 'Forms', `${tag}: one section open`);
       const colors = await p.evaluate(() => [...document.querySelectorAll('.gmenu-section')].map((h) => getComputedStyle(h).color));
-      const muted = await p.evaluate(() => getComputedStyle(document.querySelector('.gmenu-about')).color);
+      const muted = await p.evaluate(() => getComputedStyle(document.querySelector('.gsheet-close')).color);
       const reports = await p.locator('.gmenu-section', { hasText: 'Reports' }).evaluate((h) => getComputedStyle(h).color);
       if (dev === 'phone') ok(reports === muted, `${tag}: a closed header is muted again after a tap (${reports} vs ${muted})`);
       if (dev === 'desk' && scheme === 'light') await p.screenshot({ path: `${S}/v171-${tag}-menu.png` });
@@ -58,8 +58,8 @@ const seed = [
       }
       // Accent.
       await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(250);
-      await p.locator('.gmenu-section', { hasText: 'View' }).click(); await p.waitForTimeout(100);
-      await p.locator('.gmenu-item', { hasText: 'Accent color' }).click(); await p.waitForTimeout(400);
+      await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(350);
+      await p.locator('.gset-row', { hasText: 'Accent color' }).click(); await p.waitForTimeout(400);
       ok(await p.locator('.gaccent-swatch').count() === 9 && await p.locator('.gaccent-swatch.on', { hasText: 'indigo' }).count() === 1, `${tag}: 8 swatches and a custom one; indigo chosen`);
       await p.locator('.gaccent-swatch', { hasText: 'teal' }).click(); await p.waitForTimeout(500);
       const accent = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());

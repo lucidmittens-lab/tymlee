@@ -306,6 +306,7 @@
       submit(line);
     },
     setView: (v) => setView(v),
+    view: () => view,
     // Reports in a sheet wrap like in the console (continuing under their
     // last column).
     formatReport(pre, text) {

@@ -60,7 +60,7 @@ const seed = [
     // The GUI: tick boxes.
     await p.evaluate(() => localStorage.setItem('tymlee.view2', 'pure')); await p.reload(); await p.waitForTimeout(600);
     await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(200);
-    await p.locator('.gmenu button', { hasText: 'To-do list' }).click(); await p.waitForTimeout(200);
+    await p.locator('.gmenu-tile', { hasText: 'To-do' }).click(); await p.waitForTimeout(200);
     ok((await p.locator('.gsheet-title').textContent()) === 'To-do · 0/2', `to-do window: the done one is archived: ${await p.locator('.gsheet-title').textContent()}`);
     await p.locator('.gform-range', { hasText: 'Done · 1' }).click(); await p.waitForTimeout(200);
     ok((await p.locator('.gsheet-title').textContent()) === 'Done · 1' && (await p.locator('.gtick-row .gtick-text').allTextContents()).join() === 'call about the drawings', 'the Done archive lists it');

@@ -6,4 +6,6 @@
 window.TYMLEE_CONFIG = {
   supabaseUrl: 'https://yhutioohsjsuphumyndv.supabase.co',
   supabaseAnonKey: 'sb_publishable_LZfEQVD3O4fhDE0BE9tkKw_ZF4aNKTO', // publishable (or legacy anon) key
+  // allowUnencrypted: true, // only for a server without the encryption part
+  //                          // of schema.sql: then the log syncs unencrypted
 };

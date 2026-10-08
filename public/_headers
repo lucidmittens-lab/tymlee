@@ -1,0 +1,13 @@
+# Security headers for every page and file (Cloudflare reads this file).
+# The content policy only lets the page run its own scripts and talk to the
+# sync server (Supabase) and Anthropic (Ask AI, with your own key), so text
+# that somehow got into the page could not run as code or send data elsewhere.
+# The style hash is index.html's one inline <style> (the background before the
+# stylesheet loads): change that and the hash must change too (a test checks).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'sha256-OE7UJnne3YAzuz1dAGAlMCf/leZEFDAGgtCQmrD+Xl8='; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: geolocation=(), microphone=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin

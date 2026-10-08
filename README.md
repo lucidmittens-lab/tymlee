@@ -192,9 +192,13 @@ When you're signed in, each entry's text and start time are encrypted together i
 
 The code is in [`public/vault.js`](public/vault.js). It uses AES-GCM with a 256-bit master key, bound to each entry's id, and PBKDF2-SHA-256 (300,000 rounds) for the recovery and link codes. Stored entries start with `/e2/` (time and text sealed together; the `ts` column is 0) or, on older servers, `/e1/` (text only). The site's code is served by whoever hosts it, so publishing this repository is how users can check what it does.
 
-The last section of `supabase/schema.sql` makes the database itself refuse unencrypted entries, notes, work orders and settings, e.g. from an old copy of the app still open somewhere. Rows stored before it are left as they are; they are re-encrypted by the next device that syncs them.
+The last section of `supabase/schema.sql` makes the database itself refuse unencrypted entries, notes, work orders and settings, e.g. from an old copy of the app still open somewhere.
 
-A server set up before encryption existed (without the `keyring` table from `supabase/schema.sql`) keeps syncing without encryption until the script is run.
+A device with the key doesn't trust anything unencrypted the server hands back: such entries are ignored (with a notice saying how many), and unencrypted settings are replaced with the device's own. Only your key can write what the app shows you.
+
+A server without the `keyring` table from `supabase/schema.sql` gets nothing: sync stays off (with a notice) and the log stays on the device. The app never decides by itself to sync unencrypted; to run a server without encryption on purpose, set `allowUnencrypted: true` in `public/config.js`.
+
+[`SECURITY.md`](SECURITY.md) has the threat model: what is protected, from whom, and what isn't.
 
 ## Terminal app
 
@@ -300,3 +304,5 @@ Supabase's built-in email sender is rate-limited to a few emails per hour and is
 ```
 npm test
 ```
+
+The browser and terminal tests (`test/e2e/`) drive the real app: Playwright for the website (desktop and phone sizes), a pseudo-terminal for the terminal app, with fake Supabase and Anthropic servers so nothing leaves the machine. `npm run e2e` runs the ones related to what changed since the live branch; `npm run e2e quick` a short set that touches everything; `npm run e2e all` every one; `npm run e2e ai sync` just those. They need Playwright with Chromium and, for the terminal tests, Python 3 with `pyte`.

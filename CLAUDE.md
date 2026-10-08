@@ -32,3 +32,21 @@ The website is the `public/` folder, deployed by Cloudflare from the branch
 `claude/time-tracking-app-bg1ckf` on every push. Database changes go in
 `supabase/schema.sql` (safe to run again) and are run by the owner in the
 Supabase SQL editor.
+
+## Testing
+
+- `npm test`: the unit tests (seconds). Run after every change.
+- `npm run e2e`: the browser and terminal tests related to what changed since
+  the live branch (`test/e2e/run.js` maps files to tests). Run before shipping.
+- `npm run e2e quick`: a short set that touches everything once.
+- `npm run e2e all`: every test (about 10 minutes). Only when shared code
+  changed in a way the mapping can't see, or the owner asks.
+
+New behavior gets a check in the related `test/e2e/*-e2e.js` (or a new file
+there). Test data uses made-up names only, never the owner's real projects.
+
+## Security
+
+`SECURITY.md` is the threat model. Changes to `vault.js`, `store.js`'s sync
+and key handling, `supabase/schema.sql` or `public/_headers` should keep it
+true (and `strict-e2e.js`, `e2ee-e2e.js`, `csp-e2e.js` passing).

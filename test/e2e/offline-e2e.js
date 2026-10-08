@@ -1,0 +1,25 @@
+const { chromium } = require('playwright');
+const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
+(async () => {
+  const b = await chromium.launch();
+  const ctx = await b.newContext({ viewport: { width: 1000, height: 700 } });
+  await ctx.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: '' }));
+  const p = await ctx.newPage();
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message));
+  await p.goto('http://localhost:8123/'); await p.waitForTimeout(300);
+  await p.evaluate(() => navigator.serviceWorker.ready);
+  await p.fill('#entry', 'dev offline check'); await p.press('#entry', 'Enter'); await p.waitForTimeout(400);
+  const n = await p.evaluate(async () => (await caches.open('tymlee-shell')).keys().then((k) => k.length));
+  ok(n >= 21, `site files saved for offline (${n})`);
+  await ctx.setOffline(true);
+  await p.reload(); await p.waitForTimeout(800);
+  ok(await p.locator('#entry').isVisible(), 'the page opens with no network');
+  const text = await p.locator('#out').textContent();
+  ok(await p.evaluate(() => typeof Tymlee === 'object' && typeof TymleeStore === 'object'), 'scripts loaded from the saved copy');
+  await p.fill('#entry', '/log'); await p.press('#entry', 'Enter'); await p.waitForTimeout(300);
+  ok((await p.locator('#out').textContent()).includes('offline check'), 'the log is there offline');
+  await p.screenshot({ path: process.argv[2] + '/offline.png' });
+  await ctx.setOffline(false);
+  ok(!errs.length, 'no page errors ' + errs.join(' | '));
+  await b.close();
+})();

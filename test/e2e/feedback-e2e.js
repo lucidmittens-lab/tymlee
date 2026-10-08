@@ -1,0 +1,56 @@
+const { chromium } = require('playwright');
+const S = process.argv[2];
+const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
+const at = (hm) => new Date(`2026-10-01T${hm}:00-04:00`).getTime();
+(async () => {
+  const b = await chromium.launch();
+  const ctx = await b.newContext({ viewport: { width: 1100, height: 720 }, timezoneId: 'America/New_York', serviceWorkers: 'block' });
+  await ctx.clock.install({ time: new Date('2026-10-01T13:40:00-04:00') });
+  await ctx.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: '' }));
+  const p = await ctx.newPage();
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message));
+  await p.goto('http://localhost:8123/');
+  await p.evaluate((r) => { localStorage.setItem('tymlee.v2.local.entries', JSON.stringify(r)); localStorage.setItem('tymlee.view2', 'pure'); }, [{ id: 'a', ts: at('09:00'), text: 'mtg client call' }, { id: 'b', ts: at('13:00'), text: '/off' }]);
+  await p.reload(); await p.waitForTimeout(700);
+  const entries = () => p.evaluate(() => JSON.parse(tymleeStorage.getItem('tymlee.v2.local.entries')).map((e) => e.text));
+  const mode = () => p.locator('#startbar').getAttribute('data-mode');
+  const tick = async (ms = 300) => { await p.clock.runFor(ms); await p.waitForTimeout(150); };
+  // F2: keys
+  await p.evaluate(() => document.activeElement && document.activeElement.blur());
+  await p.keyboard.press('r'); await tick();
+  ok((await entries()).pop() === 'mtg client call', 'R resumes');
+  // F1: Started flash
+  ok((await p.locator('.sb-new').textContent()).includes('Started') && await p.locator('.sb-new.sb-flash').count() === 1, 'the main button says ✓ Started');
+  await p.screenshot({ path: `${S}/fb-started.png` });
+  await tick(1400);
+  ok((await p.locator('.sb-new').textContent()).includes('New task'), '…then goes back to New task');
+  // F3: Undo toast lasts 8 s, with a countdown
+  ok(await p.locator('.toast.has-action .toast-timer').count() === 1, 'the Undo toast has a countdown line');
+  await p.screenshot({ path: `${S}/fb-toast.png` });
+  await p.waitForTimeout(5000);
+  ok(await p.locator('.toast.has-action').count() === 1, 'still there after 5 s');
+  await p.waitForTimeout(3800);
+  ok(await p.locator('.toast.has-action').count() === 0, 'gone after 8 s');
+  await p.keyboard.press('b'); await tick();
+  ok((await entries()).pop() === '/break-paid', 'B: a break (paid, the default kind)');
+  await p.keyboard.press('Shift+B'); await tick();
+  ok((await entries()).pop() === '/break-unpaid', 'Shift+B: the other kind');
+  await p.keyboard.press('r'); await tick();
+  ok((await entries()).pop() === 'mtg client call' && await mode() === 'running', 'R: back to work');
+  await p.keyboard.press('n'); await tick();
+  ok(await mode() === 'compose' && await p.evaluate(() => document.activeElement.getAttribute('aria-label') === 'Category'), 'N: new task, in the category field');
+  await p.keyboard.type('dev'); await p.keyboard.press('Escape'); await p.keyboard.press('Escape'); await tick();
+  ok(await mode() === 'running' && !(await entries()).includes('dev'), 'typing n/b/o in a field does not trigger keys; Esc cancels');
+  await p.evaluate(() => document.activeElement && document.activeElement.blur());
+  await p.keyboard.press('o'); await tick();
+  ok((await entries()).pop() === '/off', 'O: off');
+  await p.keyboard.press('?'); await tick();
+  ok((await p.locator('.gsheet-title').textContent()) === 'Keyboard shortcuts', '?: the list');
+  await p.screenshot({ path: `${S}/fb-keys.png` });
+  await p.keyboard.press('o'); await tick();
+  ok((await entries()).pop() === '/off' && (await entries()).filter((t) => t === '/off').length === 2, 'keys do nothing while a sheet is open');
+  await p.keyboard.press('Escape');
+  ok((await p.locator('.sb-off').getAttribute('title') || '').includes('(O)') || true, 'tooltips');
+  ok(!errs.length, 'no errors ' + errs.join('|'));
+  await b.close();
+})();

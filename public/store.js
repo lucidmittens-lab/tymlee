@@ -62,6 +62,11 @@
     const { T, V, storage } = env;
     const config = env.config || {};
     const configured = Boolean(config.supabaseUrl && config.supabaseAnonKey);
+    // Sync without encryption only where the site's own config allows it (a
+    // self-hosted server without the encryption part of schema.sql). Never
+    // because the server says so: a server that claimed to have no keyring
+    // would otherwise get everything in plain text.
+    const allowPlain = Boolean(config.allowUnencrypted);
 
     let client = null;
     let user = null; // { id, email }
@@ -75,7 +80,9 @@
     let lastFullPull = 0;
     // Encryption for the signed-in account:
     //   'pending'  not checked yet (or the check failed; retried on next sync)
-    //   'plain'    the server has no keyring table yet: sync without encryption
+    //   'plain'    the server has no keyring table, and config.allowUnencrypted
+    //              is set: sync without encryption
+    //   'unsupported' no keyring table and no such setting: nothing syncs
     //   'none'     no key yet: one is being created (encryption is required); nothing syncs until then
     //   'locked'   the account is encrypted but this device has no key yet
     //   'ready'    this device holds the key; text is encrypted on upload
@@ -382,6 +389,13 @@
       let files = '';
       let reseal = false;
       const encrypted = V.isSealed(text) || V.isEncrypted(text);
+      // With the key here, every row this account writes is encrypted (the
+      // database refuses others). A plain one can't be trusted as the
+      // person's own: the server or someone else put it there.
+      if (!encrypted && vault.mode === 'ready' && !allowPlain) {
+        seen.plain++;
+        return null;
+      }
       if (encrypted && vault.mode !== 'ready') {
         seen.encrypted = true;
         return null;
@@ -431,7 +445,7 @@
       const incremental = !full && v2 && changedCursor != null;
       const since = !full && !v2 ? Date.now() - RECENT_MS : null;
       const opened = [];
-      const seen = { encrypted: false, unreadable: 0 };
+      const seen = { encrypted: false, unreadable: 0, plain: 0 };
       let newest = changedCursor;
       const page = 1000;
       for (let from = 0; ; from += page) {
@@ -479,6 +493,9 @@
       persist();
       if (seen.unreadable) {
         onNotice(`${seen.unreadable} entr${seen.unreadable === 1 ? 'y' : 'ies'} could not be decrypted and are hidden`, 'err');
+      }
+      if (seen.plain) {
+        onNotice(`${seen.plain} entr${seen.plain === 1 ? 'y' : 'ies'} on the server ${seen.plain === 1 ? "wasn't" : "weren't"} encrypted, so ${seen.plain === 1 ? 'it was' : 'they were'} ignored: tymlee only trusts what your own key locked`, 'err');
       }
       if (reseal.length || numbered.length) schedule(flush);
       settle();
@@ -531,9 +548,11 @@
           if (V.isEncrypted(stored)) {
             if (vault.mode !== 'ready') return; // locked out of it here
             remote = JSON.parse(await V.decryptField(vault.key, who, 'settings', stored));
-          } else {
+          } else if (vault.mode !== 'ready' || allowPlain) {
             remote = JSON.parse(stored);
             resend = vault.mode === 'ready'; // stored before encryption was on
+          } else {
+            resend = true; // not locked with the key: replaced with this device's
           }
         }
         if (owner !== who) return;
@@ -790,7 +809,11 @@
       const { data, error } = await fetchKeyring();
       if (owner !== who) return;
       if (error) {
-        if (missingTable(error)) { vault = { mode: 'plain' }; return; }
+        if (missingTable(error)) {
+          vault = { mode: allowPlain ? 'plain' : 'unsupported' };
+          if (!allowPlain) onNotice("Sync is off: this server isn't set up for encryption (run supabase/schema.sql). Your log stays on this device.", 'err');
+          return;
+        }
         throw error;
       }
       if (data) { lock(); return; }
@@ -814,10 +837,10 @@
     async function enableEncryption() {
       requireClient();
       if (!user) throw new Error('not signed in · /login you@example.com');
-      if (vault.mode === 'pending' || vault.mode === 'plain' || vault.mode === 'none') await schedule(prepareVault);
+      if (vault.mode === 'pending' || vault.mode === 'plain' || vault.mode === 'none' || vault.mode === 'unsupported') await schedule(prepareVault);
       if (vault.mode === 'ready') throw new Error('encryption is already on, and this device has the key');
       if (vault.mode === 'locked') throw new Error("encryption is already on for this account; this device doesn't have the key yet (/link or /recover)");
-      if (vault.mode === 'plain') throw new Error('encryption is not available: the server needs the latest supabase/schema.sql');
+      if (vault.mode === 'plain' || vault.mode === 'unsupported') throw new Error('encryption is not available: the server needs the latest supabase/schema.sql');
       const who = owner;
       const raw = V.newMasterKey();
       const code = V.newRecoveryCode();
@@ -848,6 +871,8 @@
         throw error;
       }
       if (owner !== who || !data || !data.recovery) return;
+      // A /link copy nobody used: it has expired, so take it off the server.
+      if (data.link && !(data.link.expires > Date.now())) await client.from('keyring').update({ link: null }).eq('user_id', who);
       const mine = await V.keyId(vault.raw);
       if (!data.recovery.kid) {
         await client.from('keyring').update({ recovery: { ...data.recovery, kid: mine } }).eq('user_id', who);
@@ -946,6 +971,12 @@
         onChange();
         return false;
       }
+      if (vault.mode === 'unsupported') {
+        status = 'error';
+        lastError = "the server isn't set up for encryption (supabase/schema.sql)";
+        onChange();
+        return false;
+      }
       if (vault.mode === 'none') setTimeout(autoEncrypt, 0);
       return vault.mode === 'ready' || vault.mode === 'plain';
     }
@@ -953,7 +984,7 @@
     function requireKey() {
       requireClient();
       if (!user) throw new Error('not signed in · /login you@example.com');
-      if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet (run supabase/schema.sql)');
+      if (vault.mode === 'plain' || vault.mode === 'unsupported') throw new Error('encryption is not set up on the server yet (run supabase/schema.sql)');
       if (vault.mode === 'none') throw new Error("encryption isn't turned on for this account yet: /encrypt");
       if (vault.mode !== 'ready') throw new Error("this device doesn't have the key yet: /link <code> or /recover <key>");
     }
@@ -982,7 +1013,7 @@
       requireClient();
       if (!user) throw new Error('not signed in · /login you@example.com');
       if (vault.mode === 'ready') throw new Error('this device already has the key');
-      if (vault.mode === 'plain') throw new Error('encryption is not set up on the server yet');
+      if (vault.mode === 'plain' || vault.mode === 'unsupported') throw new Error('encryption is not set up on the server yet');
       const { data, error } = await fetchKeyring();
       if (error) throw error;
       if (!data) throw new Error("encryption isn't turned on for this account yet: /encrypt");
@@ -1012,7 +1043,7 @@
         const fullNow = full || now - lastFullPull > FULL_EVERY_MS;
         // Re-check older servers now and then, so new features switch on
         // after supabase/schema.sql has been run.
-        if (fullNow && (vault.mode === 'plain' || vault.mode === 'none')) vault = { mode: 'pending' };
+        if (fullNow && (vault.mode === 'plain' || vault.mode === 'none' || vault.mode === 'unsupported')) vault = { mode: 'pending' };
         if (fullNow && (serverVersion === 1 || !serverNotes || !serverWo)) serverVersion = null;
         if (fullNow && serverSettings === false) serverSettings = null;
         if (fullNow && serverRecords === false) serverRecords = null;

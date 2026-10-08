@@ -1536,21 +1536,28 @@
 
   let lastStatusHeight = '';
 
-  // The accent color from the account's settings (/accent): a small style
-  // sheet that sets it for light and dark screens. Without one, style.css's.
-  const accentStyle = document.createElement('style');
-  document.head.append(accentStyle);
+  // The accent color from the account's settings (/accent), set on the page
+  // for light or dark screens (and again when that changes). Without one,
+  // style.css's. Set as properties, not a style sheet, so the site's content
+  // policy (public/_headers) can refuse inline styles.
+  const darkScreen = window.matchMedia('(prefers-color-scheme: dark)');
   let accentShown = null;
-  function applyAccent() {
+  function applyAccent(force) {
     const want = (store.settings && store.settings.accent) || '';
-    if (want === accentShown) return;
+    if (want === accentShown && !force) return;
     accentShown = want;
     const c = want ? T.accentColors(want) : null;
-    accentStyle.textContent = c ? [
-      `:root { --accent: ${c.light.accent}; --on-accent: ${c.light.on}; }`,
-      `@media (prefers-color-scheme: dark) { :root { --accent: ${c.dark.accent}; --on-accent: ${c.dark.on}; } }`,
-    ].join('\n') : '';
+    const rootStyle = document.documentElement.style;
+    if (!c) {
+      rootStyle.removeProperty('--accent');
+      rootStyle.removeProperty('--on-accent');
+      return;
+    }
+    const tone = darkScreen.matches ? c.dark : c.light;
+    rootStyle.setProperty('--accent', tone.accent);
+    rootStyle.setProperty('--on-accent', tone.on);
   }
+  darkScreen.addEventListener('change', () => applyAccent(true));
 
   function renderStatus() {
     applyAccent();

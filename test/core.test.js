@@ -1068,3 +1068,17 @@ test('/ai follow-up: earlier turns go first (files with the first), the log as i
   const reply = A.readReply({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"message":"hi","changes":[]}' }] });
   assert.equal(reply.raw, '{"message":"hi","changes":[]}');
 });
+
+test('_headers: the content policy allows index.html\'s one inline style, by its hash', () => {
+  const fs = require('node:fs');
+  const crypto = require('node:crypto');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const headers = fs.readFileSync(path.join(__dirname, '../public/_headers'), 'utf8');
+  const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
+  assert.equal(styles.length, 1);
+  const hash = crypto.createHash('sha256').update(styles[0]).digest('base64');
+  assert.ok(headers.includes(`'sha256-${hash}'`), 'update the hash in public/_headers');
+  assert.ok(!/<script>/.test(html), 'no inline scripts (script-src is self only)');
+  assert.match(headers, /frame-ancestors 'none'/);
+});

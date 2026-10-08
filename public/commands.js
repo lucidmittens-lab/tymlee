@@ -1497,6 +1497,7 @@
             ready: store.timesSealed ? 'encrypted (text and times): this device has the key' : 'encrypted (text): this device has the key',
             locked: "encrypted: this device doesn't have the key yet (/link or /recover)",
             plain: 'not encrypted: the server is not set up for it yet',
+            unsupported: "not synced: the server isn't set up for encryption (supabase/schema.sql)",
             none: 'not encrypted: type /encrypt to turn it on',
             pending: 'encryption: checking…',
           }[store.encryption] || '';

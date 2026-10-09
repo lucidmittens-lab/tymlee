@@ -33,8 +33,8 @@
 
   function blockTitle(b) {
     if (b.off) return `${offWord(b)} ${T.clock(b.start)}–${T.clock(b.end)} (${T.formatHM(b.end - b.start)})`;
-    const end = b.running ? 'now' : T.clock(b.start + b.duration);
-    return `${T.idTag(b.n)} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}`;
+    const end = b.running ? 'now' : T.clock(b.from + b.duration);
+    return `${T.idTag(b.n)} ${b.wo ? `${T.woTag(b.wo)} ` : ''}${b.eq ? `${T.eqTag(b.eq)} ` : ''}${b.category}${b.note ? ` ${b.note}` : ''} · ${T.clock(b.from)}–${end} · ${T.formatHM(b.duration)}`;
   }
 
   const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -195,7 +195,7 @@
           const top = (minutesOfDay(b.start, day.start) - axisFrom) * px;
           const full = (b.end - b.start) / 60000 * px;
           const h = Math.max(2, full - 2); // 2px gap between blocks
-          const block = el('div', `tl-block${b.off ? ' tl-offblock' : ''}${b.running ? ' tl-running' : ''}${b.clipped ? ' tl-clipped' : ''}`);
+          const block = el('div', `tl-block${b.off ? ' tl-offblock' : ''}${b.running ? ' tl-running' : ''}${b.clipped ? ' tl-clipped' : ''}${b.cont ? ' tl-cont' : ''}`);
           block.style.top = `${top + 1}px`;
           block.style.height = `${h}px`;
           block.style.setProperty('--c', slotColor(b.slot));
@@ -214,8 +214,8 @@
             block.append(line1);
           }
           if (h >= 34 && !b.off) {
-            const end = b.running ? 'now' : T.clock(b.start + b.duration);
-            block.append(el('div', 'tl-line tl-muted tl-times', `${T.clock(b.start)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}${b.files ? '  @' : ''}`));
+            const end = b.running ? 'now' : T.clock(b.from + b.duration);
+            block.append(el('div', 'tl-line tl-muted tl-times', `${b.cont ? `from ${T.ymd(b.from).slice(5)} ` : ''}${T.clock(b.from)}–${end} · ${T.formatHM(b.duration)}${b.notes ? '  ✎' : ''}${b.files ? '  @' : ''}`));
           }
           // Notes, then file paths: as many lines as the block has room for.
           const lines = extraLines(b);

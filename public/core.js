@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.1';
+  const VERSION = '2.0.2';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -79,6 +79,10 @@
   const ID_PATTERN = '\\d+(?:-\\d{1,3})?'; // for building regexes that read IDs
   // How an ID is shown: labelled, so it isn't taken for a work order.
   const idTag = (n) => `ID:${n}`;
+
+  // Lines that carry a secret (a recovery key, a link or sign-in code, an API
+  // key): kept out of command history, which the terminal app saves to a file.
+  const secretLine = (line) => /^\s*\/(recover|aikey|code)\b|^\s*\/link\s+\S|^\s*\/recovery\s+check\b/i.test(String(line));
 
   // Give entries without an ID one (and fix two entries sharing one, which
   // two devices offline can cause: the one with the lower internal id keeps
@@ -397,6 +401,38 @@
   // the account's settings (/clock) by whatever is showing them.
   let clock12 = false;
   function setClock(mode) { clock12 = mode === '12'; }
+
+  // Entries that run past midnight: counted on the day they started
+  // (default), or split at midnight so each day gets its own part ("/midnight
+  // split", for night shifts and overtime by day or week).
+  let splitNights = false;
+  function setMidnight(mode) { splitNights = mode === 'split'; }
+  function midnightMode() { return splitNights ? 'split' : 'start'; }
+
+  // Spans that start in [from, to). Split: each span cut at midnight, and
+  // the parts that fall in the range (a part keeps its entry's ID; `cont`
+  // marks a part that continues one from the day before).
+  function spansIn(spans, range) {
+    if (!splitNights) return spans.filter((s) => s.ts >= range.from && s.ts < range.to);
+    const out = [];
+    for (const s of splitAtMidnight(spans)) if (s.ts >= range.from && s.ts < range.to) out.push(s);
+    return out;
+  }
+  function splitAtMidnight(spans) {
+    const out = [];
+    for (const s of spans) {
+      let start = s.ts;
+      let next = addDays(startOfDay(start), 1);
+      if (s.end <= next) { out.push(s); continue; }
+      while (start < s.end) {
+        const end = Math.min(s.end, next);
+        out.push({ ...s, ts: start, end, duration: end - start, running: s.running && end === s.end, cont: start !== s.ts, from: s.ts, whole: s.duration });
+        start = end;
+        next = addDays(next, 1);
+      }
+    }
+    return out;
+  }
   function clockMode() { return clock12 ? '12' : '24'; }
 
   // A time to show: "14:30", or "2:30pm" on the 12-hour clock.
@@ -602,7 +638,7 @@
   function formatReport(entries, range, now, opts) {
     const compact = Boolean(opts && opts.compact);
     const RULE = '-'.repeat(compact ? 36 : 56);
-    const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
+    const spans = spansIn(withSpans(entries, now), range);
     if (!spans.length) return `no entries (${range.label})`;
 
     const numWidth = Math.max(...spans.map((s) => idTag(s.n).length));
@@ -663,7 +699,7 @@
   // Readout grouped by category instead of by time: categories largest
   // first, each with its total, share and entries (oldest first).
   function formatCategoryReport(entries, range, now) {
-    const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    const spans = spansIn(withSpans(entries, now), range).filter((s) => !s.off);
     if (!spans.length) return `no entries (${range.label})`;
     const multiDay = ymd(spans[0].ts) !== ymd(spans[spans.length - 1].ts);
     const numWidth = Math.max(...spans.map((s) => idTag(s.n).length));
@@ -696,7 +732,7 @@
   // Time per work order for a range, largest first; "(none)" collects time
   // without a work order.
   function formatWorkOrders(entries, range, now) {
-    const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    const spans = spansIn(withSpans(entries, now), range).filter((s) => !s.off);
     const links = entries.filter((e) => isLink(e) && e.wo && e.ts >= range.from && e.ts < range.to);
     if (!spans.length && !links.length) return `no entries (${range.label})`;
     const all = spans.reduce((sum, s) => sum + s.duration, 0);
@@ -791,11 +827,16 @@
   }
 
   // Days in [from, to) as blocks for a vertical timeline. Each block is an
-  // entry (or off time) clipped to its day; `axisFrom`/`axisTo` are whole
-  // hours (ms) spanning the logged time of every day, for a shared axis.
+  // entry (or off time) on one day: one that runs past midnight is drawn on
+  // both days (`clipped` on the first, `cont` on the next), whichever day
+  // /midnight counts it on. `from` and `duration` are the whole entry's.
+  // `axisFrom`/`axisTo` are whole hours (ms) spanning the logged time of
+  // every day, for a shared axis.
   function timelineDays(entries, range, now) {
-    const spans = withSpans(entries, now).filter((s) => s.ts >= range.from && s.ts < range.to);
-    const slots = categorySlots(spans);
+    const all = withSpans(entries, now);
+    const counted = spansIn(all, range);
+    const spans = splitAtMidnight(all.filter((s) => s.end > range.from && s.ts < range.to)).filter((s) => s.ts >= range.from && s.ts < range.to);
+    const slots = categorySlots(counted.length ? counted : spans);
     const days = [];
     for (const s of spans) {
       const key = ymd(s.ts);
@@ -813,14 +854,20 @@
       // overnight) is left out.
       const lastEnd = worked.length ? Math.min(dayEnd, Math.max(...worked.map((s) => s.end))) : day.blocks[0].ts;
       day.blocks = day.blocks
-        .map((s) => ({
-          n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', files: s.files || '', wo: s.wo || '', eq: s.eq || '',
-          off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
-          duration: s.duration, clipped: s.end > dayEnd,
-          slot: s.off ? null : slots.get(s.category.toLowerCase()),
-        }))
-        .filter((b) => b.end > b.start || !b.off);
-      day.totalMs = worked.reduce((sum, s) => sum + s.duration, 0);
+        .map((s) => {
+          const from = s.from == null ? s.ts : s.from;
+          const whole = s.whole == null ? s.duration : s.whole;
+          return {
+            n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', files: s.files || '', wo: s.wo || '', eq: s.eq || '',
+            off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
+            from, duration: whole, clipped: from + whole > dayEnd, cont: Boolean(s.cont),
+            slot: s.off ? null : slots.has(s.category.toLowerCase()) ? slots.get(s.category.toLowerCase()) : 0,
+          };
+        })
+        .filter((b) => (b.end > b.start || !b.off) && !(b.off && b.cont)); // no off time carried over from the night before
+      // The day's total: as reports count it (/midnight).
+      day.totalMs = splitNights ? worked.reduce((sum, s) => sum + s.duration, 0) : worked.reduce((sum, s) => sum + (s.cont ? 0 : s.whole == null ? s.duration : s.whole), 0);
+      if (!day.blocks.length) continue;
       const first = new Date(day.blocks[0].start);
       const fromHour = first.getHours();
       const last = new Date(Math.max(lastEnd, day.blocks[0].start + 60000) - 1);
@@ -832,8 +879,8 @@
       axisFrom = Math.min(axisFrom, fromHour * 60);
       axisTo = Math.max(axisTo, toHour * 60);
     }
-    const legend = summarize(spans).map((t) => ({ ...t, slot: slots.get(t.category.toLowerCase()) }));
-    return { days, axisFrom: Math.min(axisFrom, axisTo - 60), axisTo, legend };
+    const legend = summarize(counted).map((t) => ({ ...t, slot: slots.get(t.category.toLowerCase()) }));
+    return { days: days.filter((d) => d.blocks.length), axisFrom: Math.min(axisFrom, axisTo - 60), axisTo, legend };
   }
 
   // ---- pay -----------------------------------------------------------------
@@ -888,11 +935,13 @@
   // Pay for each worked span: its rate (the one in effect when it started),
   // with the part past the week's overtime threshold paid at the overtime
   // factor. Returns Map(id -> { money, ot }), money null without a rate;
-  // `ot` is true once the span has gone into overtime.
+  // `ot` is true once the span has gone into overtime. With /midnight split,
+  // overtime weeks end at Saturday midnight even mid-shift.
   function earnings(entries, settings, now) {
     const out = new Map();
     const worked = new Map(); // week start -> ms worked so far
-    for (const s of withSpans(entries, now)) {
+    const spans = withSpans(entries, now);
+    for (const s of splitNights ? splitAtMidnight(spans) : spans) {
       if (s.off) continue;
       const week = weekStart(s.ts);
       const before = worked.get(week) || 0;
@@ -904,10 +953,14 @@
       const limit = otmin == null ? Infinity : otmin * 3600000;
       const regular = Math.max(0, Math.min(after, limit) - before);
       const overtime = s.duration - regular;
+      const money = rate == null ? null : (rate * (regular + overtime * factor)) / 3600000;
+      const had = s.cont && out.get(s.id);
       out.set(s.id, {
-        money: rate == null ? null : (rate * (regular + overtime * factor)) / 3600000,
-        ot: after > limit,
+        money: had && had.money != null && money != null ? had.money + money : money,
+        ot: after > limit || Boolean(had && had.ot),
       });
+      // Split at midnight: each day's part too, under "id@day start".
+      if (splitNights) out.set(`${s.id}@${startOfDay(s.ts)}`, { money, ot: after > limit });
     }
     return out;
   }
@@ -1156,8 +1209,8 @@
   // One row per entry; timestamps are ISO 8601 (UTC), running entries have no end.
   function toCSV(entries, range, now) {
     const rows = [['n', 'wo', 'start', 'end', 'minutes', 'category', 'note', 'notes', 'files']];
-    for (const s of withSpans(entries, now)) {
-      if (s.off || s.ts < range.from || s.ts >= range.to) continue;
+    for (const s of spansIn(withSpans(entries, now), range)) {
+      if (s.off) continue;
       rows.push([
         s.n,
         s.wo || '',
@@ -1707,8 +1760,8 @@
     formatEditable, parseEditable,
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
-    clock, clockCol, setClock, clockMode, hourLabel,
-    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idValue, idTag, validSid, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    clock, clockCol, setClock, clockMode, setMidnight, midnightMode, spansIn, splitAtMidnight, hourLabel,
+    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idValue, idTag, secretLine, validSid, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

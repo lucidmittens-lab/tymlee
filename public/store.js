@@ -166,11 +166,19 @@
     function persist() {
       write(key(owner, 'entries'), entries);
       write(key(owner, 'queue'), queue);
+      // When the oldest change still waiting to be sent was made.
+      const since = key(owner, 'unsentSince');
+      try {
+        if (!queue.length) storage.removeItem(since);
+        else if (!storage.getItem(since)) storage.setItem(since, String(Date.now()));
+      } catch (_) { /* a warning, not the data */ }
     }
 
     function clearOwner(who) {
       storage.removeItem(key(who, 'entries'));
       storage.removeItem(key(who, 'queue'));
+      storage.removeItem(key(who, 'unsentSince'));
+      storage.removeItem(key(who, 'recoveryNag'));
       storage.removeItem(key(who, 'key'));
       storage.removeItem(key(who, 'settings'));
       storage.removeItem(key(who, 'settingsDirty'));
@@ -786,6 +794,40 @@
       ].join('\n'), 'key');
     }
 
+    // Has someone confirmed they saved the current recovery key? Recorded in
+    // the (encrypted, synced) settings as the key's salt, so every device
+    // knows, and a new recovery key needs confirming again.
+    let recoveryId = null;
+    const RECOVERY_NAG_MS = 24 * 3600000;
+    function recoveryConfirmed() {
+      if (vault.mode !== 'ready' || !recoveryId) return null;
+      return settings.recoveryOk === recoveryId;
+    }
+    function remindRecovery() {
+      if (recoveryConfirmed() !== false) return;
+      const nagKey = key(owner, 'recoveryNag');
+      const last = Number(storage.getItem(nagKey)) || 0;
+      if (Date.now() - last < RECOVERY_NAG_MS) return;
+      try { storage.setItem(nagKey, String(Date.now())); } catch (_) { /* reminds again next time */ }
+      onNotice("You haven't confirmed that your recovery key is saved. Without it, losing your devices means losing your log. Confirm it in Settings → Recovery key (or /recovery check, then paste the key); /recovery makes a new one.", 'err');
+    }
+    function recoveryShown(blob) {
+      recoveryId = blob.salt;
+      try { storage.setItem(key(owner, 'recoveryNag'), String(Date.now())); } catch (_) { /* fine */ }
+    }
+    // /recovery check: the key opens this account's key on the server.
+    async function checkRecovery(code) {
+      requireKey();
+      const { data, error } = await fetchKeyring();
+      if (error) throw error;
+      if (!data || !data.recovery) throw new Error("this account has no recovery key yet");
+      let raw = null;
+      try { raw = await V.unwrap(data.recovery, code); } catch (_) { /* wrong */ }
+      if (raw !== vault.raw) throw new Error("that isn't this account's current recovery key · /recovery makes a new one");
+      recoveryId = data.recovery.salt;
+      setSettings({ ...settings, recoveryOk: recoveryId });
+    }
+
     function recoveryMessage(code, first) {
       return [
         first ? 'Your log is end-to-end encrypted: it is encrypted on your devices before upload, so nobody else can read it, including whoever runs this site. Your recovery key:' : 'Your new recovery key (the old one no longer works):',
@@ -793,6 +835,8 @@
         `  ${code}`,
         '',
         'Save it somewhere safe, like a password manager. It is the only way back into your log if you lose access to all your devices, and nobody else, including whoever runs this site, can recover it for you.',
+        '',
+        'Once it is saved, confirm it: /recovery check, then paste the key. Until then you get a reminder once a day.',
         ...(first ? ['', 'To add another device, type /link here.'] : []),
       ].join('\n');
     }
@@ -854,6 +898,7 @@
         throw created.error;
       }
       await unlock(raw);
+      recoveryShown(recovery);
       onNotice(recoveryMessage(code, true), 'key');
       await sync({ full: true }); // re-uploads existing entries encrypted
     }
@@ -871,6 +916,7 @@
         throw error;
       }
       if (owner !== who || !data || !data.recovery) return;
+      recoveryId = data.recovery.salt;
       // A /link copy nobody used: it has expired, so take it off the server.
       if (data.link && !(data.link.expires > Date.now())) await client.from('keyring').update({ link: null }).eq('user_id', who);
       const mine = await V.keyId(vault.raw);
@@ -941,6 +987,7 @@
       const keyring = await client.from('keyring').update({ recovery, link: null }).eq('user_id', who);
       if (keyring.error) throw keyring.error;
       if (owner !== who) return '';
+      recoveryShown(recovery);
       // Keep only what this device typed and hasn't sent yet.
       entries = T.applyOps([], queue.filter((q) => q.op === 'put'));
       queue = queue.filter((q) => q.op === 'put');
@@ -1005,6 +1052,7 @@
       const recovery = { ...(await V.wrap(vault.raw, code)), kid: await V.keyId(vault.raw) };
       const { error } = await client.from('keyring').update({ recovery }).eq('user_id', owner);
       if (error) throw error;
+      recoveryShown(recovery);
       return recoveryMessage(code, false);
     }
 
@@ -1048,13 +1096,55 @@
         if (fullNow && serverSettings === false) serverSettings = null;
         if (fullNow && serverRecords === false) serverRecords = null;
         if (fullNow && !queue.length) await verifyKey(); // flush checks when it has something to send
+        const offline = madeOffline(now);
+        const known = new Set(entries.map((e) => e.id));
         await flush();
         if (vault.mode === 'locked') return;
         await pull(fullNow);
         if (fullNow) lastFullPull = now;
+        if (offline.size) noteInterleaved(offline, known);
         await syncSettings();
         await syncRecords();
+        if (vault.mode === 'ready' && !recoveryId) await verifyKey(); // once a session: which recovery key is current
+        remindRecovery();
       }));
+    }
+
+    // Two devices logging while one (or both) was offline: once they sync,
+    // their entries share one timeline, which can switch back and forth
+    // between them (each entry runs until the next one starts). Say so when
+    // it happens, so it can be fixed.
+    const OFFLINE_MS = 5 * 60000;
+    function madeOffline(now) {
+      const since = Number(storage.getItem(key(owner, 'unsentSince'))) || 0;
+      if (!since || now - since < OFFLINE_MS) return new Set();
+      // Entries started around then, not old ones queued again (an import,
+      // or uploading everything under a new key).
+      return new Set(queue.filter((q) => q.op === 'put' && q.entry.ts >= since - 12 * 3600000).map((q) => q.entry.id));
+    }
+    function noteInterleaved(mine, known) {
+      const theirs = (e) => !known.has(e.id) && !mine.has(e.id);
+      const both = entries.filter((e) => mine.has(e.id) || theirs(e));
+      if (!both.some((e) => !mine.has(e.id))) return;
+      // Interleaved: some entry from one device lies between two of the other's.
+      let from = null;
+      let prev = null;
+      let switches = 0;
+      let first = null;
+      let last = null;
+      for (const e of both) {
+        const side = mine.has(e.id);
+        if (from !== null && side !== from) {
+          switches++;
+          if (!first) first = prev;
+          last = e;
+        }
+        from = side;
+        prev = e;
+      }
+      if (switches < 2) return;
+      const day = T.ymd(first.ts);
+      onNotice(`While this device was offline, another device logged entries in the same hours (${day}, ${T.clock(first.ts)}–${T.clock(last.ts)}). They're now on one timeline, switching between the two. /log ${day} shows it; /edit fixes it.`, 'err');
     }
 
     // After `run`, wait for whatever was queued behind it meanwhile.
@@ -1192,6 +1282,8 @@
       createLink,
       unlockWith,
       newRecoveryKey,
+      checkRecovery,
+      get recoveryConfirmed() { return recoveryConfirmed(); },
       resetEncryption,
       get encryption() { return vault.mode; },
       supports,
@@ -1222,6 +1314,11 @@
       },
       get user() { return user; },
       get pending() { return queue.length; },
+      // Since when changes have been waiting to be sent (0: nothing waiting).
+      get unsentSince() {
+        if (!user || !queue.length) return 0;
+        try { return Number(storage.getItem(key(owner, 'unsentSince'))) || 0; } catch (_) { return 0; }
+      },
       get status() { return status; },
       get lastError() { return lastError; },
       get configured() { return configured; },

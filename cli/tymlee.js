@@ -310,6 +310,7 @@ function ask(label, initial, name) {
       form: 'this form asks questions (%{ask:...}); fill it in from the tymlee shell',
       yesno: '/ai shows its changes and asks before applying; run it from the tymlee shell',
       reply: '',
+      secret: 'type it on the same line: /recovery check XXXXX-XXXXX-XXXXX-XXXXX',
     };
     if (name === 'reply') return Promise.resolve(null); // a question from Claude: shown, nothing more
     print(why[name] || 'typing notes needs the tymlee shell; use /note #n <notes>', 'err');
@@ -675,6 +676,7 @@ const shell = createShell({
     ],
     linkSignIn: false,
     get build() { return buildId(); },
+    platform: `${{ darwin: 'Mac', linux: 'Linux', win32: 'Windows' }[process.platform] || process.platform} ${os.release()}, Node ${process.version}`,
     paint,
     width: () => stdout.columns || 80,
     pickEntry,
@@ -758,6 +760,8 @@ async function interactive() {
     print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70 }), 'report');
   }
   for (const note of shell.startupNotices()) print(note, 'dim');
+  // After the first sync has had its go: changes stuck for days.
+  Promise.resolve(store.whenIdle()).then(() => { for (const w of shell.dataWarnings()) print(w, 'err'); }, () => {});
   drawStatus();
   checkForUpdate();
   const clock = setInterval(() => { drawPane(); drawStatus(); }, 1000);
@@ -823,6 +827,7 @@ async function interactive() {
       return;
     }
     promptShown = false;
+    if (T.secretLine(raw) && rl.history[0] === raw) rl.history.shift(); // keys and codes stay out of the history file
     const line = shell.route(raw);
     queue = queue.then(async () => {
       await shell.run(line);

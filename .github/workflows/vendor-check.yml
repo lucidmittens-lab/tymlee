@@ -1,0 +1,34 @@
+# Once a month: are newer versions of the Supabase and Anthropic libraries
+# out (the website's copies in public/vendor/ and the terminal app's
+# cli/package.json)? The run fails when they are, so GitHub emails the
+# owner. To update: node scripts/vendor.js update, then test and ship.
+name: Check bundled libraries
+
+on:
+  schedule:
+    - cron: '17 14 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the pinned versions
+        working-directory: cli
+        run: npm ci --no-audit --no-fund
+
+      - name: Compare with npm, and the copies with the pinned versions
+        run: node scripts/vendor.js check --strict
+
+      - name: Known security problems in the pinned versions
+        working-directory: cli
+        run: npm audit --omit=dev --audit-level=moderate

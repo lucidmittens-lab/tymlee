@@ -543,6 +543,43 @@
     // ---- full backups --------------------------------------------------------------
 
     const BACKUP_KEY = 'tymlee.lastBackup';
+
+    // ---- problems --------------------------------------------------------------
+    // Errors that look like bugs (not "usage: ..." or "not signed in"), the
+    // last few kept on this device for /problem. Only the command's name and
+    // the error are kept, never what was typed after it.
+    const PROBLEMS_KEY = 'tymlee.problems';
+    const BUG = /^(TypeError|ReferenceError|RangeError|SyntaxError|InternalError)$/;
+    function problems() {
+      try {
+        const list = JSON.parse(io.storage.getItem(PROBLEMS_KEY) || '[]');
+        return Array.isArray(list) ? list : [];
+      } catch (_) { return []; }
+    }
+    function noteProblem(err, where) {
+      const e = err && typeof err === 'object' ? err : { name: 'Error', message: String(err) };
+      const frame = String(e.stack || '').split('\n').map((l) => l.match(/([\w.-]+\.js):(\d+)/)).find(Boolean);
+      const item = { at: Date.now(), where: where || '', what: `${e.name || 'Error'}: ${String(e.message || '').slice(0, 300)}${frame ? ` (${frame[1]}:${frame[2]})` : ''}` };
+      try { io.storage.setItem(PROBLEMS_KEY, JSON.stringify([...problems(), item].slice(-20))); } catch (_) { /* best effort */ }
+    }
+    function problemReport() {
+      const now = Date.now();
+      const recent = problems().slice().reverse();
+      const when = (t) => `${T.ymd(t)} ${T.clock(t)}`;
+      return [
+        'tymlee problem report',
+        `version ${T.VERSION}${io.build ? ` (build ${io.build})` : ''} · ${io.place === 'this browser' ? 'website' : 'terminal app'}${io.platform ? ` · ${io.platform}` : ''}`,
+        `account: ${store.user ? 'signed in' : 'signed out'} · sync: ${store.status}${store.pending ? ` (${store.pending} waiting)` : ''} · encryption: ${store.encryption}`,
+        ...(store.lastError ? [`last sync error: ${store.lastError}`] : []),
+        `entries: ${shown().length} · AI: ${aiSettings().key ? 'set up' : 'off'}`,
+        '',
+        recent.length ? 'recent errors (newest first):' : 'no errors recorded on this device',
+        ...recent.slice(0, 10).map((p) => `  ${when(p.at)}  ${p.where ? `${p.where}: ` : ''}${p.what}`),
+        '',
+        `What happened? (written ${when(now)})`,
+        '',
+      ].join('\n');
+    }
     const BACKUP_EVERY_DAYS = 7;
 
     function lastBackup() {
@@ -586,6 +623,29 @@
         const due = todos().filter((t) => !t.done && t.due && t.due <= today);
         const late = due.filter((t) => t.due < today).length;
         if (due.length) out.push(`${due.length} to-do${due.length === 1 ? '' : 's'} due today${late ? ` (${late} overdue)` : ''} · /todos today`);
+      }
+      return out;
+    }
+
+    // Things that could lose data, worth more than a quiet line at startup:
+    // changes that haven't reached the server for days, or (in a browser,
+    // signed out) a log that exists only here with no recent backup.
+    // Browsers can clear a site's data: Safari does after about a week
+    // without a visit, unless it's on the Home Screen.
+    const UNSENT_DAYS = 2;
+    const ONLY_HERE_DAYS = 7;
+    function dataWarnings(now = Date.now()) {
+      const out = [];
+      const day = 86400000;
+      const since = store.unsentSince;
+      if (since && now - since > UNSENT_DAYS * day) {
+        const days = Math.floor((now - since) / day);
+        const why = store.lastError ? ` (last error: ${store.lastError})` : '';
+        out.push(`${store.pending} change${store.pending === 1 ? " hasn't" : "s haven't"} reached the server for ${days} days${why}. Until they do, they exist only on ${io.place || 'this device'}. Sync now tries again and Save a full backup keeps a copy (both in Settings; /sync, /backup).`);
+      }
+      const all = shown();
+      if (!store.user && io.place === 'this browser' && all.length && now - all[0].ts > ONLY_HERE_DAYS * day && now - lastBackup() > ONLY_HERE_DAYS * day) {
+        out.push(`Your log is only in this browser, which can clear a site's data (Safari does after about a week unused). Sign in to keep it synced and encrypted, or save a backup (Settings → Save a full backup; /backup).`);
       }
       return out;
     }
@@ -960,6 +1020,7 @@
     // 12- or 24-hour times, kept with the account's settings like pay.
     function applyClock() {
       T.setClock(store.settings.clock);
+      T.setMidnight(store.settings.midnight);
       return T.clockMode();
     }
 
@@ -1373,6 +1434,18 @@
           print(`exported ${plural(count, 'entry', 'entries')} -> ${where}`, 'ok');
         },
       },
+      problem: {
+        usage: '/problem',
+        about: 'something wrong? a report to send (version, recent errors; none of your log), copied to the clipboard',
+        async run() {
+          const text = problemReport();
+          print(text, 'report');
+          let copied = false;
+          try { await io.copy(text); copied = true; } catch (_) { /* shown above */ }
+          const url = `${T.REPO_URL}/issues/new?title=${encodeURIComponent('Problem: ')}&body=${encodeURIComponent(text)}`;
+          print(`${copied ? 'copied · ' : ''}add what happened and send it to whoever set you up, or open an issue: ${url}`, 'ok');
+        },
+      },
       copy: {
         usage: '/copy [range]',
         about: 'copy the log to the clipboard',
@@ -1469,9 +1542,18 @@
         },
       },
       recovery: {
-        usage: '/recovery',
-        about: 'make a new recovery key (the old one stops working)',
-        async run() {
+        usage: '/recovery [check <key>]',
+        about: 'make a new recovery key (the old one stops working) · /recovery check confirms you saved yours',
+        async run(args) {
+          if (args[0] === 'check') {
+            const code = args.slice(1).join('') || (await io.ask('paste your recovery key', '', 'secret'));
+            if (code == null || !code.trim()) return print('nothing checked', 'dim');
+            if (!V.looksLikeCode(code, 20)) return print('usage: /recovery check XXXXX-XXXXX-XXXXX-XXXXX  (your recovery key)', 'err');
+            print('checking the recovery key…', 'dim');
+            await store.checkRecovery(code);
+            return print("recovery key confirmed: it's saved and it works. No more reminders.", 'ok');
+          }
+          if (args.length) return print('usage: /recovery  (a new key) · /recovery check <key>  (confirm the one you saved)', 'err');
           print(await store.newRecoveryKey(), 'key');
         },
       },
@@ -1870,6 +1952,19 @@
           print(`clock: ${arg}-hour, e.g. ${T.clock(Date.now())}`, 'ok');
         },
       },
+      midnight: {
+        usage: '/midnight [start|split]',
+        about: 'entries past midnight: counted on the day they started (start), or split at midnight between the two days (split; for night shifts)',
+        run(args) {
+          const arg = (args[0] || '').toLowerCase();
+          applyClock();
+          if (!arg) return print(T.midnightMode() === 'split' ? 'past midnight: split between the two days · /midnight start counts them on the day they started' : 'past midnight: counted on the day they started · /midnight split splits them at midnight', 'ok');
+          if (arg !== 'start' && arg !== 'split') return print('usage: /midnight start or /midnight split', 'err');
+          store.setSettings({ ...store.settings, midnight: arg });
+          applyClock();
+          print(arg === 'split' ? 'entries past midnight are now split at midnight: reports, day totals and weekly overtime count each part on its own day' : 'entries past midnight now count on the day they started', 'ok');
+        },
+      },
       ai: {
         usage: `/ai <what to do>  or  ${io.ai ? io.ai.fileUsage : '/ai file'}`,
         about: `plain language to changes, with your Claude API key: /ai 9-11 ACME drawings, lunch, mtg till 3 · ${io.ai ? io.ai.fileUsage : '/ai file'} reads files (PDFs, images, text, Word, Excel, PowerPoint; up to 5) · /ai undo`,
@@ -2003,7 +2098,7 @@
       ['ai', 'AI (your own Claude API key)', ['claude', 'names'], ['ai', 'aikey', 'aimodel', 'name', 'names']],
       ['backup', 'Backup', ['restore', 'import'], ['backup', 'restore', 'import', 'save']],
       ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
-      ['more', 'More', ['other', 'display', 'view'], ['clock', 'accent']],
+      ['more', 'More', ['other', 'display', 'view', 'bug'], ['clock', 'midnight', 'accent', 'problem']],
     ];
     function helpGroups() {
       const placed = new Set();
@@ -2143,6 +2238,7 @@
       try {
         await cmd.run(args);
       } catch (err) {
+        if (err && BUG.test(err.name)) noteProblem(err, `/${name}`);
         print((err && err.message) || String(err), 'err');
       }
     }
@@ -2198,9 +2294,12 @@
       if (!shown().length) return { state: 'idle', text: 'not clocked in · type /help', sync, due: dueCount() };
       const spans = spansAt(now);
       const cur = spans[spans.length - 1];
-      // Same rule as the report: an entry counts toward the day it started on.
+      // Same rule as the report: an entry counts toward the day it started
+      // on, or (/midnight split) its part since midnight.
       const dayStart = T.startOfDay(now);
-      const todayMs = spans.reduce((sum, s) => sum + (s.ts >= dayStart && !s.off ? s.duration : 0), 0);
+      const split = T.midnightMode() === 'split';
+      const today = T.spansIn(spans.filter((s) => s.end > dayStart), { from: dayStart, to: T.addDays(dayStart, 1) });
+      const todayMs = today.reduce((sum, s) => sum + (s.off ? 0 : s.duration), 0);
       // Pay, once there's a rate: this entry's so far, and today's.
       let money = null;
       let todayMoney = null;
@@ -2218,9 +2317,9 @@
         }
         let sum = 0;
         let any = false;
-        for (const s of spans) {
-          const e = s.ts >= dayStart && earned.get(s.id);
-          if (e && e.money != null) { sum += e.money; any = true; }
+        for (const s of today) {
+          const e = earned.get(split ? `${s.id}@${dayStart}` : s.id);
+          if (e && e.money != null && !s.off) { sum += e.money; any = true; }
         }
         if (any) todayMoney = T.formatMoney(sum);
       }
@@ -2262,6 +2361,9 @@
       setClock,
       formNames: () => Object.keys(forms()).sort(),
       startupNotices,
+      dataWarnings,
+      noteProblem,
+      problemReport,
       // For the GUI's checklists.
       checklistNames: () => Object.keys(templates()).sort(),
       checkRuns: () => runs(),

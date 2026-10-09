@@ -1234,6 +1234,7 @@
           ['Help', () => runMenu('Help', '/help')],
           ['Keyboard shortcuts', () => showShortcuts()],
           ['Siri and Shortcuts', () => runMenu('Siri and Shortcuts', '/siri')],
+          ['Report a problem', () => problemSheet()],
         ]],
       ];
     }
@@ -1255,6 +1256,27 @@
         }
         if (lines.length) runMenu('Pay', lines);
       });
+    }
+
+    // Something wrong: a report (version, recent errors, none of the log) to
+    // copy and send, or to open as a GitHub issue.
+    function problemSheet() {
+      const text = shell.problemReport();
+      const intro = el('p', 'gform-intro', "Copy this, add what happened, and send it to whoever set you up. It has the version and recent errors, nothing from your log.");
+      const box = el('textarea', 'gproblem-text');
+      box.value = text;
+      box.rows = Math.min(16, text.split('\n').length + 2);
+      box.setAttribute('aria-label', 'Problem report');
+      const row = el('div', 'gform-ranges');
+      row.append(
+        button('Copy', 'gform-go', async () => {
+          try { await navigator.clipboard.writeText(box.value); toast('Copied. Paste it into an email or message.', 'ok'); } catch (_) { box.select(); toast('Select the text and copy it.', 'dim'); }
+        }),
+        button('Open a GitHub issue', 'gform-range', () => {
+          window.open(`${opts.about.repo}/issues/new?title=${encodeURIComponent('Problem: ')}&body=${encodeURIComponent(box.value)}`, '_blank', 'noopener');
+        }),
+      );
+      sheet('Report a problem', intro, box, row);
     }
 
     // Deleted entries (30 days), each with Restore.
@@ -1311,7 +1333,10 @@
       ]);
       const rate = money('rate');
       const otmin = money('otmin');
-      group('Pay', [row('Rate and overtime', rate ? `$${rate}/h${otmin ? ` · OT after ${otmin}h` : ''}` : 'Off', () => payForm())]);
+      group('Hours and pay', [
+        choice('Past midnight', [['start', 'Start day'], ['split', 'Split']], T.midnightMode(), (v) => quietly(() => opts.run(`/midnight ${v}`))),
+        row('Rate and overtime', rate ? `$${rate}/h${otmin ? ` · OT after ${otmin}h` : ''}` : 'Off', () => payForm()),
+      ]);
       group('AI', [row(shell.ai.ready() ? 'Key and model' : 'Set up AI (optional)', shell.ai.ready() ? shell.ai.model().replace(/^Claude /, '') : 'Off', () => aiSetup())]);
       group('Account', signedIn ? [
         row(store.user.email, (state && state.sync && state.sync.label) || '', () => runMenu('Account', '/whoami')),
@@ -1321,6 +1346,10 @@
       if (signedIn) {
         group('Security', enc === 'ready' ? [
           row('Link a device', '', () => runMenu('Link a device', '/link')),
+          row('Recovery key', store.recoveryConfirmed === false ? 'not confirmed' : store.recoveryConfirmed ? 'saved' : '', () => form('Confirm your recovery key', {
+            intro: 'Paste the recovery key you saved. It is checked against your account, so you know it works before you need it.',
+            fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Check',
+          }, (v) => v.key && runMenu('Recovery key', `/recovery check ${v.key}`)), store.recoveryConfirmed === false ? 'warn' : ''),
           row('New recovery key', '', () => form('New recovery key', { intro: 'Your old recovery key stops working.', submit: 'Make a new key' }, () => runMenu('Recovery key', '/recovery'))),
         ] : [
           row('Enter a link code', '', () => form('Link this device', { intro: 'On a device that is set up, choose Settings → Link a device, and type the code it shows.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))),

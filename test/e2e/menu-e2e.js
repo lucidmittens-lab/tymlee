@@ -33,7 +33,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
     await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(250);
     await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(400);
     const titles = await p.locator('.gset-title').allTextContents();
-    ok((await p.locator('.gsheet-title').textContent()) === 'Settings' && titles.join() === 'Appearance,Pay,AI,Account,Data', `${dev}: Settings groups (signed out): ${titles}`);
+    ok((await p.locator('.gsheet-title').textContent()) === 'Settings' && titles.join() === 'Appearance,Hours and pay,AI,Account,Data', `${dev}: Settings groups (signed out): ${titles}`);
     ok(await p.locator('.gset-seg button[aria-pressed="true"]', { hasText: 'GUI' }).count() === 1, `${dev}: the current view is marked`);
     ok((await p.locator('.gset-row', { hasText: 'Save a full backup' }).locator('.gset-value').textContent()) === 'never on this device', `${dev}: backup shows when it was last saved`);
     await p.screenshot({ path: `${S}/menu-${dev}-settings.png` });

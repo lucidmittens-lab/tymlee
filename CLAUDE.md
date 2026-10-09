@@ -45,6 +45,15 @@ Supabase SQL editor.
 New behavior gets a check in the related `test/e2e/*-e2e.js` (or a new file
 there). Test data uses made-up names only, never the owner's real projects.
 
+## Bundled libraries
+
+`public/vendor/` holds the website's copies of `@supabase/supabase-js` and
+`@anthropic-ai/sdk`, built from the versions pinned in `cli/package.json`
+(`scripts/vendor.js`). A monthly workflow (`vendor-check.yml`) fails when newer
+versions are out or `npm audit` finds a problem; then run
+`node scripts/vendor.js update`, test (`npm test`, `npm run e2e ai ai-gui sync
+e2ee strict csp`), and ship as a normal version.
+
 ## Security
 
 `SECURITY.md` is the threat model. Changes to `vault.js`, `store.js`'s sync

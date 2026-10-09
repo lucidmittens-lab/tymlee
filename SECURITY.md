@@ -17,7 +17,13 @@ are uploaded. The server stores ciphertext.
   device. The server only holds it locked: with the recovery key (100 random
   bits, PBKDF2-SHA-256 at 300,000 rounds), and for 10 minutes while adding a
   device, with a `/link` code (60 random bits, same derivation). Codes are
-  shown on screen and never sent.
+  shown on screen and never sent, and lines that carry a key or code
+  (`/recover`, `/link <code>`, `/recovery check`, `/code`, `/aikey`) are kept
+  out of command history (which the terminal app saves to a file).
+- **Recovery key saved?** `/recovery check` (or Settings → Recovery key)
+  confirms the saved key really opens the account's key on the server;
+  until then a reminder shows once a day. What's recorded, in the encrypted
+  settings, is only which recovery key was confirmed (its public salt).
 - **On the device:** the master key and a decrypted copy of the log are kept
   in the browser's storage (or, for the terminal app, in files only your user
   can read: folder 700, files 600). Signing out removes both.
@@ -69,6 +75,14 @@ are uploaded. The server stores ciphertext.
 - The site had no security headers. It now sends a content policy (own
   scripts only; network access only to Supabase and Anthropic), and refuses
   to be framed.
+
+## Bundled libraries
+
+The website runs copies of the Supabase and Anthropic libraries
+(`public/vendor/`), built from the versions the terminal app pins
+(`scripts/vendor.js`). A monthly GitHub workflow (`vendor-check.yml`) fails,
+so GitHub emails the owner, when newer versions are out or `npm audit` reports
+a problem.
 
 ## For the owner: settings to check in Supabase
 

@@ -1137,3 +1137,65 @@ test('entry IDs with a code (000049-002): /edit keeps them, and so does encrypti
   const key = await V.importMasterKey(V.newMasterKey());
   assert.equal((await V.openEntry(key, 'b', await V.sealEntry(key, 'b', es[1]))).sid, 49.002);
 });
+
+test('secret lines stay out of history', () => {
+  for (const l of ['/recover ABCDE-FGHIJ-KLMNO-PQRST', '/link ABCD-EFGH-JKMN', '/aikey sk-ant-xyz', '/code 123456', '  /Recovery check ABCDE', '/recovery check']) assert.ok(T.secretLine(l), l);
+  for (const l of ['/link', '/recovery', 'ACME drawings', '/log today', '/recovery2']) assert.ok(!T.secretLine(l), l);
+});
+
+test('/midnight split: a night shift is split between the days, reports and pay follow', () => {
+  const at = (d, h, m = 0) => Date.UTC(2026, 9, d, h, m);
+  const entries = [
+    { id: 'a', ts: at(9, 22), text: 'OOB night shift', sid: 10 },
+    { id: 'b', ts: at(10, 2), text: '/off', sid: 20 },
+  ];
+  const now = at(10, 12);
+  const fri = { from: at(9, 0), to: at(10, 0), label: 'fri' };
+  const sat = { from: at(10, 0), to: at(11, 0), label: 'sat' };
+  try {
+    T.setMidnight('start');
+    assert.equal(T.midnightMode(), 'start');
+    assert.equal(T.spansIn(T.withSpans(entries, now), fri).filter((s) => !s.off).reduce((n, s) => n + s.duration, 0), 4 * 3600000);
+    assert.equal(T.spansIn(T.withSpans(entries, now), sat).filter((s) => !s.off).length, 0);
+    T.setMidnight('split');
+    const f = T.spansIn(T.withSpans(entries, now), fri).filter((s) => !s.off);
+    const s = T.spansIn(T.withSpans(entries, now), sat).filter((x) => !x.off);
+    assert.deepEqual(f.map((x) => [x.id, x.duration / 3600000, Boolean(x.cont)]), [['a', 2, false]]);
+    assert.deepEqual(s.map((x) => [x.id, x.duration / 3600000, Boolean(x.cont)]), [['a', 2, true]]);
+    assert.match(T.formatReport(entries, sat, now), /OOB/);
+    // Overtime weeks end Saturday midnight: 39h by Saturday 23:00, then a
+    // 3-hour shift into Sunday. Counted on its start day, 2 of its hours are
+    // overtime; split, none are (Saturday's hour makes 40, Sunday is a new week).
+    const week = [{ id: 'w', ts: at(4, 0), text: 'OOB prep', sid: 5 }, { id: 'x', ts: at(5, 15), text: '/off', sid: 6 }];
+    const shift = [{ id: 'n', ts: at(10, 23), text: 'OOB night', sid: 30 }, { id: 'o', ts: at(11, 2), text: '/off', sid: 40 }];
+    const pay = { rate: [{ from: 0, value: 10 }], otmin: [{ from: 0, value: 40 }] };
+    const all = [...week, ...shift];
+    T.setMidnight('split');
+    const split = T.earnings(all, pay, at(12, 0)).get('n').money;
+    T.setMidnight('start');
+    const whole = T.earnings(all, pay, at(12, 0)).get('n').money;
+    assert.equal(whole, 10 * (1 + 2 * 1.5)); // 39h before it: 1h regular, 2h overtime
+    assert.equal(split, 10 * 3);
+  } finally {
+    T.setMidnight('start');
+  }
+});
+
+test('timeline: a night shift is drawn on both days; a day with only its end does not break', () => {
+  const at = (d, h) => Date.UTC(2026, 9, d, h);
+  const log = [{ id: 'a', ts: at(9, 22), text: 'OOB night shift', sid: 10 }, { id: 'b', ts: at(10, 3), text: '/off', sid: 20 }];
+  const sat = T.timelineDays(log, { from: at(10, 0), to: at(11, 0), label: 'sat' }, at(10, 12));
+  assert.equal(sat.days.length, 1);
+  const [b] = sat.days[0].blocks;
+  assert.deepEqual([b.id, b.cont, b.start === at(10, 0), b.end === at(10, 3), b.from === at(9, 22), b.duration / 3600000], ['a', true, true, true, true, 5]);
+  assert.equal(sat.days[0].totalMs, 0); // counted on Friday, where it started
+  const fri = T.timelineDays(log, { from: at(9, 0), to: at(10, 0), label: 'fri' }, at(10, 12));
+  assert.equal(fri.days[0].blocks[0].clipped, true);
+  assert.equal(fri.days[0].totalMs, 5 * 3600000);
+  try {
+    T.setMidnight('split');
+    assert.equal(T.timelineDays(log, { from: at(10, 0), to: at(11, 0), label: 'sat' }, at(10, 12)).days[0].totalMs, 3 * 3600000);
+  } finally {
+    T.setMidnight('start');
+  }
+});

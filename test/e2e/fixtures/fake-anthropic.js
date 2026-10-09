@@ -9,7 +9,9 @@ http.createServer((req, res) => {
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
     fs.writeFileSync(out, JSON.stringify({ url: req.url, headers: req.headers, body: JSON.parse(body || '{}') }));
-    const changes = [{ ...blank, action: 'add_entry', time: '09:00', category: 'NORTHSTAR', title: 'mix revisions' }, { ...blank, action: 'link_wo', category: 'NORTHSTAR', wo: '4471' }];
+    // Just after midnight, so it is in the past whenever the test runs (a time
+    // later than now is refused).
+    const changes = [{ ...blank, action: 'add_entry', time: '00:05', category: 'NORTHSTAR', title: 'mix revisions' }, { ...blank, action: 'link_wo', category: 'NORTHSTAR', wo: '4471' }];
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ message: 'Added the morning.', changes }) }], usage: { input_tokens: 1, output_tokens: 1 } }));
   });

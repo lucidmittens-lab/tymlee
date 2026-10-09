@@ -39,7 +39,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   await p.fill('#entry', 'dev one more on top'); await p.press('#entry', 'Enter'); await p.waitForTimeout(800);
   const after = await p.evaluate(() => JSON.parse(tymleeStorage.getItem('tymlee.v2.local.entries')).length);
   ok(after === 40001, `adding to a big log saves (${after} entries; reload took ${loadMs} ms)`);
-  ok(!(await p.locator('#out pre.err').count()), 'no storage warnings');
+  ok(!(await p.locator('#out pre.err', { hasText: /storage|could not save/ }).count()), 'no storage warnings');
   await p.fill('#entry', '/log week'); await p.press('#entry', 'Enter'); await p.waitForTimeout(500);
   await p.screenshot({ path: `${S}/idb-big-log.png` });
   // Another tab sees changes.

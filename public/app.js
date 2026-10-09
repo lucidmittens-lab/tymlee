@@ -67,6 +67,15 @@
     }
   }
 
+  // For problem reports: the kind of device and browser, nothing more.
+  function platformName() {
+    const ua = navigator.userAgent;
+    const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'other';
+    const browser = /Edg\//.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'browser';
+    const home = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    return `${os}, ${browser}${home ? ', from the Home Screen' : ''}`;
+  }
+
   function print(text, cls) {
     const pre = document.createElement('pre');
     if (cls) pre.className = cls;
@@ -253,6 +262,7 @@
       // browser instead of this app, so only the code is offered.
       helpFooter: ['', `Terminal app for Mac: ${T.REPO_URL}/releases/latest/download/tymlee.pkg`],
       build: BUILD ? BUILD.commit.slice(0, 7) : '',
+      platform: platformName(),
       linkSignIn: !(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches),
       showTimeline,
       pickEntry,
@@ -1264,7 +1274,7 @@
     return new Promise((resolve) => {
       const multiline = name === 'notes';
       const yesno = name === 'yesno'; // Apply / Cancel buttons; y + Enter too
-      modal = { kind: 'ask', label, multiline, yesno, resolve };
+      modal = { kind: 'ask', label, multiline, yesno, secret: name === 'secret', resolve };
       if (multiline) {
         input.hidden = true;
         ghost.hidden = true;
@@ -1475,7 +1485,7 @@
   function submit(line) {
     echo(line);
     const done = shell.run(line);
-    if (history[history.length - 1] !== line) history.push(line);
+    if (history[history.length - 1] !== line && !T.secretLine(line)) history.push(line);
     histIdx = history.length;
     draft = '';
     renderStatus();
@@ -1497,7 +1507,7 @@
         endModal(choice);
       } else {
         const value = modal.multiline ? notesBox.value : input.value;
-        echo(value.trim() || '(nothing)');
+        echo(modal.secret && value.trim() ? '•••••-•••••-•••••-•••••' : value.trim() || '(nothing)');
         endModal(value);
       }
       scrollToPrompt();
@@ -1699,7 +1709,26 @@
     chosenView = ['cli', 'gui', 'pure'].includes(saved) ? saved : 'gui';
     if (chosenView !== 'cli') setView(chosenView, { save: false });
     runFromLink();
+    // Once the first sync has had its go, and then hourly: anything that
+    // could lose data, at most once a day.
+    Promise.resolve(store.whenIdle()).then(warnData, warnData);
+    setInterval(warnData, 3600000);
   });
+
+  // Errors nothing caught: kept for /problem (Menu → Help → Report a problem).
+  window.addEventListener('error', (e) => shell.noteProblem(e.error || { name: 'Error', message: e.message, stack: `${e.filename}:${e.lineno}` }, 'page'));
+  window.addEventListener('unhandledrejection', (e) => shell.noteProblem(e.reason, 'page'));
+
+  const WARNED_KEY = 'tymlee.dataWarned';
+  function warnData() {
+    const list = shell.dataWarnings();
+    if (!list.length) return;
+    try {
+      if (Date.now() - (Number(localStorage.getItem(WARNED_KEY)) || 0) < 86400000) return;
+      localStorage.setItem(WARNED_KEY, String(Date.now()));
+    } catch (_) { /* warn anyway */ }
+    for (const w of list) print(w, 'err');
+  }
 
   // A link that says what to do, from Siri or a Shortcut: ?say=<anything
   // spoken> or ?do=<exact line>. Taken off the address first, so reloading

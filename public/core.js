@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.1';
+  const VERSION = '2.0.2';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -542,7 +542,7 @@
     violet: ['#7c3aed', '#a78bfa'],
     slate: ['#475569', '#94a3b8'],
   };
-  const DEFAULT_ACCENT = 'indigo';
+  const DEFAULT_ACCENT = 'blue';
 
   function hexRgb(hex) {
     const m = String(hex).match(/^#?([0-9a-f]{6})$/i);

@@ -26,7 +26,7 @@
   --fg: #16181d;
   --muted: #6b7280;
   --line: #e4e7ec;
-  --accent: #4f46e5;
+  --accent: #2563eb;
   --on-accent: #ffffff;
   --warn: #dc2626;
   --panel: #ffffff;    /* the console tray */
@@ -48,7 +48,7 @@
     --fg: #e7e9ee;
     --muted: #8b93a3;
     --line: #262b35;
-    --accent: #8b8cf8;
+    --accent: #60a5fa;
     --on-accent: #0f1115;
     --warn: #f87171;
     --panel: #13161c;

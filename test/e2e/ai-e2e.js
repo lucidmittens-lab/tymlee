@@ -46,7 +46,11 @@ const blank = { id: '', date: '', time: '', category: '', title: '', notes: '', 
     { ...blank, action: 'add_name', category: 'NORTHSTAR', name: 'Northstar Productions' },
     { ...blank, action: 'edit_entry', id: '999999', title: 'x' },
   ] }) };
+  for (let i = 0; i < 4; i++) await send('/help', 50); // enough output that the console scrolls
   await send('/ai 9-11 SP mix revisions WO 4471, lunch, ACME drawings from 12:30, the 3pm thing was a client call', 600);
+  const atBottom = await p.evaluate(() => { const el = document.getElementById('scroll'); return el.scrollHeight - el.scrollTop - el.clientHeight < 40; });
+  const promptSeen = await p.locator('#entry').evaluate((e) => { const r = e.getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0; });
+  ok(atBottom && promptSeen, "Claude's answer, and the apply? prompt, scroll into view while it waits");
   const req = seen[seen.length - 1];
   ok(req.body.model === 'claude-opus-5-5' && req.body.output_config.format.type === 'json_schema' && req.body.output_config.effort === 'low' && req.body.fallbacks === 'default', 'request: model, structured output, effort, fallbacks');
   ok((req.headers['anthropic-beta'] || '').includes('server-side-fallback-2026-07-01') && req.headers['x-api-key'] === 'sk-ant-api03-TESTKEY000000000000000000000abcd' && 'anthropic-dangerous-direct-browser-access' in req.headers, 'request headers: beta, the key, direct browser access');

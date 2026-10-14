@@ -77,6 +77,10 @@
   }
 
   function print(text, cls) {
+    // Like a terminal: output that arrives while a command is still running
+    // (/ai's answer, while it waits for y/n) follows the bottom, unless
+    // you've scrolled up to read something.
+    const follow = view === 'cli' && nearBottom();
     const pre = document.createElement('pre');
     if (cls) pre.className = cls;
     // Reports wrap under their last column, a line at a time; past a couple
@@ -91,7 +95,7 @@
     // In the GUI view, bigger output (reports, help, keys) shows in the
     // console tray from its top; the tray keeps its size (scroll to read on).
     pinned = /\b(report|key)\b/.test(cls || '') ? pre : null;
-    if (view === 'gui') scrollToPrompt();
+    if (view === 'gui' || follow) scrollToPrompt();
     return pre;
   }
 
@@ -1287,6 +1291,7 @@
         fitNotesBox();
         notesBox.focus();
         notesBox.setSelectionRange(notesBox.value.length, notesBox.value.length);
+        scrollToPrompt();
         return;
       }
       input.value = initial || '';
@@ -1294,6 +1299,7 @@
       renderHints();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
+      scrollToPrompt(); // the question and what it's about, in view
     });
   }
 

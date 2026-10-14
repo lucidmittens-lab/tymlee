@@ -48,11 +48,13 @@ const reply = (obj) => ({ id: 'm', type: 'message', role: 'assistant', model: 'c
       ok(await p.locator('.aipanel').isVisible() && (await p.locator('.gsheet-wrap').count()) === 0 && (await p.locator('.aip-model').inputValue()) === 'haiku', `${tag}: then the Ask AI panel (no sheet), with the model`);
       ok(dev === 'phone' ? (await p.locator('.tab[data-tab="ai"]').getAttribute('aria-current')) === 'true' : (await p.locator('.sb-ai').getAttribute('aria-pressed')) === 'true', `${tag}: the AI button shows it's open`);
       const panelBox = await p.locator('.aipanel').boundingBox(); const barBox = await p.locator('.startbar').boundingBox();
-      ok(panelBox.y + panelBox.height <= barBox.y + 1, `${tag}: the panel sits above the start bar`);
+      const vp = p.viewportSize();
+      if (dev === 'phone') ok(panelBox.y <= 1 && panelBox.height >= vp.height - 2, `${tag}: on a phone the chat takes the whole screen (${Math.round(panelBox.y)}+${Math.round(panelBox.height)} of ${vp.height})`);
+      else ok(panelBox.x >= barBox.x + barBox.width && panelBox.height > vp.height * 0.9, `${tag}: on a desktop the chat is a full-height column beside the timeline and start bar`);
       await p.selectOption('.aip-model', 'sonnet'); await p.waitForTimeout(300);
       ok((await p.locator('.gsheet-wrap').count()) === 0 && (await p.evaluate(() => document.body.innerText)).includes('Ask AI') && (await p.locator('.aip-model').inputValue()) === 'sonnet', `${tag}: changing the model asks for nothing`);
       await p.selectOption('.aip-model', 'haiku'); await p.waitForTimeout(300);
-      ok((await p.locator('.chat-msg').count()) === 0 && !(await p.locator('.chat').isVisible()) && (await p.locator('.chat-input').isVisible()), `${tag}: a new chat: just the message box, no hint`);
+      ok((await p.locator('.chat-msg').count()) === 0 && (await p.locator('.chat > *').count()) === 0 && (await p.locator('.chat-input').isVisible()) && (await p.locator('.chat-input').evaluate((t) => t.offsetHeight)) >= 36, `${tag}: a new chat: just the message box (full height), no hint`);
       await p.fill('.chat-input', 'got interrupted by a phone call 2:30 to 2:50');
       if (scheme === 'light') await p.screenshot({ path: `${S}/aig-${tag}-ask.png` });
       await p.press('.chat-input', 'Enter');
@@ -79,7 +81,7 @@ const reply = (obj) => ({ id: 'm', type: 'message', role: 'assistant', model: 'c
       ok(t2.join('|') === 'TLWH finishing', `${tag}: Undo takes them back`);
       // A PDF.
       await aiOpen();
-      ok((await p.locator('.chat-msg').count()) === 0 && !(await p.locator('.chat').isVisible()), `${tag}: after Apply, a new chat`);
+      ok((await p.locator('.chat-msg').count()) === 0 && (await p.locator('.chat > *').count()) === 0, `${tag}: after Apply, a new chat`);
       const fc = p.waitForEvent('filechooser');
       await p.click('.gai-attach');
       await (await fc).setFiles([
@@ -108,7 +110,7 @@ const reply = (obj) => ({ id: 'm', type: 'message', role: 'assistant', model: 'c
       await aiOpen();
       ok((await p.locator('.gai-change').count()) === 6, `${tag}: ✕ then open again: the chat is still there`);
       await p.locator('.aip-new').click(); await p.waitForTimeout(200);
-      ok((await p.locator('.gai-change').count()) === 0 && (await p.locator('.gai-chip').count()) === 0 && !(await p.locator('.chat').isVisible()) && !(await p.locator('.aip-new').isVisible()), `${tag}: New chat starts over, empty`);
+      ok((await p.locator('.gai-change').count()) === 0 && (await p.locator('.gai-chip').count()) === 0 && (await p.locator('.chat > *').count()) === 0 && !(await p.locator('.aip-new').isVisible()), `${tag}: New chat starts over, empty`);
       await p.locator('.aip-close').click(); await p.waitForTimeout(300);
       // Photos: shrunk to 1568px and sent as JPEG; the camera button on phones only.
       await aiOpen();

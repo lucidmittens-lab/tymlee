@@ -966,8 +966,10 @@
     aiText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); aiSend(); } });
     aiText.addEventListener('input', () => fitAiText());
     function fitAiText() {
+      // Measured while hidden it would be 0 tall: leave it to the CSS then.
+      if (!aiText.offsetParent) { aiText.style.height = ''; return; }
       aiText.style.height = 'auto';
-      aiText.style.height = `${Math.min(aiText.scrollHeight + 2, 140)}px`;
+      aiText.style.height = `${Math.min(Math.max(aiText.scrollHeight + 2, 38), 140)}px`;
     }
     let aiFiles = []; // attached, not yet sent
     let aiSent = []; // sent in this chat (they go along with every turn)
@@ -1067,6 +1069,7 @@
       aiPanel.hidden = false;
       aiBtn.setAttribute('aria-pressed', 'true');
       markTab();
+      fitAiText();
       drawAi();
       focusAi();
     }
@@ -1082,6 +1085,12 @@
       const b = el('div', `chat-msg ${who}`);
       b.append(...content);
       aiThread.hidden = false;
+      // Claude's messages: who answered, above the bubble.
+      if (/\bai\b/.test(who) && !/\bwait\b/.test(who)) {
+        const by = el('div', 'chat-by');
+        by.append(icon('spark'), el('span', null, shell.ai.model().replace(/^Claude /, '')));
+        aiThread.append(by);
+      }
       aiThread.append(b);
       aiThread.scrollTop = aiThread.scrollHeight;
       return b;

@@ -60,7 +60,7 @@ const seed = [
       await p.click('.sb-menu:visible, .tab[data-tab="menu"]:visible'); await p.waitForTimeout(250);
       await p.locator('.gmenu-tile', { hasText: 'Settings' }).click(); await p.waitForTimeout(350);
       await p.locator('.gset-row', { hasText: 'Accent color' }).click(); await p.waitForTimeout(400);
-      ok(await p.locator('.gaccent-swatch').count() === 9 && await p.locator('.gaccent-swatch.on', { hasText: 'indigo' }).count() === 1, `${tag}: 8 swatches and a custom one; indigo chosen`);
+      ok(await p.locator('.gaccent-swatch').count() === 9 && await p.locator('.gaccent-swatch.on', { hasText: 'blue' }).count() === 1, `${tag}: 8 swatches and a custom one; blue (the default) chosen`);
       await p.locator('.gaccent-swatch', { hasText: 'teal' }).click(); await p.waitForTimeout(500);
       const accent = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
       ok(accent === (scheme === 'dark' ? '#2dd4bf' : '#0f766e'), `${tag}: teal applies (${accent})`);

@@ -1199,3 +1199,16 @@ test('timeline: a night shift is drawn on both days; a day with only its end doe
     T.setMidnight('start');
   }
 });
+
+test('timeline: an entry left running until the next morning is not drawn on that morning', () => {
+  const at = (d, h, m = 0) => Date.UTC(2026, 9, d, h, m);
+  const log = [{ id: 'a', ts: at(9, 13), text: 'ACME site visit', sid: 10 }, { id: 'b', ts: at(10, 8, 30), text: 'admin email', sid: 20 }];
+  const sat = T.timelineDays(log, { from: at(10, 0), to: at(11, 0), label: 'sat' }, at(10, 12));
+  assert.deepEqual(sat.days[0].blocks.map((b) => b.id), ['b']);
+  try {
+    T.setMidnight('split');
+    assert.deepEqual(T.timelineDays(log, { from: at(10, 0), to: at(11, 0), label: 'sat' }, at(10, 12)).days[0].blocks.map((b) => b.id), ['a', 'b']);
+  } finally {
+    T.setMidnight('start');
+  }
+});

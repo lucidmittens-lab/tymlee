@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.2';
+  const VERSION = '2.0.3';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -827,15 +827,21 @@
   }
 
   // Days in [from, to) as blocks for a vertical timeline. Each block is an
-  // entry (or off time) on one day: one that runs past midnight is drawn on
-  // both days (`clipped` on the first, `cont` on the next), whichever day
-  // /midnight counts it on. `from` and `duration` are the whole entry's.
+  // entry (or off time) on one day: a night shift is drawn on both days
+  // (`clipped` on the first, `cont` on the next), whichever day /midnight
+  // counts it on. `from` and `duration` are the whole entry's.
   // `axisFrom`/`axisTo` are whole hours (ms) spanning the logged time of
   // every day, for a shared axis.
   function timelineDays(entries, range, now) {
     const all = withSpans(entries, now);
     const counted = spansIn(all, range);
-    const spans = splitAtMidnight(all.filter((s) => s.end > range.from && s.ts < range.to)).filter((s) => s.ts >= range.from && s.ts < range.to);
+    // The part after midnight is drawn for a night shift: one that ended
+    // with Off or a break, or is still running (or with /midnight split).
+    // An entry left running overnight until the next morning's first task
+    // (a forgotten clock-out) doesn't take over the next day.
+    const shift = (s, i) => splitNights || !all[i + 1] || isMarker(all[i + 1].text);
+    const spans = splitAtMidnight(all.map((s, i) => ({ ...s, night: shift(s, i) })).filter((s) => s.end > range.from && s.ts < range.to))
+      .filter((s) => s.ts >= range.from && s.ts < range.to && !(s.cont && !s.night));
     const slots = categorySlots(counted.length ? counted : spans);
     const days = [];
     for (const s of spans) {

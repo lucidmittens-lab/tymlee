@@ -578,7 +578,7 @@
     violet: ['#7c3aed', '#a78bfa'],
     slate: ['#475569', '#94a3b8'],
   };
-  const DEFAULT_ACCENT = 'indigo';
+  const DEFAULT_ACCENT = 'blue';
 
   function hexRgb(hex) {
     const m = String(hex).match(/^#?([0-9a-f]{6})$/i);

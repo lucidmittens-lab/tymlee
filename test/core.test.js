@@ -927,7 +927,7 @@ test('/find on a phone: two lines an entry, like the compact /log', () => {
 });
 
 test('accent colors: named ones step for dark screens; any #rrggbb works; text on it stays readable', () => {
-  assert.deepEqual(T.accentColors(''), { name: 'indigo', light: { accent: '#4f46e5', on: '#ffffff' }, dark: { accent: '#8b8cf8', on: '#111318' } });
+  assert.deepEqual(T.accentColors(''), { name: 'blue', light: { accent: '#2563eb', on: '#ffffff' }, dark: { accent: '#60a5fa', on: '#111318' } });
   assert.equal(T.accentColors('Teal').light.accent, '#0f766e');
   const y = T.accentColors('#FFD400');
   assert.equal(y.name, '#ffd400');

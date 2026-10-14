@@ -18,7 +18,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? n++ : f++; 
     const pick = async (label) => { await p.click('.sb-add'); await p.waitForTimeout(150); await p.locator('.sb-addmenu .sb-popup-item', { hasText: label }).click(); await p.waitForTimeout(250); };
     ok(await p.locator('.sb-add').isVisible(), `${dev}: + on the running card`);
     await p.click('.sb-add'); await p.waitForTimeout(150);
-    ok(await p.locator('.sb-addmenu').isVisible() && (await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).map((t) => t.trim()).join('|') === 'Note|Work order|Equipment|Files|Edit entry', `${dev}: the menu: ${(await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).join('|')}`);
+    ok(await p.locator('.sb-addmenu').isVisible() && (await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).map((t) => t.trim()).join('|') === 'Note|Work order|Equipment|File location|Edit entry', `${dev}: the menu: ${(await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).join('|')}`);
     const mb = await p.locator('.sb-addmenu').boundingBox(); const vw = (opts.viewport || {}).width;
     ok(mb.x >= 0 && mb.x + mb.width <= vw, `${dev}: the menu fits on screen`);
     await p.screenshot({ path: `${S}/plus-${dev}-menu.png` });
@@ -46,7 +46,8 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? n++ : f++; 
     await p.fill('.gform input[name=v]', 'ler-resolve-07'); await p.press('.gform input[name=v]', 'Enter'); await p.waitForTimeout(300);
     ok((await entry()).eq === 'ler-resolve-07', `${dev}: Equipment sets it: ${(await entry()).eq}`);
     // Files
-    await pick('Files');
+    await pick('File location');
+    ok(/nothing is uploaded/.test(await p.locator('.gform-intro').textContent()), `${dev}: File location says nothing is uploaded`);
     await p.fill('.gform input[name=files]', '/Volumes/Work/ mix.wav stems.zip'); await p.press('.gform input[name=files]', 'Enter'); await p.waitForTimeout(300);
     ok((await entry()).files === '/Volumes/Work/mix.wav\n/Volumes/Work/stems.zip', `${dev}: Files adds them: ${JSON.stringify((await entry()).files)}`);
     ok((await entry()).notes === 'client asked for a recut' && (await entry()).text === 'ACME drawings', `${dev}: the rest is unchanged`);
@@ -68,7 +69,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? n++ : f++; 
     await p.evaluate(() => document.activeElement && document.activeElement.blur());
     await p.locator(dev === 'phone' ? '.sb-paid' : '.sb-break-main').click(); await p.waitForTimeout(300);
     await p.click('.sb-add'); await p.waitForTimeout(150);
-    ok((await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).map((t) => t.trim()).join('|') === 'Note|Files|Edit entry', `${dev}: on a break: no work order or equipment`);
+    ok((await p.locator('.sb-addmenu .sb-popup-item:visible').allTextContents()).map((t) => t.trim()).join('|') === 'Note|File location|Edit entry', `${dev}: on a break: no work order or equipment`);
     await ctx.close();
   }
   ok(!errs.length, 'no page errors ' + errs.join(' | '));

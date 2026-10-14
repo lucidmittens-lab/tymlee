@@ -42,6 +42,7 @@
     spark: '<path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9z" fill="currentColor" stroke="none"/><path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" stroke="none"/>',
     camera: '<path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.3l1.5-2.2h7.4L17.2 7h2.3A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/>',
     paperclip: '<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/>',
+    folder: '<path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4.2l2 2.2H19A1.5 1.5 0 0 1 20.5 9.2V17A1.5 1.5 0 0 1 19 18.5H5A1.5 1.5 0 0 1 3.5 17z"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     plus: '<path d="M12 6v12M6 12h12"/>',
     up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
@@ -159,7 +160,7 @@
     addMenu.hidden = true;
     addMenu.setAttribute('role', 'menu');
     const addItems = {};
-    for (const [key, label, ico] of [['note', 'Note', 'note'], ['wo', 'Work order', 'hash'], ['eq', 'Equipment', 'tool'], ['files', 'Files', 'paperclip'], ['edit', 'Edit entry', 'pencil']]) {
+    for (const [key, label, ico] of [['note', 'Note', 'note'], ['wo', 'Work order', 'hash'], ['eq', 'Equipment', 'tool'], ['files', 'File location', 'folder'], ['edit', 'Edit entry', 'pencil']]) {
       const b = button('', 'sb-popup-item', () => { toggleAddMenu(false); addTo(key); });
       b.setAttribute('role', 'menuitem');
       b.append(icon(ico), el('span', null, label), el('span', 'sb-popup-hint'));
@@ -211,10 +212,10 @@
         }, (v) => v.text && runMenu('Note', `/note ${v.text}`));
       }
       if (what === 'files') {
-        return form('Add files', {
-          intro: 'A folder, then the files in it; or full paths. They go on the running entry.',
-          fields: [{ name: 'files', label: 'Files', placeholder: '/Volumes/Work/ mix.wav stems.zip' }], submit: 'Add',
-        }, (v) => v.files && runMenu('Files', `/file ${v.files}`, { brief: true }));
+        return form('File location', {
+          intro: "Where this entry's files are kept: a folder, then the files in it; or full paths. Only the locations are saved; nothing is uploaded.",
+          fields: [{ name: 'files', label: 'Paths', placeholder: '/Volumes/Work/ mix.wav stems.zip' }], submit: 'Add',
+        }, (v) => v.files && runMenu('File location', `/file ${v.files}`, { brief: true }));
       }
       if (what === 'edit') return opts.editEntry(id);
       const wo = what === 'wo';

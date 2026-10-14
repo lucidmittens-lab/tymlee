@@ -33,12 +33,12 @@
   --accent-bg: color-mix(in srgb, var(--accent) 10%, var(--card));
   --accent-ring: color-mix(in srgb, var(--accent) 28%, transparent);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.08);
-  --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.18);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 16px 48px rgba(16, 24, 40, 0.16);
   --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --radius: 6px;      /* buttons and inputs: crisp */
-  --radius-card: 10px; /* bars, cards, sheets */
+  --radius: 8px;      /* buttons and inputs */
+  --radius-card: 14px; /* bars, cards, sheets */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,8 +54,8 @@
     --panel: #13161c;
     --accent-bg: color-mix(in srgb, var(--accent) 14%, var(--card));
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.32);
+    --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -526,7 +526,7 @@ body {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 12px 16px 16px;
+  padding: 14px 18px 18px;
 }
 #gui .tl { font-size: 12px; line-height: 1.3; position: relative; margin-top: 0; margin-bottom: 0; }
 .gui-bar {
@@ -957,11 +957,11 @@ button.gui-day {
    (gui.js): idle, running, break or compose. Wide screens: one row. */
 .startbar {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   max-width: 1200px;
-  margin: 0 auto 10px;
-  padding: 10px;
+  margin: 0 auto 12px;
+  padding: 12px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
@@ -1092,7 +1092,7 @@ button.gui-day {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--shadow-lg);
 }
@@ -1155,7 +1155,7 @@ button.gui-day {
   border-radius: var(--radius-card);
   background: var(--card);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
   overflow: hidden;
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -1282,7 +1282,7 @@ button.gui-day {
 @media (max-width: 600px) {
   /* Phones: the card on its own row, bigger buttons, the menu at the right
      end of the middle row. */
-  .startbar { padding: 8px; gap: 6px; margin-bottom: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)) 44px; }
+  .startbar { padding: 10px; gap: 8px; margin-bottom: 10px; grid-template-columns: repeat(6, minmax(0, 1fr)) 44px; }
   #app.pure-mode #dock { padding: 0 8px; }
   .startbar button { height: 44px; }
   .startbar input { height: 44px; }
@@ -1297,7 +1297,7 @@ button.gui-day {
   .startbar[data-mode="break"] { grid-template-areas: "card card card card card card card" "paid paid paid unpaid unpaid unpaid menu" "off off back back back back back"; }
   .startbar[data-mode="compose"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "cancel cancel start start start start menu"; }
   .startbar[data-mode="idle"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "resume resume start start start start menu"; }
-  .sb-card { height: auto; min-height: 54px; padding: 8px 12px; }
+  .sb-card { height: auto; min-height: 56px; padding: 10px 14px; }
   .sb-card-words { flex-direction: column; align-items: flex-start; gap: 1px; }
   .sb-clock { font-size: 19px; line-height: 1.15; }
   .sb-what { font-size: 13px; max-width: 100%; }
@@ -1364,7 +1364,7 @@ button.gui-day {
   #app.pure-mode .startbar[data-mode="break"] { grid-template-areas: "card card card card card card card" "paid paid paid paid unpaid unpaid unpaid" "off off back back back back back"; }
   #app.pure-mode .startbar[data-mode="compose"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "cancel cancel start start start start start"; }
   #app.pure-mode .startbar[data-mode="idle"] { grid-template-areas: "card card card card card card card" "cat cat cat cat cat cat cat" "title title title title title title title" "resume resume start start start start start"; }
-  #app.pure-mode .startbar { margin-bottom: 6px; }
+  #app.pure-mode .startbar { margin-bottom: 8px; }
 }
 
 /* Pull to sync: a strip that grows at the top of the timeline. */
@@ -1431,7 +1431,7 @@ button.gui-day {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
   animation: aip-in 0.16s ease-out;
 }
 .aipanel[hidden] { display: none; }

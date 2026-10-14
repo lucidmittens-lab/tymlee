@@ -1303,7 +1303,7 @@
         r.append(seg);
         return r;
       };
-      const accent = (store.settings && store.settings.accent) || 'indigo';
+      const accent = (store.settings && store.settings.accent) || T.DEFAULT_ACCENT;
       group('Appearance', [
         choice('View', [['cli', 'CLI'], ['gui', 'Hybrid'], ['pure', 'GUI']], opts.view(), (v) => opts.setView(v)),
         choice('Clock', [['12', '12h'], ['24', '24h']], T.clockMode(), (v) => quietly(() => opts.run(`/clock ${v}`))),

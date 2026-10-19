@@ -9,5 +9,8 @@
   },
   "assets": {
     "directory": "./public"
-  }
+  },
+  // Branches other than production (main, where bolt.new syncs) are built
+  // with `wrangler preview`, which needs this block (it can stay empty).
+  "previews": {}
 }

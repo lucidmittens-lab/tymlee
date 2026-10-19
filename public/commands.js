@@ -571,6 +571,7 @@
         `version ${T.VERSION}${io.build ? ` (build ${io.build})` : ''} · ${io.place === 'this browser' ? 'website' : 'terminal app'}${io.platform ? ` · ${io.platform}` : ''}`,
         `account: ${store.user ? 'signed in' : 'signed out'} · sync: ${store.status}${store.pending ? ` (${store.pending} waiting)` : ''} · encryption: ${store.encryption}`,
         ...(store.lastError ? [`last sync error: ${store.lastError}`] : []),
+        ...((store.lastSignOut && store.lastSignOut()) ? [(() => { const o = store.lastSignOut(); return `last unexpected sign-out: ${when(o.at)}${o.online ? '' : ' (offline)'}${o.error ? ` · ${o.error}` : ''}`; })()] : []),
         `entries: ${shown().length} · AI: ${aiSettings().key ? 'set up' : 'off'}`,
         '',
         recent.length ? 'recent errors (newest first):' : 'no errors recorded on this device',
@@ -1462,8 +1463,9 @@
       },
       login: {
         usage: '/login <email>',
-        about: `sign in to sync across devices (emails you ${io.linkSignIn ? 'a link and a code' : 'a code'})`,
+        about: `sign in to sync across devices (emails you ${io.linkSignIn ? 'a link and a code' : 'a code'})${store.passkeysAvailable ? ' · /login passkey: with a passkey' : ''}`,
         async run(args) {
+          if ((args[0] || '').toLowerCase() === 'passkey') return COMMANDS.passkey.run(['login']);
           const email = (args[0] || '').trim();
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return print('usage: /login you@example.com', 'err');
           if (store.user) return print(`already signed in as ${store.user.email} · /logout first`, 'err');
@@ -1577,6 +1579,43 @@
           print('deleting the synced log and making a new key…', 'dim');
           await store.resetEncryption();
           print('encryption reset: this device has the new key', 'ok');
+        },
+      },
+      passkey: {
+        usage: '/passkey [login|add|unlock|remove <n>]',
+        about: 'passkeys (Face ID, Touch ID, Windows Hello): sign in, and unlock your encrypted log, with one touch · /passkey lists yours',
+        async run(args) {
+          const what = (args[0] || '').toLowerCase();
+          if (!store.passkeysAvailable) return print(store.configured ? `passkeys work in the website (Settings → Passkeys); ${io.place === 'this computer' ? 'the terminal app signs in with an emailed code and /link' : 'this browser does not support them'}` : 'sync is not configured', 'err');
+          if (what === 'login') {
+            if (store.user) return print(`already signed in as ${store.user.email}`, 'err');
+            print('waiting for your passkey…', 'dim');
+            await store.signInWithPasskey();
+            return;
+          }
+          if (!store.user) return print('not signed in · /passkey login, or /login you@example.com', 'err');
+          if (what === 'add') {
+            print('making a passkey for this account…', 'dim');
+            const r = await store.addPasskey(args.slice(1).join(' ') || io.platform || '');
+            return print(r.unlock
+              ? 'passkey added: it signs you in and unlocks your log, on this device and wherever it syncs (iCloud Keychain, Google Password Manager…)'
+              : "passkey added: it signs you in. It can't unlock your log (its app or this browser doesn't support that), so other devices still unlock with /link or the recovery key.", 'ok');
+          }
+          if (what === 'unlock') {
+            await store.unlockWithPasskey();
+            return;
+          }
+          const list = await store.listPasskeys();
+          if (what === 'remove') {
+            const n = Number(args[1]);
+            const p = list[n - 1];
+            if (!p) return print(`usage: /passkey remove <n>  (the number in /passkey${list.length ? `, 1-${list.length}` : ''})`, 'err');
+            await store.removePasskey(p.id);
+            return print(`removed passkey ${n} (${p.name}). It can't sign in or unlock any more; also delete it from your password manager.`, 'ok');
+          }
+          if (what) return print('usage: /passkey  ·  /passkey login | add [name] | unlock | remove <n>', 'err');
+          if (!list.length) return print('no passkeys yet · /passkey add makes one (Face ID, Touch ID or Windows Hello)', 'dim');
+          print(list.map((p, i) => `  ${i + 1}  ${p.name}  ·  added ${String(p.created).slice(0, 10)}${p.used ? `  ·  last used ${String(p.used).slice(0, 10)}` : ''}  ·  ${p.unlocks ? 'signs in and unlocks' : 'signs in only'}`).join('\n'), 'report');
         },
       },
       whoami: {
@@ -2097,7 +2136,7 @@
       ['pay', 'Pay', ['rate', 'overtime'], ['rate', 'otmin', 'otrate']],
       ['ai', 'AI (your own Claude API key)', ['claude', 'names'], ['ai', 'aikey', 'aimodel', 'name', 'names']],
       ['backup', 'Backup', ['restore', 'import'], ['backup', 'restore', 'import', 'save']],
-      ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
+      ['account', 'Account, sync and encryption', ['sync', 'login', 'encryption'], ['login', 'code', 'passkey', 'logout', 'whoami', 'sync', 'encrypt', 'link', 'recover', 'recovery', 'reset-encryption']],
       ['more', 'More', ['other', 'display', 'view', 'bug'], ['clock', 'midnight', 'accent', 'problem']],
     ];
     function helpGroups() {

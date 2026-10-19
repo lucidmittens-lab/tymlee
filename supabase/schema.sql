@@ -242,3 +242,17 @@ alter table public.records add constraint records_encrypted_check check (
 -- equipment together) may now be up to 64000 characters.
 alter table public.entries drop constraint if exists entries_text_check;
 alter table public.entries add constraint entries_text_check check (char_length(text) between 1 and 64000);
+
+-- ---------------------------------------------------------------------------
+-- Passkeys (added later; safe to run on an existing project).
+-- Signing in with a passkey is Supabase's own (Authentication → Passkeys in
+-- the dashboard). Unlocking with one is tymlee's: a passkey that supports the
+-- WebAuthn PRF extension gives the device a secret only that passkey can
+-- produce, and the account's key is kept here locked with it, one entry per
+-- passkey: [{ id: credential id, kid, v, n, salt, iv, data, at }]. The secret
+-- never leaves the device, so the server can't open these either.
+
+alter table public.keyring add column if not exists passkeys jsonb not null default '[]'::jsonb;
+alter table public.keyring drop constraint if exists keyring_passkeys_check;
+alter table public.keyring add constraint keyring_passkeys_check
+  check (jsonb_typeof(passkeys) = 'array' and jsonb_array_length(passkeys) <= 20 and octet_length(passkeys::text) <= 32000);

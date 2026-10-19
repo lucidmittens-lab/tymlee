@@ -20,6 +20,15 @@ are uploaded. The server stores ciphertext.
   shown on screen and never sent, and lines that carry a key or code
   (`/recover`, `/link <code>`, `/recovery check`, `/code`, `/aikey`) are kept
   out of command history (which the terminal app saves to a file).
+- **Passkeys.** Signing in with a passkey is Supabase's (it keeps only the
+  passkey's public key). Unlocking with one is tymlee's: a passkey that
+  supports the WebAuthn PRF extension gives the device a 32-byte secret that
+  only that passkey can produce, for a fixed input. The master key is locked
+  with a key derived from it (HKDF-SHA-256, random salt, AES-256-GCM bound to
+  the passkey's credential id) and that copy is kept in `keyring.passkeys`.
+  The secret is never sent anywhere (the credential sent to Supabase has its
+  extension results removed), so the server can't open these copies either.
+  Removing a passkey deletes its copy; resetting encryption deletes them all.
 - **Recovery key saved?** `/recovery check` (or Settings → Recovery key)
   confirms the saved key really opens the account's key on the server;
   until then a reminder shows once a day. What's recorded, in the encrypted
@@ -48,6 +57,11 @@ are uploaded. The server stores ciphertext.
   true of every web app with end-to-end encryption; publishing this
   repository is how you can check what the site runs. The terminal app,
   once installed, runs the code you installed.
+- **Your passkeys are trusted.** Anyone who can use one that unlocks (your
+  unlocked phone or computer and its Face ID, Touch ID, Windows Hello or
+  PIN, or the account it syncs through, such as your Apple ID or Google
+  account) can sign in and read your log. Passkeys that don't support PRF only
+  sign in; a new device then still needs /link or the recovery key.
 - **Your device is trusted.** Malware or someone with your unlocked device can
   read the decrypted copy and the key. Anything that could run its own
   script in the page could too; the site's content policy (`public/_headers`)
@@ -86,6 +100,10 @@ a problem.
 
 ## For the owner: settings to check in Supabase
 
+- **Authentication → Passkeys:** on, with the site's domain as the relying
+  party ID (`tymlee.date`) and `https://tymlee.date` as the allowed origin.
+  Preview builds (other domains) can't use these passkeys.
+
 - **Authentication → URL Configuration:** only your site's URL (and
   localhost for testing) under Redirect URLs.
 - **Authentication → Providers → Email:** a short code/link lifetime, and
@@ -96,14 +114,18 @@ a problem.
 
 ## For a reviewer
 
-- `public/vault.js`: the cryptography (small; no DOM access).
+- `public/vault.js`: the cryptography (small; no DOM access), including the
+  passkey copies (`wrapWithSecret`).
 - `public/store.js`: what is uploaded and how it's read back (`sealRow`,
   `openRow`, `syncSettings`, `syncRecords`), key handling (`prepareVault`,
   `enableEncryption`, `verifyKey`, `createLink`, `unlockWith`,
-  `resetEncryption`).
+  `resetEncryption`), passkeys (`browserPasskeys`, which strips the PRF result
+  before anything is sent; `signInWithPasskey`, `addPasskey`,
+  `unlockWithPasskey`).
 - `supabase/schema.sql`: row-level security and the database's own checks.
 - `public/_headers`: the content policy.
 - `public/ai.js` and `aiPlan` in `public/commands.js`: what goes to Anthropic
   and how its answer becomes changes.
 - Tests: `test/vault.test.js` (the cryptography), and the browser
-  tests `test/e2e/e2ee-e2e.js`, `strict-e2e.js` and `csp-e2e.js`.
+  tests `test/e2e/e2ee-e2e.js`, `strict-e2e.js`, `csp-e2e.js` and
+  `passkey-e2e.js`.

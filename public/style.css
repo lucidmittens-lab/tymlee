@@ -1689,3 +1689,7 @@ button.gui-day {
     padding: 12px 14px 14px;
   }
 }
+
+/* Passkeys: the passkey button leads the sign-in form. */
+.gform .gform-passkey { width: 100%; margin-bottom: 4px; }
+.gpasskeys > .gform-go { margin: 4px 0 8px; }

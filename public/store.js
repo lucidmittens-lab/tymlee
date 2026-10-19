@@ -52,6 +52,74 @@
         setInterval(() => { if (w.document.visibilityState !== 'hidden') on.tick(); }, ms);
       },
       redirectUrl: () => w.location.origin + w.location.pathname,
+      passkeys: w.PublicKeyCredential && w.navigator.credentials ? browserPasskeys(w) : null,
+    };
+  }
+
+  // ---- passkeys in the browser (WebAuthn) ------------------------------------
+  // get/create take the server's JSON options and ask for the PRF extension;
+  // they return the credential as JSON for the server, *without* the PRF
+  // result, and the PRF secret separately (it must never be sent anywhere).
+  function browserPasskeys(w) {
+    const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const unb64u = (text) => {
+      const s = atob(String(text).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((String(text).length + 3) % 4));
+      return Uint8Array.from(s, (c) => c.charCodeAt(0));
+    };
+    const creds = (list) => (list || []).map((c) => ({ ...c, type: c.type || 'public-key', id: unb64u(c.id) }));
+    const secretOf = (cred) => {
+      const r = cred.getClientExtensionResults && cred.getClientExtensionResults().prf;
+      const first = r && r.results && r.results.first;
+      return first ? new Uint8Array(first) : null;
+    };
+    const prfInput = () => w.TymleeVault.PRF_INPUT;
+    return {
+      random: () => b64u(w.crypto.getRandomValues(new Uint8Array(32))),
+      async get(json, { allow } = {}) {
+        const publicKey = { ...json, challenge: unb64u(json.challenge), allowCredentials: creds(allow ? allow.map((id) => ({ id })) : json.allowCredentials) };
+        publicKey.extensions = { ...(json.extensions || {}), prf: { eval: { first: prfInput() } } };
+        const cred = await w.navigator.credentials.get({ publicKey });
+        const r = cred.response;
+        return {
+          id: cred.id,
+          secret: secretOf(cred),
+          credential: {
+            id: cred.id, rawId: cred.id, type: 'public-key',
+            response: {
+              clientDataJSON: b64u(r.clientDataJSON), authenticatorData: b64u(r.authenticatorData), signature: b64u(r.signature),
+              ...(r.userHandle ? { userHandle: b64u(r.userHandle) } : {}),
+            },
+            clientExtensionResults: {},
+            authenticatorAttachment: cred.authenticatorAttachment || undefined,
+          },
+        };
+      },
+      async create(json) {
+        const publicKey = {
+          ...json,
+          challenge: unb64u(json.challenge),
+          user: { ...json.user, id: unb64u(json.user.id) },
+          excludeCredentials: creds(json.excludeCredentials),
+          extensions: { ...(json.extensions || {}), prf: { eval: { first: prfInput() } } },
+        };
+        const cred = await w.navigator.credentials.create({ publicKey });
+        const r = cred.response;
+        const prf = cred.getClientExtensionResults ? cred.getClientExtensionResults().prf : null;
+        return {
+          id: cred.id,
+          secret: secretOf(cred),
+          prfEnabled: prf ? Boolean(prf.enabled || (prf.results && prf.results.first)) : false,
+          credential: {
+            id: cred.id, rawId: cred.id, type: 'public-key',
+            response: {
+              attestationObject: b64u(r.attestationObject), clientDataJSON: b64u(r.clientDataJSON),
+              ...(r.getTransports ? { transports: r.getTransports() } : {}),
+            },
+            clientExtensionResults: {},
+            authenticatorAttachment: cred.authenticatorAttachment || undefined,
+          },
+        };
+      },
     };
   }
 
@@ -789,6 +857,7 @@
         '',
         'Or use your recovery key:',
         '  /recover XXXXX-XXXXX-XXXXX-XXXXX',
+        ...(env.passkeys ? ['', 'Or, if you added a passkey that unlocks: /passkey unlock'] : []),
         '',
         "Lost both? /reset-encryption starts over with a new key. The synced log can't be decrypted without the old key, so it is deleted.",
       ].join('\n'), 'key');
@@ -860,7 +929,11 @@
         }
         throw error;
       }
-      if (data) { lock(); return; }
+      if (data) {
+        if (pendingPasskey && await unlockWithSecret(pendingPasskey, data.recovery && data.recovery.kid)) return;
+        lock();
+        return;
+      }
       // Encryption is required: an account without it gets it now, before
       // anything is uploaded (vaultOpen holds sync until then).
       vault = { mode: 'none' };
@@ -988,6 +1061,9 @@
       if (keyring.error) throw keyring.error;
       if (owner !== who) return '';
       recoveryShown(recovery);
+      // Copies locked with passkeys hold the old key: drop them (add the
+      // passkeys again for the new one).
+      if ((await passkeyWraps()) !== null) await client.from('keyring').update({ passkeys: [] }).eq('user_id', who);
       // Keep only what this device typed and hasn't sent yet.
       entries = T.applyOps([], queue.filter((q) => q.op === 'put'));
       queue = queue.filter((q) => q.op === 'put');
@@ -1026,6 +1102,137 @@
       }
       if (vault.mode === 'none') setTimeout(autoEncrypt, 0);
       return vault.mode === 'ready' || vault.mode === 'plain';
+    }
+
+    // ---- passkeys ----------------------------------------------------------------
+    // Signing in is Supabase's (two-step, so the same prompt can also ask for
+    // the PRF secret). Unlocking is tymlee's: keyring.passkeys holds the
+    // account key locked with each PRF-capable passkey (vault.js).
+    let pendingPasskey = null; // { id, secret } from a passkey sign-in, until the vault is ready
+    const PASSKEY_SETUP = 'passkeys need the latest supabase/schema.sql, and Passkeys turned on in Supabase (Authentication → Passkeys)';
+
+    function requirePasskeys() {
+      requireClient();
+      if (!env.passkeys) throw new Error(`passkeys work in the website, not on ${env.place}`);
+    }
+    function friendly(error) {
+      const m = (error && error.message) || String(error);
+      if (/NotAllowedError|not allowed|cancel|abort/i.test(m) || (error && error.name === 'NotAllowedError')) return new Error('passkey cancelled');
+      if (/passkey.*(disabled|not enabled)|404|not found/i.test(m)) return new Error(PASSKEY_SETUP);
+      return error instanceof Error ? error : new Error(m);
+    }
+    async function passkeyWraps() {
+      const { data, error } = await client.from('keyring').select('passkeys').maybeSingle();
+      if (error) {
+        if (error.code === '42703' || /column .*passkeys.* does not exist/i.test(error.message || '')) return null;
+        throw error;
+      }
+      return data && Array.isArray(data.passkeys) ? data.passkeys : [];
+    }
+    async function savePasskeyWraps(list) {
+      const { error } = await client.from('keyring').update({ passkeys: list }).eq('user_id', owner);
+      if (error) throw error;
+    }
+    async function unlockWithSecret({ id, secret }, kid) {
+      const wraps = await passkeyWraps();
+      const w = wraps && wraps.find((x) => x.id === id && (!kid || !x.kid || x.kid === kid));
+      if (!w) return false;
+      let raw;
+      try { raw = await V.unwrapWithSecret(w, secret, id); } catch (_) { return false; }
+      await unlock(raw);
+      onNotice('unlocked with your passkey', 'ok');
+      return true;
+    }
+
+    async function signInWithPasskey() {
+      requirePasskeys();
+      try {
+        const start = await client.auth.passkey.startAuthentication();
+        if (start.error) throw start.error;
+        const got = await env.passkeys.get(start.data.options);
+        const { data, error } = await client.auth.passkey.verifyAuthentication({ challengeId: start.data.challenge_id, credential: got.credential });
+        if (error) throw error;
+        pendingPasskey = got.secret ? { id: got.id, secret: got.secret } : null;
+        await setUser(data.user || (data.session && data.session.user));
+      } catch (err) {
+        throw friendly(err);
+      } finally {
+        pendingPasskey = null;
+      }
+      if (vault.mode === 'locked') onNotice("this passkey signed you in, but it can't unlock your log on this device yet (it may not support unlocking, or was added before). Use /link or /recover once; then Settings → Passkeys → Add a passkey here.", 'dim');
+    }
+
+    // A local prompt (no server challenge) for the PRF secret of one of
+    // `ids`: unlocking needs no proof to the server, only the secret.
+    async function passkeySecret(ids) {
+      const got = await env.passkeys.get({ challenge: env.passkeys.random(), userVerification: 'required', timeout: 120000 }, { allow: ids });
+      return got;
+    }
+
+    async function addPasskey(name) {
+      requirePasskeys();
+      requireKey();
+      const wraps = await passkeyWraps();
+      if (!wraps) throw new Error(PASSKEY_SETUP);
+      let made;
+      let meta;
+      try {
+        const start = await client.auth.passkey.startRegistration();
+        if (start.error) throw start.error;
+        made = await env.passkeys.create(start.data.options);
+        const v = await client.auth.passkey.verifyRegistration({ challengeId: start.data.challenge_id, credential: made.credential });
+        if (v.error) throw v.error;
+        meta = v.data || {};
+        if (name && meta.id) await client.auth.passkey.update({ passkeyId: meta.id, friendlyName: String(name).slice(0, 120) });
+      } catch (err) {
+        throw friendly(err);
+      }
+      // The secret: some browsers give it when the passkey is made, others
+      // only when it's used (one more touch, here).
+      let secret = made.secret;
+      if (!secret && made.prfEnabled) {
+        try { secret = (await passkeySecret([made.id])).secret; } catch (_) { secret = null; }
+      }
+      if (!secret) return { signIn: true, unlock: false };
+      const copy = await V.wrapWithSecret(vault.raw, secret, made.id);
+      const entry = { id: made.id, pid: meta.id || '', kid: await V.keyId(vault.raw), at: Date.now(), name: name || '', ...copy };
+      await savePasskeyWraps([...wraps.filter((x) => x.id !== made.id), entry]);
+      return { signIn: true, unlock: true };
+    }
+
+    // A signed-in device without the key: unlock with a passkey instead of
+    // /link or the recovery key.
+    async function unlockWithPasskey() {
+      requirePasskeys();
+      if (!user) throw new Error('not signed in · /login you@example.com');
+      if (vault.mode === 'ready') throw new Error('this device already has the key');
+      const wraps = await passkeyWraps();
+      if (!wraps || !wraps.length) throw new Error('no passkey can unlock this account yet: add one (Settings → Passkeys) on a device that has the key');
+      let got;
+      try { got = await passkeySecret(wraps.map((x) => x.id)); } catch (err) { throw friendly(err); }
+      if (!got.secret) throw new Error("this passkey can't unlock (its app or this browser doesn't support it)");
+      const { data } = await fetchKeyring();
+      if (!(await unlockWithSecret({ id: got.id, secret: got.secret }, data && data.recovery && data.recovery.kid))) throw new Error("that passkey can't unlock this account's current key");
+      await sync({ full: true });
+    }
+
+    // Supabase's passkeys for this account, and which of them unlock.
+    async function listPasskeys() {
+      requireClient();
+      if (!user) throw new Error('not signed in · /login you@example.com');
+      const { data, error } = await client.auth.passkey.list();
+      if (error) throw friendly(error);
+      const wraps = (await passkeyWraps()) || [];
+      return (data || []).map((p) => ({ id: p.id, name: p.friendly_name || 'passkey', created: p.created_at, used: p.last_used_at || '', unlocks: wraps.some((x) => x.pid === p.id) }));
+    }
+
+    async function removePasskey(passkeyId) {
+      requireClient();
+      if (!user) throw new Error('not signed in · /login you@example.com');
+      const { error } = await client.auth.passkey.delete({ passkeyId });
+      if (error) throw friendly(error);
+      const wraps = await passkeyWraps();
+      if (wraps && wraps.some((x) => x.pid === passkeyId)) await savePasskeyWraps(wraps.filter((x) => x.pid !== passkeyId));
     }
 
     function requireKey() {
@@ -1203,6 +1410,12 @@
       }
       client.auth.onAuthStateChange((event, session) => {
         // Supabase asks that no other Supabase calls are awaited inside this callback.
+        if (event === 'SIGNED_OUT' && user && !signingOut) {
+          // Not /logout: the session ended (its renewal was refused, or the
+          // browser cleared it). Kept for /problem.
+          try { storage.setItem('tymlee.lastSignOut', JSON.stringify({ at: Date.now(), online: env.isOnline(), error: lastError || '' })); } catch (_) { /* fine */ }
+          setTimeout(() => onNotice(`you were signed out: the session ended. Sign in again${env.passkeys ? ' (with a passkey it is one touch)' : ''}; your log on this device is kept.`, 'err'), 0);
+        }
         setTimeout(() => setUser(session ? session.user : null), 0);
       });
       const { data } = await client.auth.getSession();
@@ -1237,11 +1450,13 @@
       await setUser(data.user || (data.session && data.session.user));
     }
 
+    let signingOut = false;
     async function logout() {
       requireClient();
       const who = owner;
       await chain; // let any in-progress sync finish first
-      const { error } = await client.auth.signOut();
+      signingOut = true;
+      const { error } = await client.auth.signOut().finally(() => setTimeout(() => { signingOut = false; }, 1000));
       if (error) throw error;
       await setUser(null);
       // Don't leave the account's entries behind on this browser.
@@ -1283,6 +1498,15 @@
       unlockWith,
       newRecoveryKey,
       checkRecovery,
+      signInWithPasskey,
+      addPasskey,
+      unlockWithPasskey,
+      listPasskeys,
+      removePasskey,
+      get passkeysAvailable() { return Boolean(configured && env.passkeys); },
+      lastSignOut() {
+        try { return JSON.parse(storage.getItem('tymlee.lastSignOut') || 'null'); } catch (_) { return null; }
+      },
       get recoveryConfirmed() { return recoveryConfirmed(); },
       resetEncryption,
       get encryption() { return vault.mode; },

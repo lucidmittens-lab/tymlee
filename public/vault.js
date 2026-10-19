@@ -5,8 +5,9 @@
 // the browser before upload, so the server (and whoever runs it) only ever
 // stores ciphertext. The master key itself is stored on the server only in
 // "wrapped" (encrypted) copies: one locked with the account's recovery key,
-// and briefly one locked with a /link code while adding a device. Codes are
-// shown on screen and never sent anywhere.
+// briefly one locked with a /link code while adding a device, and one per
+// passkey that supports the WebAuthn PRF extension. Codes are shown on screen
+// and never sent anywhere; a passkey's PRF secret never leaves the device.
 (function (root) {
   'use strict';
 
@@ -184,6 +185,41 @@
     return entry;
   }
 
+  // ---- passkeys (WebAuthn PRF) ---------------------------------------------
+  // A passkey with the PRF extension turns a fixed input into a 32-byte secret
+  // only it can produce. The master key is locked with a key derived from that
+  // secret (HKDF-SHA-256, a random salt per copy), bound to the passkey's
+  // credential id, so a copy can't be moved to another passkey's entry.
+  const PRF_INPUT = enc.encode('tymlee: unlock the log, v1');
+
+  async function keyFromSecret(secret, salt) {
+    const base = await subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
+    return subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode('tymlee passkey wrap v1') },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt'],
+    );
+  }
+
+  // { v, salt, iv, data } for one passkey; `secret` is the PRF output (bytes).
+  async function wrapWithSecret(rawBase64, secret, credentialId) {
+    if (!secret || secret.byteLength < 32) throw new Error('the passkey did not give a usable secret');
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const key = await keyFromSecret(secret, salt);
+    const data = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(`passkey:${credentialId}`) }, key, fromBase64(rawBase64)));
+    return { v: 1, salt: toBase64(salt), iv: toBase64(iv), data: toBase64(data) };
+  }
+
+  // Throws if this isn't the passkey (or secret) the copy was made with.
+  async function unwrapWithSecret(blob, secret, credentialId) {
+    const key = await keyFromSecret(secret, fromBase64(blob.salt));
+    const raw = await subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(blob.iv), additionalData: enc.encode(`passkey:${credentialId}`) }, key, fromBase64(blob.data));
+    return toBase64(new Uint8Array(raw));
+  }
+
   // Fields kept in their own column (servers without sealed entries) are
   // encrypted like text, bound to the entry id plus "#<field>".
   const encryptField = (key, id, field, value) => encryptWith(PREFIX, key, `${id}#${field}`, value);
@@ -193,7 +229,7 @@
 
   const api = {
     PREFIX, newRecoveryCode, newLinkCode, normalizeCode, looksLikeCode,
-    newMasterKey, importMasterKey, wrap, unwrap, keyId, isEncrypted, encryptText, decryptText,
+    newMasterKey, importMasterKey, wrap, unwrap, keyId, PRF_INPUT, wrapWithSecret, unwrapWithSecret, isEncrypted, encryptText, decryptText,
     isSealed, sealEntry, openEntry, encryptNotes, decryptNotes, encryptField, decryptField,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

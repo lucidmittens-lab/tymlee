@@ -719,8 +719,10 @@
 
     // A small form: fields [{ name, label, value, type, placeholder }], then
     // onSubmit(values). A range picker when `range` is set.
-    function form(heading, { intro, fields = [], range, submit, danger }, onSubmit) {
+    function form(heading, { lead = [], intro, fields = [], range, submit, danger }, onSubmit) {
       const f = el('form', 'gform');
+      // lead: buttons above everything else ([label, onClick, cls]).
+      for (const [label, onClick, cls] of lead) f.append(button(label, cls || 'gform-go', onClick));
       if (intro) f.append(el('p', 'gform-intro', intro));
       const inputs = {};
       const picked = {};
@@ -1289,6 +1291,32 @@
       sheet('Report a problem', intro, box, row);
     }
 
+    // Passkeys: sign in (and unlock, where the passkey supports it) with
+    // Face ID, Touch ID or Windows Hello.
+    async function passkeySheet() {
+      const box = el('div', 'gtick gpasskeys');
+      const ready = store.encryption === 'ready';
+      box.append(el('p', 'gform-intro', ready
+        ? 'A passkey signs you in with Face ID, Touch ID or Windows Hello, and unlocks your encrypted log on a new device: no email code, no link code. It syncs with your password manager (iCloud Keychain, Google Password Manager).'
+        : 'Unlock this device first (a link code or your recovery key); then add a passkey here.'));
+      const add = button('Add a passkey', 'gform-go', async () => { await runMenu('Passkeys', '/passkey add', { brief: true }); passkeySheet(); });
+      add.disabled = !ready;
+      box.append(add);
+      sheet('Passkeys', box);
+      let list = [];
+      try { list = await store.listPasskeys(); } catch (err) { box.append(el('p', 'gform-intro err', err.message)); return; }
+      list.forEach((p, i) => {
+        const r = el('div', 'gtick-row gtrash-row');
+        const words = el('span', 'gtick-words');
+        words.append(el('span', 'gtick-text', p.name), el('span', 'gtick-sub', `${p.unlocks ? 'signs in and unlocks' : 'signs in only'} · added ${String(p.created).slice(0, 10)}${p.used ? ` · used ${String(p.used).slice(0, 10)}` : ''}`));
+        const remove = button('Remove', 'gform-range', () => form('Remove passkey', {
+          intro: `"${p.name}" won't sign in or unlock any more. Also delete it from your password manager.`, submit: 'Remove', danger: true,
+        }, async () => { await runMenu('Passkeys', `/passkey remove ${i + 1}`, { brief: true }); passkeySheet(); }));
+        r.append(words, remove);
+        box.append(r);
+      });
+    }
+
     // Deleted entries (30 days), each with Restore.
     function trashSheet() {
       const list = shell.trashList();
@@ -1351,6 +1379,7 @@
       group('Account', signedIn ? [
         row(store.user.email, (state && state.sync && state.sync.label) || '', () => runMenu('Account', '/whoami')),
         row('Sync now', '', () => runMenu('Sync', '/sync')),
+        ...(store.passkeysAvailable ? [row('Passkeys', 'Face ID, Touch ID', () => passkeySheet())] : []),
         row('Sign out', '', () => form('Sign out', { intro: 'Your log stays in your account. This device forgets it, and its key.', submit: 'Sign out' }, () => runMenu('Sign out', '/logout'))),
       ] : [row('Sign in', 'to sync your devices', () => signIn())]);
       if (signedIn) {
@@ -1362,6 +1391,7 @@
           }, (v) => v.key && runMenu('Recovery key', `/recovery check ${v.key}`)), store.recoveryConfirmed === false ? 'warn' : ''),
           row('New recovery key', '', () => form('New recovery key', { intro: 'Your old recovery key stops working.', submit: 'Make a new key' }, () => runMenu('Recovery key', '/recovery'))),
         ] : [
+          ...(store.passkeysAvailable ? [row('Unlock with a passkey', '', () => runMenu('Unlock', '/passkey unlock', { brief: true }))] : []),
           row('Enter a link code', '', () => form('Link this device', { intro: 'On a device that is set up, choose Settings → Link a device, and type the code it shows.', fields: [{ name: 'code', label: 'Link code', placeholder: 'XXXX-XXXX-XXXX' }], submit: 'Link' }, (v) => v.code && runMenu('Link', `/link ${v.code}`))),
           row('Use recovery key', '', () => form('Recovery key', { fields: [{ name: 'key', label: 'Recovery key', placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX' }], submit: 'Unlock' }, (v) => v.key && runMenu('Recovery', `/recover ${v.key}`))),
           row('Reset encryption', '', () => form('Reset encryption', {
@@ -1389,7 +1419,8 @@
     }
 
     function signIn() {
-      form('Sign in', { intro: "We'll email you a 6-digit code.", fields: [{ name: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' }], submit: 'Send code' }, async (v) => {
+      const passkey = store.passkeysAvailable ? [['Sign in with a passkey', () => { closeSheet(); runMenu('Sign in', '/passkey login', { brief: true }); }, 'gform-go gform-passkey']] : [];
+      form('Sign in', { lead: passkey, intro: passkey.length ? 'Or get a 6-digit code by email:' : "We'll email you a 6-digit code.", fields: [{ name: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' }], submit: 'Send code' }, async (v) => {
         if (!v.email) return;
         await runMenu('Sign in', `/login ${v.email}`);
         form('Sign in', { intro: `Enter the code sent to ${v.email}.`, fields: [{ name: 'code', label: 'Code', placeholder: '123456' }], submit: 'Sign in' },

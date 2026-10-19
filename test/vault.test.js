@@ -72,3 +72,16 @@ test('work orders are sealed with the entry', async () => {
   assert.equal(await V.decryptField(key, 'id-1', 'wo', col), '4471');
   await assert.rejects(V.decryptNotes(key, 'id-1', col));
 });
+
+test('a passkey secret locks the master key, bound to that passkey', async () => {
+  const raw = V.newMasterKey();
+  const secret = crypto.getRandomValues(new Uint8Array(32));
+  const blob = await V.wrapWithSecret(raw, secret, 'cred-A');
+  assert.ok(!JSON.stringify(blob).includes(raw), 'the key is not in the copy');
+  assert.equal(await V.unwrapWithSecret(blob, secret, 'cred-A'), raw);
+  await assert.rejects(V.unwrapWithSecret(blob, crypto.getRandomValues(new Uint8Array(32)), 'cred-A'), 'another secret fails');
+  await assert.rejects(V.unwrapWithSecret(blob, secret, 'cred-B'), 'moved to another passkey fails');
+  await assert.rejects(V.wrapWithSecret(raw, new Uint8Array(8), 'cred-A'), 'a short secret is refused');
+  const again = await V.wrapWithSecret(raw, secret, 'cred-A');
+  assert.notEqual(again.data, blob.data, 'a fresh salt and IV each time');
+});

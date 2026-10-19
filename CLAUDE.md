@@ -71,4 +71,4 @@ e2ee strict csp`), and ship as a normal version.
 
 `SECURITY.md` is the threat model. Changes to `vault.js`, `store.js`'s sync
 and key handling, `supabase/schema.sql` or `public/_headers` should keep it
-true (and `strict-e2e.js`, `e2ee-e2e.js`, `csp-e2e.js` passing).
+true (and `strict-e2e.js`, `e2ee-e2e.js`, `csp-e2e.js`, `passkey-e2e.js` passing).

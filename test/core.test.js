@@ -1212,3 +1212,74 @@ test('timeline: an entry left running until the next morning is not drawn on tha
     T.setMidnight('start');
   }
 });
+
+test('forms: a paid break counts in the hours but is no category or title', () => {
+  const at = (h) => Date.UTC(2026, 9, 19, h);
+  const log = [{ id: 'a', ts: at(9), text: 'ACME x' }, { id: 'b', ts: at(10), text: '/break-paid' }, { id: 'c', ts: at(11), text: 'ACME y' },
+    { id: 'd', ts: at(12), text: '/break-unpaid' }, { id: 'e', ts: at(13), text: 'NORTHSTAR z' }, { id: 'f', ts: at(14), text: '/off' }];
+  const out = T.fillForm('cats: %{category}\ntitles: %{titles}\nhours: %{hours}\n%{each category}- %{category} %{hours}\n%{end}', log, T.parseRange('2026-10-19', at(15)), at(15), () => '').text;
+  assert.match(out, /cats: ACME, NORTHSTAR\n/);
+  assert.match(out, /titles: x, y, z\n/);
+  assert.match(out, /hours: 4:00\n/);
+  assert.ok(!/break/.test(out), out);
+});
+
+test('/edit: an empty day gets its own header, and new lines land on it', () => {
+  const now = Date.UTC(2026, 9, 19, 15);
+  const range = T.parseRange('2026-10-12', now);
+  const ed = T.formatEditable([], range, now);
+  assert.ok(ed.text.includes('Mon 2026-10-12') && !ed.text.includes('2026-10-19'), ed.text);
+  const r = T.parseEditable(`${ed.text}  09:00  ZENITH review\n  12:00  /off\n`, ed.items, now);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.ops.map((o) => T.ymd(o.entry.ts)), ['2026-10-12', '2026-10-12']);
+  const week = T.formatEditable([{ id: 'a', ts: Date.UTC(2026, 9, 15, 9), text: 'ACME x', sid: 10 }], { from: Date.UTC(2026, 9, 12), to: Date.UTC(2026, 9, 19), label: 'week' }, now);
+  assert.deepEqual(week.text.split('\n').filter((l) => /^\w{3} \d{4}/.test(l)).map((l) => l.slice(4)), ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18']);
+});
+
+test('setEnd: ending an entry adds an Off or moves the one after it', () => {
+  const at = (h, m = 0) => Date.UTC(2026, 9, 19, h, m);
+  const now = at(18);
+  const log = [
+    { id: 'a', ts: at(9), text: 'ACME x', sid: 10 }, { id: 'b', ts: at(10), text: 'NORTHSTAR y', sid: 20 },
+    { id: 'c', ts: at(12), text: '/off', sid: 30 }, { id: 'd', ts: at(13), text: 'ZENITH z', sid: 40 },
+    { id: 'e', ts: at(14), text: '/break-paid', sid: 50 }, { id: 'f', ts: at(14, 15), text: 'MOJO w', sid: 60 },
+  ];
+  const one = (r) => r.ops && r.ops.length === 1 && r.ops[0];
+  let r = T.setEnd(log, 'a', '09:45', now); // a task follows: an Off in the gap
+  assert.ok(one(r).entry.text === '/off' && one(r).entry.ts === at(9, 45) && one(r).entry.id !== 'b');
+  assert.match(T.setEnd(log, 'a', '10:30', now).error, /can't end after the next entry starts/);
+  r = T.setEnd(log, 'b', '11:30', now); // an Off follows: it moves
+  assert.ok(one(r).entry.id === 'c' && one(r).entry.ts === at(11, 30));
+  assert.ok(one(T.setEnd(log, 'b', '12:30', now)).entry.id === 'c');
+  assert.match(T.setEnd(log, 'b', '13:30', now).error, /can't end after/);
+  r = T.setEnd(log, 'd', '13:50', now); // a break follows, ending earlier: an Off, the break stays
+  assert.ok(one(r).entry.text === '/off' && one(r).entry.ts === at(13, 50));
+  r = T.setEnd(log, 'd', '14:05', now); // ending later: the break moves
+  assert.ok(one(r).entry.id === 'e' && one(r).entry.ts === at(14, 5));
+  r = T.setEnd(log, 'f', '16:00', now); // the running one: an Off
+  assert.ok(one(r).entry.text === '/off' && one(r).entry.ts === at(16));
+  assert.match(T.setEnd(log, 'f', '19:00', now).error, /future/);
+  assert.deepEqual(T.setEnd(log, 'b', '12:00', now).ops, []);
+  assert.deepEqual(T.setEnd(log, 'b', '', now).ops, []);
+  assert.match(T.setEnd(log, 'b', 'noon', now).error, /should look like/);
+  // Past midnight: an end earlier than the start is the next day.
+  const night = [{ id: 'n', ts: Date.UTC(2026, 9, 18, 22), text: 'OOB night', sid: 70 }];
+  assert.equal(one(T.setEnd(night, 'n', '02:00', now)).entry.ts, Date.UTC(2026, 9, 19, 2));
+});
+
+test('insertEntry: a new entry from the timeline; inside a block it resumes afterwards', () => {
+  const at = (h, m = 0) => Date.UTC(2026, 9, 19, h, m);
+  const now = at(18);
+  const log = [{ id: 'a', ts: at(13), text: 'ACME drawings', wo: '4410021', sid: 10 }, { id: 'b', ts: at(15), text: '/off', sid: 20 }];
+  let r = T.insertEntry(log, { ts: at(14, 30), text: 'mtg call', end: '14:45' }, now);
+  assert.deepEqual(r.ops.map((o) => [T.hhmm(o.entry.ts), o.entry.text]), [['14:30', 'mtg call'], ['14:45', 'ACME drawings']]);
+  assert.equal(r.ops[1].entry.wo, '4410021');
+  r = T.insertEntry(log, { ts: at(14, 30), text: 'mtg call', end: '15:00' }, now); // ends where the block did: nothing to resume
+  assert.deepEqual(r.ops.map((o) => T.hhmm(o.entry.ts)), ['14:30']);
+  r = T.insertEntry(log, { ts: at(14, 30), text: 'mtg call' }, now); // no end: runs until the next entry
+  assert.deepEqual(r.ops.map((o) => T.hhmm(o.entry.ts)), ['14:30']);
+  r = T.insertEntry(log, { ts: at(16), text: 'ZENITH review', end: '16:45' }, now); // in off time: an Off after it
+  assert.deepEqual(r.ops.map((o) => [T.hhmm(o.entry.ts), o.entry.text]), [['16:00', 'ZENITH review'], ['16:45', '/off']]);
+  assert.match(T.insertEntry(log, { ts: at(19), text: 'x' }, now).error, /future/);
+  assert.match(T.insertEntry(log, { ts: at(16), text: '' }, now).error, /needs some text/);
+});

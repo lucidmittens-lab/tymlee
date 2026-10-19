@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.5';
+  const VERSION = '2.0.6';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -865,12 +865,14 @@
           const whole = s.whole == null ? s.duration : s.whole;
           return {
             n: s.n, id: s.id, category: s.category, note: s.note, notes: s.notes || '', files: s.files || '', wo: s.wo || '', eq: s.eq || '',
+            // Off time is nothing: no block, no room (unpaid breaks still show).
+            isOff: s.text === OFF,
             off: s.off, running: s.running, start: s.ts, end: Math.min(s.end, dayEnd, s.off ? lastEnd : Infinity),
             from, duration: whole, clipped: from + whole > dayEnd, cont: Boolean(s.cont),
             slot: s.off ? null : slots.has(s.category.toLowerCase()) ? slots.get(s.category.toLowerCase()) : 0,
           };
         })
-        .filter((b) => (b.end > b.start || !b.off) && !(b.off && b.cont)); // no off time carried over from the night before
+        .filter((b) => (b.end > b.start || !b.off) && !(b.off && b.cont) && !b.isOff); // no off time carried over from the night before
       // The day's total: as reports count it (/midnight).
       day.totalMs = splitNights ? worked.reduce((sum, s) => sum + s.duration, 0) : worked.reduce((sum, s) => sum + (s.cont ? 0 : s.whole == null ? s.duration : s.whole), 0);
       if (!day.blocks.length) continue;
@@ -1064,6 +1066,8 @@
     if (key === 'entry') return spans.map((s) => ({ spans: [s], where: idTag(s.n) }));
     const groups = new Map();
     for (const s of spans) {
+      // A paid break is no category of its own (its time is in the totals).
+      if (key === 'category' && isMarker(s.text)) continue;
       // An entry with several pieces of equipment goes under each of them.
       const values = key === 'wo' ? [s.wo || ''] : key === 'equipment' ? (s.eq ? eqNames(s.eq) : ['']) : [s.category];
       for (const value of values) {
@@ -1101,7 +1105,8 @@
     return {
       date,
       day: oneDay ? FULL_DAY_NAMES[new Date(range.from).getDay()].replace(/^./, (c) => c.toUpperCase()) : '',
-      category: uniq(spans.map((s) => s.category)).join(', '),
+      // Paid breaks count in the hours but aren't a category (or a title).
+      category: uniq(spans.filter((s) => !isMarker(s.text)).map((s) => s.category)).join(', '),
       wo: none === 'wo' ? '(none)' : uniq(spans.map((s) => s.wo)).join(', '),
       equipment: none === 'equipment' ? '(none)' : eq || uniq(spans.flatMap((s) => eqNames(s.eq))).join(', '),
       in: first ? clock(first.ts) : '',
@@ -1113,7 +1118,7 @@
       hours: formatHM(ms),
       dur: formatHM(ms),
       down: first ? formatHM(Math.max(0, lastEnd - first.ts - ms)) : '0:00',
-      titles: uniq(spans.map((s) => s.note || s.category)).join(', '),
+      titles: uniq(spans.filter((s) => !isMarker(s.text)).map((s) => s.note || s.category)).join(', '),
       notes: spans.filter((s) => s.notes).map((s) => s.notes).join('\n'),
       files: filesList(spans.filter((s) => s.files).map((s) => s.files).join('\n')),
       paths: spans.filter((s) => s.files).map((s) => s.files).join('\n'),
@@ -1256,19 +1261,91 @@
       .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid, files: s.files || '' }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? Math.max(...items.map((it) => idTag(it.n).length)) : 1;
-    let day = '';
-    for (const it of items) {
-      const d = ymd(it.ts);
-      if (d !== day) {
-        day = d;
-        lines.push(`${DAY_NAMES[new Date(it.ts).getDay()]} ${d}`);
-      }
-      lines.push(`  ${idTag(it.n).padEnd(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
-      lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
-      lines.push(...filesLines(it.files, ' '.repeat(numWidth + 11)));
+    // Every day of a range up to a month gets its header, with or without
+    // entries, so any of them can be added to; longer ranges list the days
+    // that have entries. (Days after today are left out.)
+    const header = (ts) => `${DAY_NAMES[new Date(ts).getDay()]} ${ymd(ts)}`;
+    const lastDay = Math.min(Number.isFinite(range.to) ? range.to : now, addDays(startOfDay(now), 1));
+    const first = Number.isFinite(range.from) ? startOfDay(range.from) : null;
+    const days = [];
+    if (first != null && addDays(first, 31) >= lastDay) {
+      for (let d = first; d < lastDay; d = addDays(d, 1)) days.push(d);
     }
-    if (!items.length) lines.push(`${DAY_NAMES[new Date(now).getDay()]} ${ymd(now)}`);
+    for (const it of items) if (!days.includes(startOfDay(it.ts))) days.push(startOfDay(it.ts));
+    if (!days.length) days.push(first != null && first < lastDay ? first : startOfDay(now));
+    days.sort((x, y) => x - y);
+    for (const d of days) {
+      lines.push(header(d));
+      for (const it of items) {
+        if (startOfDay(it.ts) !== d) continue;
+        lines.push(`  ${idTag(it.n).padEnd(numWidth)}  ${it.wo ? `${woTag(it.wo)}  ` : ''}${hhmm(it.ts)}  ${it.text}`);
+        lines.push(...notesLines(it.notes, ' '.repeat(numWidth + 11)));
+        lines.push(...filesLines(it.files, ' '.repeat(numWidth + 11)));
+      }
+    }
     return { text: lines.join('\n') + '\n', items };
+  }
+
+  // The GUI's End field: an entry ends where the next one starts, so ending
+  // it at `value` ("HH:MM", on its start day, or the next day if earlier)
+  // adds an Off there, or moves the Off or break that follows it. Returns
+  // { ops } (none when nothing changes) or { error }.
+  function setEnd(entries, id, value, now) {
+    const spans = withSpans(entries, now);
+    const i = spans.findIndex((x) => x.id === id);
+    if (i < 0) return { error: 'that entry is gone' };
+    const s = spans[i];
+    const next = spans[i + 1];
+    const v = String(value || '').trim();
+    if (!v) return { ops: [] };
+    const m = v.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m || +m[1] > 23 || +m[2] > 59) return { error: 'the end time should look like 17:30' };
+    const at = new Date(s.ts);
+    at.setHours(+m[1], +m[2], 0, 0);
+    let end = at.getTime();
+    if (end <= s.ts) {
+      const later = new Date(addDays(startOfDay(s.ts), 1));
+      later.setHours(+m[1], +m[2], 0, 0);
+      end = later.getTime();
+    }
+    if (!s.running && end === s.end) return { ops: [] };
+    if (end > now) return { error: `${hhmm(end)} is in the future` };
+    if (end - s.ts > 24 * 3600000) return { error: 'that is more than 24 hours after it started' };
+    const original = (e) => entries.find((x) => x.id === e.id);
+    const off = () => ({ op: 'put', entry: { id: uuid(), ts: end, text: OFF } });
+    if (!next) return { ops: [off()] };
+    const after = spans[i + 2];
+    // Off moves either way; a break only later (moving it earlier would
+    // make it longer than it was).
+    const move = next.text === OFF || (isMarker(next.text) && end > next.ts);
+    if (move && (!after || end < after.ts)) return { ops: [{ op: 'put', entry: { ...original(next), ts: end } }] };
+    if (end < next.ts) return { ops: [off()] };
+    return { error: `it can't end after the next entry starts (${clock(next.ts)}, ${idTag(next.n)}): change that one's start instead` };
+  }
+
+  // A new entry at `ts` (clicked on the timeline): it runs until the next
+  // entry, or until `end` ("HH:MM", optional). Inside another entry with an
+  // end, that one picks up again afterwards (a call in the middle of a
+  // block), rather than leaving off time. Returns { ops, entry } or { error }.
+  function insertEntry(entries, { ts, text, end }, now) {
+    const { category, note } = parseInput(text || '');
+    const t = note ? `${category} ${note}` : category;
+    if (!t) return { error: 'the entry needs some text (a category at least)' };
+    if (t.startsWith('/')) return { error: 'entries can\'t start with "/"' };
+    if (t.length > MAX_TEXT) return { error: `entries are limited to ${MAX_TEXT} characters` };
+    if (!Number.isFinite(ts)) return { error: 'the start time should look like 14:30' };
+    if (ts > now) return { error: `${hhmm(ts)} is in the future` };
+    const entry = { id: uuid(), ts, text: t };
+    if (!String(end || '').trim()) return { ops: [{ op: 'put', entry }], entry };
+    const host = withSpans(entries, now).find((s) => !s.off && s.ts < ts && ts < s.end);
+    const r = setEnd(sortEntries([...entries, entry]), entry.id, end, now);
+    if (r.error) return r;
+    const ops = r.ops.slice();
+    if (host && ops[0] && ops[0].entry.text === OFF && ops[0].entry.ts < host.end) {
+      const h = entries.find((x) => x.id === host.id);
+      ops[0] = { op: 'put', entry: makeEntry({ id: uuid(), ts: ops[0].entry.ts, text: h.text, wo: h.wo, wl: h.wl, eq: h.eq, ql: h.ql }) };
+    }
+    return { ops: [{ op: 'put', entry }, ...ops], entry };
   }
 
   // Turn edited text back into operations against the original entries.
@@ -1763,7 +1840,7 @@
     startOfDay, addDays, ymd, hhmm, formatHM, formatClock,
     parseRange, parseDue, dueLabel, ACCENTS, DEFAULT_ACCENT, accentColors, formatReport, toCSV,
     uuid, sortEntries, applyOps, mergeRecent, enqueue, enqueueAll, nextBatch,
-    formatEditable, parseEditable,
+    formatEditable, parseEditable, setEnd, insertEntry,
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, setMidnight, midnightMode, spansIn, splitAtMidnight, hourLabel,

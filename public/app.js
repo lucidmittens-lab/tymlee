@@ -476,6 +476,7 @@
       range,
       mode,
       onSelect: openEntryEditor,
+      onAdd: openAddCard,
       onDay: (key) => showUnit('day', daysBack(T.parseRange(key, Date.now()).from)),
       header: (days) => guiBar(range, days),
       // A day or week fills the space between the bar and the controls.
@@ -789,6 +790,13 @@
     time.type = 'time';
     time.step = 60;
     time.value = T.hhmm(entry.ts);
+    // End: where the next entry (or an Off) starts; empty while running.
+    const span = T.withSpans(store.entries, Date.now()).find((x) => x.id === b.id);
+    const endTime = document.createElement('input');
+    endTime.type = 'time';
+    endTime.step = 60;
+    endTime.value = span && !span.running ? T.hhmm(span.end) : '';
+    endTime.title = 'Ends here: an Off is added (or the Off after it moves). Empty: keeps running.';
     const wo = document.createElement('input');
     wo.type = 'text';
     wo.value = entry.wo || '';
@@ -816,7 +824,7 @@
     for (const c of [wo, eq, text, notes, files]) c.setAttribute('autocapitalize', 'off');
     // Not a login or address form: keep browser autofill bars away.
     card.setAttribute('autocomplete', 'off');
-    for (const c of [time, wo, eq, text, notes, files]) c.setAttribute('autocomplete', 'off');
+    for (const c of [time, endTime, wo, eq, text, notes, files]) c.setAttribute('autocomplete', 'off');
 
     const error = document.createElement('div');
     error.className = 'ec-error';
@@ -838,7 +846,7 @@
 
     const row = document.createElement('div');
     row.className = 'ec-row';
-    row.append(field('Start', time), field('Work order', wo), field('Equipment', eq));
+    row.append(field('Start', time), field('End', endTime), field('Work order', wo), field('Equipment', eq));
     card.append(title, row, field('Entry', text), field('Notes', notes), field('Files', files), error, buttons);
 
     // Notes, work orders and equipment need server support when signed in.
@@ -854,16 +862,27 @@
       e.preventDefault();
       const current = store.entries.find((x) => x.id === b.id);
       if (!current) return closeEntryEditor();
-      const r = T.editEntry(current, { time: time.value, wo: wo.value, eq: eq.value, text: text.value, notes: notes.value, files: files.value }, Date.now());
+      const now = Date.now();
+      const r = T.editEntry(current, { time: time.value, wo: wo.value, eq: eq.value, text: text.value, notes: notes.value, files: files.value }, now);
       if (r.error) {
         error.textContent = r.error;
         return;
       }
+      // The end, worked out with the entry as edited (its start may have moved).
+      const edited = r.changed ? store.entries.map((x) => (x.id === r.entry.id ? r.entry : x)) : store.entries;
+      const ends = endTime.value === (span && !span.running ? T.hhmm(span.end) : '') ? { ops: [] } : T.setEnd(edited, b.id, endTime.value, now);
+      if (ends.error) {
+        error.textContent = ends.error;
+        return;
+      }
       closeEntryEditor();
       backToPrompt();
-      if (!r.changed) return;
-      store.apply([{ op: 'put', entry: r.entry }]);
-      print(`updated ${T.idTag(b.n)} ${r.entry.wo ? `${T.woTag(r.entry.wo)} ` : ''}${r.entry.eq ? `${T.eqTag(r.entry.eq)} ` : ''}${T.clock(r.entry.ts)} ${r.entry.text}`, 'ok');
+      const ops = [...(r.changed ? [{ op: 'put', entry: r.entry }] : []), ...ends.ops];
+      if (!ops.length) return;
+      store.apply(ops);
+      const got = r.changed ? r.entry : current;
+      const after = T.withSpans(store.entries, Date.now()).find((x) => x.id === b.id);
+      print(`updated ${T.idTag(b.n)} ${got.wo ? `${T.woTag(got.wo)} ` : ''}${got.eq ? `${T.eqTag(got.eq)} ` : ''}${T.clock(got.ts)}${after && !after.running ? `-${T.clock(after.end)}` : ''} ${got.text}`, 'ok');
     });
     cancel.addEventListener('click', () => {
       closeEntryEditor();
@@ -916,6 +935,92 @@
     text.focus();
     text.setSelectionRange(text.value.length, text.value.length);
   }
+
+  // A click on an empty spot of the timeline: a new entry there. Start (to 5
+  // minutes), an optional End, and what it was. Inside another entry, that
+  // one picks up again after the End (T.insertEntry).
+  function openAddCard(ts, anchorEl) {
+    closeEntryEditor();
+    const day = T.startOfDay(ts);
+    const card = document.createElement('form');
+    card.className = 'entry-card add-card';
+    card.setAttribute('aria-label', 'Add an entry');
+    card.setAttribute('autocomplete', 'off');
+    const title = document.createElement('div');
+    title.className = 'ec-title';
+    title.textContent = `New entry · ${T.ymd(ts)}`;
+    const start = document.createElement('input');
+    start.type = 'time';
+    start.step = 60;
+    start.value = T.hhmm(ts);
+    const end = document.createElement('input');
+    end.type = 'time';
+    end.step = 60;
+    end.title = 'Optional: it ends here (an Off, or the entry it interrupted picks up again)';
+    const text = document.createElement('input');
+    text.type = 'text';
+    text.placeholder = 'category and what, e.g. ACME drawings review';
+    text.spellcheck = false;
+    for (const c of [start, end, text]) { c.setAttribute('autocomplete', 'off'); c.setAttribute('autocapitalize', 'off'); }
+    const error = document.createElement('div');
+    error.className = 'ec-error';
+    error.setAttribute('role', 'alert');
+    const buttons = document.createElement('div');
+    buttons.className = 'ec-buttons';
+    const save = document.createElement('button');
+    save.type = 'submit';
+    save.textContent = 'Add';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    buttons.append(save, cancel);
+    const row = document.createElement('div');
+    row.className = 'ec-row';
+    row.append(field('Start', start), field('End (optional)', end));
+    card.append(title, row, field('Entry', text), error, buttons);
+    card.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const m = start.value.match(/^(\d{1,2}):(\d{2})$/);
+      const at = new Date(day);
+      if (m) at.setHours(+m[1], +m[2], 0, 0);
+      const r = T.insertEntry(store.entries, { ts: m ? at.getTime() : NaN, text: text.value, end: end.value }, Date.now());
+      if (r.error) {
+        error.textContent = r.error;
+        return;
+      }
+      closeEntryEditor();
+      backToPrompt();
+      store.apply(r.ops);
+      const s = T.withSpans(store.entries, Date.now()).find((x) => x.id === r.entry.id);
+      print(`added ${s ? T.idTag(s.n) : ''} ${T.ymd(r.entry.ts)} ${T.clock(r.entry.ts)}${s && !s.running ? `-${T.clock(s.end)}` : ''} ${r.entry.text}`.replace(/\s+/g, ' '), 'ok');
+    });
+    cancel.addEventListener('click', () => { closeEntryEditor(); backToPrompt(); });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeEntryEditor(); backToPrompt(); }
+    });
+    if (narrow.matches || !anchorEl || !guiEl.contains(anchorEl)) {
+      if (gui) gui.closePanels();
+      card.classList.add('dock-card');
+      $('dock').insertBefore(card, $('startbar'));
+      editCard = { el: card, id: null };
+      if (!narrow.matches) text.focus();
+      return;
+    }
+    guiEl.append(card);
+    const g = guiEl.getBoundingClientRect();
+    const r = anchorEl.getBoundingClientRect();
+    const width = Math.min(380, g.width - 24);
+    card.style.width = `${width}px`;
+    card.style.left = `${Math.min(Math.max(12, r.left - g.left + 24), g.width - width - 12)}px`;
+    // Just below the spot clicked.
+    card.style.top = `${Math.max(0, lastClickY - g.top + guiEl.scrollTop + 8)}px`;
+    editCard = { el: card, id: null };
+    card.scrollIntoView({ block: 'nearest' });
+    text.focus();
+  }
+  // Where the last click on the timeline was (for placing the add card).
+  let lastClickY = 0;
+  document.addEventListener('pointerdown', (e) => { lastClickY = e.clientY; }, true);
 
   // Show the top of the GUI (range buttons and legend), scrolling down only
   // as far as needed to bring the "now" line into view.

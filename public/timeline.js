@@ -60,12 +60,13 @@
   //             timeline scrolls; called on every redraw with the days drawn
   //   onSelect(b, el)  a block was clicked
   //   onDay(key)       a calendar day was clicked
+  //   onAdd(ts, el)    an empty spot on a day was clicked (add an entry there)
   //   fit(top)  the height (px) the hours may take below `top`, the bar; set,
   //             a day or week is scaled to it: from its first entry to its
   //             last moment plus 10%, rather than whole hours at a fixed size
   //   zoom()    how many times taller than the fit to draw (1: fits; more:
   //             the timeline scrolls)
-  function render({ store, range, mode = 'day', onSelect, onDay, header, fit, zoom }) {
+  function render({ store, range, mode = 'day', onSelect, onDay, onAdd, header, fit, zoom }) {
     const rootEl = el('div', `tl tl-mode-${mode}`);
     rootEl.setAttribute('role', 'group');
     const tip = el('div', 'tl-tip');
@@ -92,7 +93,15 @@
           rootEl.append(hello);
           return;
         }
-        rootEl.append(el('div', 'tl-empty', `no entries (${range.label})`));
+        const empty = el('div', 'tl-empty', `no entries (${range.label})`);
+        if (onAdd && Number.isFinite(range.from) && range.from <= now) {
+          const add = el('button', 'tl-add', 'Add an entry');
+          add.type = 'button';
+          // Today: now; another day: 9:00.
+          add.addEventListener('click', () => onAdd(range.to > now ? now - (now % 300000) : range.from + 9 * 3600000, add));
+          empty.append(' ', add);
+        }
+        rootEl.append(empty);
         return;
       }
 
@@ -191,6 +200,27 @@
         col.style.height = `${height}px`;
         col.style.setProperty('--hour', `${60 * px}px`);
         col.style.setProperty('--offset', `${(((60 - (axisFrom % 60)) % 60) * px)}px`);
+        // A click on an empty spot (or off time): a new entry there, to 5 minutes.
+        if (onAdd && day.start <= now) {
+          col.classList.add('tl-addable');
+          const at = (e) => {
+            const box = col.getBoundingClientRect();
+            const m = axisFrom + (e.clientY - box.top) / px;
+            return Math.min(day.start + Math.round(m / 5) * 300000, now - (now % 300000));
+          };
+          col.addEventListener('click', (e) => {
+            if (e.target.closest('.tl-block:not(.tl-offblock)')) return;
+            hideTip();
+            onAdd(at(e), col);
+          });
+          col.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'touch' || e.target.closest('.tl-block:not(.tl-offblock)')) return;
+            if (tip.hidden || tip.dataset.add !== '1') { showTip(e, '', ''); tip.dataset.add = '1'; }
+            tip.firstChild.textContent = `+ add at ${T.clock(at(e))}`;
+            moveTip(e);
+          });
+          col.addEventListener('pointerleave', () => { if (tip.dataset.add === '1') { tip.dataset.add = ''; hideTip(); } });
+        }
         for (const b of day.blocks) {
           const top = (minutesOfDay(b.start, day.start) - axisFrom) * px;
           const full = (b.end - b.start) / 60000 * px;

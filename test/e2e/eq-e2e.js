@@ -60,7 +60,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   await p.locator('.tl-block.tl-running').click(); await p.waitForTimeout(200);
   const labels = await p.locator('.entry-card label, .entry-card .ec-field').allTextContents();
   ok(labels.join('|').includes('Equipment'), 'card has an Equipment field');
-  ok(await p.locator('.entry-card input').nth(2).inputValue() === 'ler-resolve-07', 'card shows the equipment');
+  ok(await p.locator('.entry-card .ec-field', { hasText: 'Equipment' }).locator('input').inputValue() === 'ler-resolve-07', 'card shows the equipment');
   await p.screenshot({ path: `${S}/eq-card.png` });
   ok(!errs.length, `no errors ${errs}`);
   await b.close();

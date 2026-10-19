@@ -638,7 +638,11 @@
   function formatReport(entries, range, now, opts) {
     const compact = Boolean(opts && opts.compact);
     const RULE = '-'.repeat(compact ? 36 : 56);
-    const spans = spansIn(withSpans(entries, now), range);
+    // On screen (`hideOff`), Off is shown as nothing: its gap is between one
+    // entry's end and the next one's start (unpaid breaks are listed).
+    // Exports keep it, so a restore gets the gaps back.
+    const hideOff = Boolean(opts && opts.hideOff);
+    const spans = spansIn(withSpans(entries, now), range).filter((s) => !hideOff || s.text !== OFF);
     if (!spans.length) return `no entries (${range.label})`;
 
     const numWidth = Math.max(...spans.map((s) => idTag(s.n).length));

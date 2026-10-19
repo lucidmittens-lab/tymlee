@@ -1809,7 +1809,7 @@
     history.push(...shell.recentTexts(100));
     histIdx = history.length;
     if (store.entries.length) {
-      print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now(), { compact: narrow.matches }), 'report');
+      print(T.formatReport(store.entries, T.parseRange('today', Date.now()), Date.now(), { compact: narrow.matches, hideOff: true }), 'report');
     }
     for (const note of shell.startupNotices()) print(note, 'dim');
     renderStatus();

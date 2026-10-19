@@ -757,7 +757,7 @@ async function interactive() {
   }
   if (store.entries.length) {
     const now = Date.now();
-    print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70 }), 'report');
+    print(T.formatReport(store.entries, T.parseRange('today', now), now, { compact: (stdout.columns || 80) < 70, hideOff: true }), 'report');
   }
   for (const note of shell.startupNotices()) print(note, 'dim');
   // After the first sync has had its go: changes stuck for days.

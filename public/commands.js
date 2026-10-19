@@ -1265,7 +1265,7 @@
         about: 'print the log for a range',
         run(args) {
           const range = rangeFrom(args);
-          if (range) print(T.formatReport(store.entries, range, Date.now(), { compact: io.compact() }), 'report');
+          if (range) print(T.formatReport(store.entries, range, Date.now(), { compact: io.compact(), hideOff: true }), 'report');
         },
       },
       report: {

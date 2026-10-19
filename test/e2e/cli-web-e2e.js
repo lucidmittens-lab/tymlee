@@ -61,7 +61,7 @@ const serverRows = () => Object.values(load().entries).filter((r) => r.user_id =
   // Website -> terminal, including a deletion.
   await send('/off', 800);
   out = cli('/log');
-  ok(/\(off\)/.test(out), 'terminal: sees /off from the website');
+  ok(!/ now /.test(out.split('\n').filter((l) => /ID:/.test(l)).pop() || ' now '), `terminal: sees /off from the website (nothing is running): ${out.split('\n').filter((l) => /ID:/.test(l)).pop()}`);
   await send('/undo', 800);
   out = cli('/log');
   ok(!/\(off\)/.test(out) && /from the terminal/.test(out), 'terminal: sees the website\'s /undo');

@@ -28,7 +28,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   ok(/^\d\d:\d\d  in ID:000030 mtg standup$/.test(await last()), `clock in after off has no "out": ${await last()}`);
   await send('/log');
   const log = await last();
-  ok(/\n  ID:000020  \d\d:\d\d  \d\d:\d\d       -  \(off\)\n/.test(log), 'report shows the off row');
+  ok(!/\(off\)/.test(log) && /\n  ID:000010  \d\d:\d\d  \d\d:\d\d .*\n  ID:000030 /.test(log), `/log shows Off as nothing: the entry before it ends, the next one starts (${log.split('\n').slice(2, 5).join(' | ')})`);
   ok(!/\(off\)\s+\d+:\d\d\s+\d+%/.test(log), 'off not in the summary');
   await p.fill('#entry', '/o'); await p.press('#entry', 'Tab');
   ok((await p.inputValue('#entry')) === '/off ', 'Tab completes /off');

@@ -293,7 +293,7 @@ const OFF_LOG = [
   { id: 'd', ts: at('2026-09-24T10:05:00Z'), text: T.OFF },
 ];
 
-test('off time is shown but not counted', () => {
+test('off time is neither shown nor counted (its gap is between end and start)', () => {
   const spans = T.withSpans(OFF_LOG, NOW);
   assert.deepEqual(spans.map((s) => s.off), [false, true, false, true]);
   assert.deepEqual(T.summarize(spans), [
@@ -301,18 +301,17 @@ test('off time is shown but not counted', () => {
     { category: 'mtg', ms: 5 * 60000 },
   ]);
   assert.deepEqual(T.knownCategories(OFF_LOG), ['mtg', 'dev']);
-  assert.equal(T.formatReport(OFF_LOG, T.parseRange('today', NOW), NOW), [
+  assert.equal(T.formatReport(OFF_LOG, T.parseRange('today', NOW), NOW, { hideOff: true }), [
     'Thu 2026-09-24',
     '             start  end       dur  category  note',
     '  ID:000010  09:00  09:45    0:45  dev       fixing login bug',
-    '  ID:000020  09:45  10:00       -  (off)',
     '  ID:000030  10:00  10:05    0:05  mtg       standup',
-    '  ID:000040  10:05  now         -  (off)',
     '  ' + '-'.repeat(56),
     '  dev         0:45   90%',
     '  mtg         0:05   10%',
     '  total       0:50',
   ].join('\n'));
+  assert.match(T.formatReport(OFF_LOG, T.parseRange('today', NOW), NOW), /09:45  10:00 +- +\(off\)/, 'exports keep it');
   const csv = T.toCSV(OFF_LOG, T.parseRange('today', NOW), NOW).trimEnd().split('\n');
   assert.equal(csv.length, 3);
 });

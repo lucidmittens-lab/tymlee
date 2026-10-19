@@ -28,16 +28,23 @@ checkout of the terminal app reads its own commit.
 
 ## Deploying
 
-The website is the `public/` folder, deployed by Cloudflare from the branch
-`claude/time-tracking-app-bg1ckf` on every push (the production branch; only
-push there when the owner says to ship). The repository's default branch is
-`main`: tools that sync to the default branch (bolt.new) commit there, and
-nothing deploys from it. Their work reaches production by merging `main` into
-the production branch, testing (`npm run e2e`), and shipping like any other
-change. Scheduled workflows (`vendor-check.yml`) run from `main`, so keep it
-up to date with the production branch after shipping. Database changes go in
-`supabase/schema.sql` (safe to run again) and are run by the owner in the
-Supabase SQL editor.
+Two branches, with different jobs:
+
+- **Production: `claude/time-tracking-app-bg1ckf`.** The website (`public/`) is
+  deployed by Cloudflare from this branch on every push. Only Claude pushes
+  here, and only when the owner says to ship. Nothing else (bolt.new or any
+  other tool) commits to it.
+- **Staging: `main`**, the repository's default branch. bolt.new (and any tool
+  that syncs to "the default branch") commits here. Nothing deploys from it to
+  the website. bolt.new's work reaches production only through Claude: merge
+  `main` into the production branch, review it, test it (`npm run e2e`), and
+  ship it when the owner says so.
+
+After shipping, bring `main` up to date with production (scheduled
+workflows such as `vendor-check.yml` run from the default branch).
+
+Database changes go in `supabase/schema.sql` (safe to run again) and are run
+by the owner in the Supabase SQL editor.
 
 ## Testing
 

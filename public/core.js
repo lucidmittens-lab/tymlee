@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.6';
+  const VERSION = '2.0.7';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1025,9 +1025,11 @@
   // alone on its line that comes out empty (%{notes} with no notes).
   function parseForm(text) {
     const root = [];
-    const stack = [{ body: root }];
+    // Open %{each} and %{if} sections; `list` is where text goes now (an
+    // %{if}'s body, or its %{else} part).
+    const stack = [{ list: root }];
     const errors = [];
-    const top = () => stack[stack.length - 1].body;
+    const top = () => stack[stack.length - 1].list;
     const re = /^([ \t]*)%\{([^}]*)\}[ \t]*(\r?\n|$)|%\{([^}]*)\}/gm;
     let last = 0;
     let m;
@@ -1042,9 +1044,21 @@
         if (!FORM_GROUPS.includes(key)) errors.push(`%{each ${each[1]}}: use %{each category}, %{each wo}, %{each equipment} or %{each entry}`);
         const node = { each: key, body: [] };
         top().push(node);
-        stack.push(node);
+        stack.push({ node, list: node.body });
+      } else if (/^if\s/i.test(tok)) {
+        // %{if hours} ... %{else} ... %{end}: "no"/"not" turns it around.
+        const c = tok.match(/^if\s+(?:(no|not)\s+)?([a-z0-9]+)$/i);
+        const name = c && ({ title: 'titles', eq: 'equipment' }[c[2].toLowerCase()] || c[2].toLowerCase());
+        if (!c || !FORM_TOKENS.some(([t]) => t === name)) errors.push(`%{${tok}}: use %{if <token>} or %{if no <token>}, e.g. %{if hours}`);
+        const node = { cond: { token: name || '', neg: Boolean(c && c[1]) }, body: [], alt: [] };
+        top().push(node);
+        stack.push({ node, list: node.body });
+      } else if (/^else$/i.test(tok)) {
+        const open = stack[stack.length - 1];
+        if (!open.node || !open.node.cond || open.list === open.node.alt) errors.push('%{else} without an %{if ...} before it');
+        else open.list = open.node.alt;
       } else if (/^end$/i.test(tok)) {
-        if (stack.length === 1) errors.push('%{end} without an %{each ...} before it');
+        if (stack.length === 1) errors.push('%{end} without an %{each ...} or %{if ...} before it');
         else stack.pop();
       } else {
         const at = tok.indexOf(':');
@@ -1060,13 +1074,16 @@
       }
     }
     if (last < text.length) top().push({ text: text.slice(last) });
-    if (stack.length > 1) errors.push(`%{each ${stack[stack.length - 1].each}} without an %{end}`);
+    if (stack.length > 1) {
+      const open = stack[stack.length - 1].node;
+      errors.push(open.cond ? `%{if ${open.cond.neg ? 'no ' : ''}${open.cond.token}} without an %{end}` : `%{each ${open.each}} without an %{end}`);
+    }
     return { nodes: root, errors };
   }
 
   // Entries grouped for %{each key}, in the order they were first logged;
   // time without a work order comes last.
-  function formGroups(spans, key) {
+  function formGroups(spans, key, links = []) {
     if (key === 'entry') return spans.map((s) => ({ spans: [s], where: idTag(s.n) }));
     const groups = new Map();
     for (const s of spans) {
@@ -1080,6 +1097,19 @@
         groups.get(k).spans.push(s);
       }
     }
+    // Linked for the day with no time logged: listed too, after those with
+    // time (their category is the one they were linked to).
+    if (key === 'wo' || key === 'equipment') {
+      for (const l of links) {
+        const values = key === 'wo' ? (l.wo ? [l.wo] : []) : (l.eq ? eqNames(l.eq) : []);
+        for (const value of values) {
+          const k = value.toLowerCase();
+          if (!groups.has(k)) groups.set(k, { value, spans: [], cats: [] });
+          const g = groups.get(k);
+          if (g.cats && !g.cats.includes(linkCategory(l))) g.cats.push(linkCategory(l));
+        }
+      }
+    }
     const list = Array.from(groups.values());
     const coded = key === 'wo' || key === 'equipment';
     if (coded) list.sort((a, b) => (!a.value) - (!b.value));
@@ -1088,6 +1118,7 @@
       spans: g.spans,
       none: coded && !g.value ? key : '',
       eq: key === 'equipment' ? g.value : null,
+      fill: g.cats ? { category: g.cats.join(', '), ...(key === 'wo' ? { wo: g.value } : {}) } : null,
       where: coded ? (g.value ? tag(g.value) : `no ${key === 'wo' ? 'work order' : 'equipment'}`) : g.value,
     }));
   }
@@ -1138,23 +1169,37 @@
     const { nodes, errors } = parseForm(template);
     if (errors.length) return { errors };
     const spans = withSpans(entries, now).filter((s) => !s.off && s.ts >= range.from && s.ts < range.to);
+    // Work orders and equipment linked for these days (/wolink, /eqlink):
+    // %{each wo} lists them even with no time (0:00).
+    const links = entries.filter((e) => isLink(e) && e.ts >= range.from && e.ts < range.to);
     // Copies made by a top-level %{each} get a divider between them; nested
     // ones (entries inside a category, say) and entries, which are lines
     // rather than sections, just follow each other.
-    const render = (list, scope, where, none, eq) => {
+    // `fill`: values for a section with no entries (a work order linked with
+    // no time: its number and category).
+    const render = (list, scope, where, none, eq, fill) => {
       let vals = null;
+      const values = () => {
+        if (!vals) vals = { ...formValues(scope, range, now, none, eq), ...(!scope.length && fill ? fill : {}) };
+        return vals;
+      };
       return list.map((n) => {
         if (n.text != null) return n.text;
         if (n.each) {
-          const copies = formGroups(scope, n.each).map((g) => render(n.body, g.spans, g.where, g.none, g.eq || eq));
+          const copies = formGroups(scope, n.each, scope === spans ? links : []).map((g) => render(n.body, g.spans, g.where, g.none, g.eq || eq, g.fill));
           return list === nodes && n.each !== 'entry' ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
+        }
+        if (n.cond) {
+          // Something to show: not empty, not 0:00, not "(none)".
+          const v = values()[n.cond.token];
+          const has = Boolean(v) && v !== '0:00' && v !== '(none)';
+          return render(has !== n.cond.neg ? n.body : n.alt, scope, where, none, eq, fill);
         }
         let value;
         if (n.token === 'ask') {
           value = answer ? answer(n.arg, where) || '' : '';
         } else {
-          vals = vals || formValues(scope, range, now, none, eq);
-          value = vals[n.token];
+          value = values()[n.token];
         }
         // Alone on its line: the line goes when there's nothing to show.
         // Its indent goes on every line of it (notes).

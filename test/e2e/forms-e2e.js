@@ -100,6 +100,16 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   await p.click('.sb-menu'); await p.waitForTimeout(200);
   await p.locator('.gmenu button', { hasText: 'Fill in a form' }).click(); await p.waitForTimeout(200);
   ok((await p.locator('.toast, .gtoast').allTextContents()).join().includes('No forms yet'), 'deleted from the menu');
+  // %{if}: a work order linked for the day with no time logged under it.
+  await p.evaluate(() => localStorage.setItem('tymlee.view2', 'cli')); await p.reload(); await p.waitForTimeout(400);
+  await send('/wolink ZENITH 2026-09-29 4499');
+  await send('/newform wocheck');
+  await p.locator('#out .editor').fill('%{each wo}\nWO %{wo} %{category}: %{if hours}%{hours}%{else}no work performed%{end}\n%{end}');
+  await p.locator('#out .editor').press('Control+Enter'); await p.waitForTimeout(200);
+  await send('/form wocheck 2026-09-29');
+  await p.waitForTimeout(300);
+  const filled = (await p.locator('#out').textContent());
+  ok(/WO 4471 dev: 3:30/.test(filled) && /WO 4499 ZENITH: no work performed/.test(filled), `%{if hours}: a linked work order with no time says so (${(filled.match(/WO 4499[^\n]*/) || [''])[0]})`);
   ok(!errs.length, `no errors ${errs}`);
   await b.close();
 })();

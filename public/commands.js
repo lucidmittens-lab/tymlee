@@ -242,6 +242,7 @@
       '# your form: text, with tokens filled in from the log',
       '# %{hours} %{in} %{out} %{notes} ... (/form lists them all)',
       '# %{each category} ... %{end} repeats a part per category (or wo, entry)',
+      '# %{if hours} ... %{else} ... %{end} only when there is time (or notes, a wo...)',
       '# %{ask:System} asks you when the form is filled in',
       '# lines starting with # up here are left out',
     ];
@@ -1767,6 +1768,11 @@
               'repeat part of a form per group; tokens inside cover just that group:',
               '  %{each category} ... %{end}    also %{each wo}, %{each equipment} and %{each entry}',
               'outside any %{each}, tokens cover the whole day; inside %{each entry}, %{in} and %{out} are that entry\'s',
+              '%{each wo} also lists work orders linked for the day (/wolink) with no time, at 0:00',
+              '',
+              'write part of a form only when a token has something (not empty, not 0:00):',
+              '  %{if hours} ... %{end}    %{if no hours} ... %{end}    %{if notes} ... %{else} ... %{end}',
+              '  e.g. %{each wo}WO %{wo}: %{if hours}%{hours}%{else}no work performed%{end}%{end}',
               'a token alone on its line that comes out empty (no notes, say) leaves no blank line',
             ].join('\n'), 'report');
           }

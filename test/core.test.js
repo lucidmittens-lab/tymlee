@@ -1282,3 +1282,27 @@ test('insertEntry: a new entry from the timeline; inside a block it resumes afte
   assert.match(T.insertEntry(log, { ts: at(19), text: 'x' }, now).error, /future/);
   assert.match(T.insertEntry(log, { ts: at(16), text: '' }, now).error, /needs some text/);
 });
+
+test('forms: %{if} / %{else}, and work orders linked with no time', () => {
+  const at = (h) => Date.UTC(2026, 9, 22, h);
+  const day = Date.UTC(2026, 9, 22);
+  const log = [
+    { id: 'l1', ts: day, text: '/wo ACME', wo: '4410021' },
+    { id: 'l2', ts: day, text: '/wo NORTHSTAR', wo: '4410022' },
+    { id: 'a', ts: at(9), text: 'ACME drawings', wo: '4410021', wl: true, notes: 'markups sent' },
+    { id: 'b', ts: at(11), text: '/off' },
+  ];
+  const fill = (tpl) => T.fillForm(tpl, log, T.parseRange('2026-10-22', at(18)), at(18), () => '');
+  const out = fill('%{each wo}\nWO %{wo} %{category}\n%{if hours}\nTime: %{hours}\n%{else}\nNo work performed.\n%{end}\n%{end}').text;
+  assert.match(out, /WO 4410021 ACME\nTime: 2:00\n/);
+  assert.match(out, /WO 4410022 NORTHSTAR\nNo work performed\.\n/);
+  assert.ok(out.indexOf('4410021') < out.indexOf('4410022'), 'those with time first');
+  assert.equal(fill('%{if no notes}none%{else}%{notes}%{end}').text, 'markups sent');
+  assert.equal(fill('%{if not wo}x%{end}%{if wo}y%{end}').text, 'y');
+  // Nested in %{each category}: no other category's links.
+  const nested = fill('%{each category}%{each wo}%{wo};%{end}%{end}').text;
+  assert.equal(nested.trim(), '4410021;');
+  assert.deepEqual(fill('%{if bogus}x%{end}').errors, ['%{if bogus}: use %{if <token>} or %{if no <token>}, e.g. %{if hours}']);
+  assert.deepEqual(fill('%{else}').errors, ['%{else} without an %{if ...} before it']);
+  assert.deepEqual(fill('%{if hours}x').errors, ['%{if hours} without an %{end}']);
+});

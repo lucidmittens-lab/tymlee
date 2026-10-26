@@ -5,7 +5,7 @@
 
   // The app's version (the website and the terminal app share it; cli/package.json
   // says the same) and where its code is.
-  const VERSION = '2.0.7';
+  const VERSION = '2.0.8';
   const REPO_URL = 'https://github.com/lucidmittens-lab/tymlee';
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -163,10 +163,29 @@
     return null;
   }
 
+  // Details: named values a form asked for (%{ask:'Room'}), on an entry or
+  // on a category's link for a day. { name: value }, or null when none.
+  const MAX_DETAILS = 20;
+  const MAX_DETAIL_NAME = 40;
+  const MAX_DETAIL_VALUE = 500;
+  function cleanDetails(d) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+    const out = {};
+    let n = 0;
+    for (const [k, v] of Object.entries(d)) {
+      const name = String(k).trim();
+      const value = String(v == null ? '' : v).trim().slice(0, MAX_DETAIL_VALUE);
+      if (!name || name.length > MAX_DETAIL_NAME || !value || n >= MAX_DETAILS) continue;
+      out[name] = value;
+      n++;
+    }
+    return n ? out : null;
+  }
+
   // An entry with its optional fields set only when they have a value.
   function makeEntry(base, extra) {
     const e = { id: base.id, ts: base.ts, text: base.text };
-    const x = { notes: base.notes, files: base.files, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, sid: base.sid, ...(extra || {}) };
+    const x = { notes: base.notes, files: base.files, wo: base.wo, wl: base.wl, eq: base.eq, ql: base.ql, sid: base.sid, details: base.details, ...(extra || {}) };
     if (validSid(x.sid)) e.sid = x.sid;
     if (x.notes) e.notes = x.notes;
     if (x.files) e.files = x.files;
@@ -178,6 +197,8 @@
       e.eq = x.eq;
       if (x.ql) e.ql = true;
     }
+    const details = cleanDetails(x.details);
+    if (details) e.details = details;
     return e;
   }
 
@@ -806,7 +827,7 @@
     const ql = Boolean(entry.ql && eq === (entry.eq || ''));
     const files = fields.files == null ? entry.files || '' : joinFiles(String(fields.files).split('\n'));
     if (files.length > MAX_FILES) return { error: `file paths are limited to ${MAX_FILES} characters` };
-    const next = makeEntry({ id: entry.id, ts, text, sid: entry.sid }, { notes, files, wo, wl, eq, ql });
+    const next = makeEntry({ id: entry.id, ts, text, sid: entry.sid, details: entry.details }, { notes, files, wo, wl, eq, ql });
     const same = next.ts === entry.ts && next.text === entry.text && (next.notes || '') === (entry.notes || '') &&
       (next.wo || '') === (entry.wo || '') && Boolean(next.wl) === Boolean(entry.wl) &&
       (next.eq || '') === (entry.eq || '') && Boolean(next.ql) === Boolean(entry.ql) && (next.files || '') === (entry.files || '');
@@ -1020,6 +1041,15 @@
   ];
   const FORM_DIVIDER = '-'.repeat(40);
 
+  // 'Room' -> Room; null if it isn't in single quotes, '' if the name isn't
+  // usable (empty, too long).
+  function detailName(t) {
+    const m = String(t).trim().match(/^'(.*)'$/s);
+    if (!m) return null;
+    const name = m[1].trim();
+    return name && name.length <= MAX_DETAIL_NAME && !/['\n{}]/.test(name) ? name : '';
+  }
+
   // Template text -> { nodes, errors }. A %{each} or %{end} alone on its line
   // takes the whole line, so it leaves no blank line behind; so does a token
   // alone on its line that comes out empty (%{notes} with no notes).
@@ -1046,11 +1076,15 @@
         top().push(node);
         stack.push({ node, list: node.body });
       } else if (/^if\s/i.test(tok)) {
-        // %{if hours} ... %{else} ... %{end}: "no"/"not" turns it around.
-        const c = tok.match(/^if\s+(?:(no|not)\s+)?([a-z0-9]+)$/i);
-        const name = c && ({ title: 'titles', eq: 'equipment' }[c[2].toLowerCase()] || c[2].toLowerCase());
-        if (!c || !FORM_TOKENS.some(([t]) => t === name)) errors.push(`%{${tok}}: use %{if <token>} or %{if no <token>}, e.g. %{if hours}`);
-        const node = { cond: { token: name || '', neg: Boolean(c && c[1]) }, body: [], alt: [] };
+        // %{if hours} ... %{else} ... %{end}: "no"/"not" turns it around;
+        // %{if 'Room'} checks a detail.
+        const c = tok.match(/^if\s+(?:(no|not)\s+)?([a-z0-9]+|'[^']*')$/i);
+        const quoted = c && detailName(c[2]);
+        const name = c && (quoted != null ? 'detail' : { title: 'titles', eq: 'equipment' }[c[2].toLowerCase()] || c[2].toLowerCase());
+        if (!c || (quoted == null && !FORM_TOKENS.some(([t]) => t === name)) || quoted === '') {
+          errors.push(`%{${tok}}: use %{if <token>} or %{if no <token>}, e.g. %{if hours} or %{if 'Room'}`);
+        }
+        const node = { cond: { token: name || '', neg: Boolean(c && c[1]), ...(quoted ? { arg: quoted } : {}) }, body: [], alt: [] };
         top().push(node);
         stack.push({ node, list: node.body });
       } else if (/^else$/i.test(tok)) {
@@ -1063,14 +1097,36 @@
       } else {
         const at = tok.indexOf(':');
         const typed = (at < 0 ? tok : tok.slice(0, at)).trim().toLowerCase();
-        const name = { title: 'titles', eq: 'equipment' }[typed] || typed;
-        const arg = at < 0 ? '' : tok.slice(at + 1).trim();
-        if (name === 'ask') {
+        let name = { title: 'titles', eq: 'equipment' }[typed] || typed;
+        let arg = at < 0 ? '' : tok.slice(at + 1).trim();
+        let bind = null;
+        if (tok.startsWith("'")) {
+          // %{'Room'}: a detail saved by %{ask:'Room'}.
+          arg = detailName(tok);
+          name = 'detail';
+          if (!arg) errors.push(`%{${tok}}: a name of your own goes in single quotes, up to ${MAX_DETAIL_NAME} characters, e.g. %{'Room'}`);
+        } else if (name === 'ask') {
+          // %{ask:equipment} / %{ask:wo}: the answer is saved to the log;
+          // %{ask:'Room'}: saved as a detail; %{ask:Room}: only remembered.
+          const low = arg.toLowerCase();
+          if (arg.startsWith("'")) {
+            const d = detailName(arg);
+            if (!d) errors.push(`%{ask:${arg}}: a name of your own goes in single quotes, up to ${MAX_DETAIL_NAME} characters, e.g. %{ask:'Room'}`);
+            arg = d || arg;
+            bind = { kind: 'detail', name: d };
+          } else if (low === 'equipment' || low === 'eq') {
+            arg = 'Equipment';
+            bind = { kind: 'eq' };
+          } else if (low === 'wo') {
+            arg = 'Work order';
+            bind = { kind: 'wo' };
+          }
           if (!arg) errors.push('%{ask:...} needs a label, e.g. %{ask:System}');
         } else if (!FORM_TOKENS.some(([t]) => t === name)) {
           errors.push(`unknown token %{${tok}} (/form tokens lists them)`);
         }
-        top().push(alone ? { token: name, arg, line: { indent: m[1], nl: m[3] } } : { token: name, arg });
+        const node = { token: name, arg, ...(bind ? { bind } : {}) };
+        top().push(alone ? { ...node, line: { indent: m[1], nl: m[3] } } : node);
       }
     }
     if (last < text.length) top().push({ text: text.slice(last) });
@@ -1084,11 +1140,11 @@
   // Entries grouped for %{each key}, in the order they were first logged;
   // time without a work order comes last.
   function formGroups(spans, key, links = []) {
-    if (key === 'entry') return spans.map((s) => ({ spans: [s], where: idTag(s.n) }));
+    // A paid break is in no section (its time is in the day's totals).
+    if (key === 'entry') return spans.filter((s) => !isMarker(s.text)).map((s) => ({ spans: [s], where: idTag(s.n) }));
     const groups = new Map();
     for (const s of spans) {
-      // A paid break is no category of its own (its time is in the totals).
-      if (key === 'category' && isMarker(s.text)) continue;
+      if (isMarker(s.text)) continue;
       // An entry with several pieces of equipment goes under each of them.
       const values = key === 'wo' ? [s.wo || ''] : key === 'equipment' ? (s.eq ? eqNames(s.eq) : ['']) : [s.category];
       for (const value of values) {
@@ -1104,9 +1160,10 @@
         const values = key === 'wo' ? (l.wo ? [l.wo] : []) : (l.eq ? eqNames(l.eq) : []);
         for (const value of values) {
           const k = value.toLowerCase();
-          if (!groups.has(k)) groups.set(k, { value, spans: [], cats: [] });
+          if (!groups.has(k)) groups.set(k, { value, spans: [], cats: [], links: [] });
           const g = groups.get(k);
           if (g.cats && !g.cats.includes(linkCategory(l))) g.cats.push(linkCategory(l));
+          if (g.links) g.links.push({ category: linkCategory(l), day: startOfDay(l.ts) });
         }
       }
     }
@@ -1118,7 +1175,7 @@
       spans: g.spans,
       none: coded && !g.value ? key : '',
       eq: key === 'equipment' ? g.value : null,
-      fill: g.cats ? { category: g.cats.join(', '), ...(key === 'wo' ? { wo: g.value } : {}) } : null,
+      fill: g.cats ? { category: g.cats.join(', '), links: g.links, ...(key === 'wo' ? { wo: g.value } : {}) } : null,
       where: coded ? (g.value ? tag(g.value) : `no ${key === 'wo' ? 'work order' : 'equipment'}`) : g.value,
     }));
   }
@@ -1172,12 +1229,36 @@
     // Work orders and equipment linked for these days (/wolink, /eqlink):
     // %{each wo} lists them even with no time (0:00).
     const links = entries.filter((e) => isLink(e) && e.ts >= range.from && e.ts < range.to);
+    const linkKey = (category, day) => `${category.toLowerCase()}|${ymd(day)}`;
+    const linkMap = new Map(links.map((l) => [linkKey(linkCategory(l), l.ts), l]));
+    // Where a tied question's answer goes: the entry inside %{each entry},
+    // otherwise each category's day the section covers.
+    const targetsOf = (scope, fill, kind) => {
+      if (kind === 'entry') return { entries: scope.map((s) => s.id) };
+      if (!scope.length && fill && fill.links) return { cats: fill.links.slice() };
+      const cats = [];
+      for (const s of scope) {
+        if (isMarker(s.text)) continue;
+        const day = startOfDay(s.ts);
+        if (!cats.some((c) => c.day === day && c.category.toLowerCase() === s.category.toLowerCase())) cats.push({ category: s.category, day });
+      }
+      return { cats };
+    };
+    const linkedOf = (scope, fill) => targetsOf(scope, fill, '').cats.map((c) => linkMap.get(linkKey(c.category, c.day))).filter(Boolean);
+    // A detail: the entry's own (inside %{each entry}), otherwise the one
+    // saved for the category's day; else what the entries have.
+    const detailOf = (scope, name, fill, kind) => {
+      const own = scope.map((s) => s.details && s.details[name]).filter(Boolean);
+      const linked = linkedOf(scope, fill).map((l) => l.details && l.details[name]).filter(Boolean);
+      const list = kind === 'entry' ? [...own, ...linked].slice(0, 1) : linked.length ? linked : own;
+      return list.filter((v, i) => list.findIndex((w) => w.toLowerCase() === v.toLowerCase()) === i).join(', ');
+    };
     // Copies made by a top-level %{each} get a divider between them; nested
     // ones (entries inside a category, say) and entries, which are lines
     // rather than sections, just follow each other.
     // `fill`: values for a section with no entries (a work order linked with
     // no time: its number and category).
-    const render = (list, scope, where, none, eq, fill) => {
+    const render = (list, scope, where, none, eq, fill, kind) => {
       let vals = null;
       const values = () => {
         if (!vals) vals = { ...formValues(scope, range, now, none, eq), ...(!scope.length && fill ? fill : {}) };
@@ -1186,18 +1267,31 @@
       return list.map((n) => {
         if (n.text != null) return n.text;
         if (n.each) {
-          const copies = formGroups(scope, n.each, scope === spans ? links : []).map((g) => render(n.body, g.spans, g.where, g.none, g.eq || eq, g.fill));
-          return list === nodes && n.each !== 'entry' ? copies.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : copies.join('');
+          const copies = formGroups(scope, n.each, scope === spans ? links : []).map((g) => render(n.body, g.spans, g.where, g.none, g.eq || eq, g.fill, n.each));
+          // A section that comes out empty (an %{if} left nothing) is left out.
+          const shown = copies.filter((c) => c.trim());
+          if (!shown.length) return '';
+          return list === nodes && n.each !== 'entry' ? shown.map((c) => c.replace(/\s+$/, '')).join(`\n\n${FORM_DIVIDER}\n\n`) + '\n' : shown.join('');
         }
         if (n.cond) {
-          // Something to show: not empty, not 0:00, not "(none)".
-          const v = values()[n.cond.token];
-          const has = Boolean(v) && v !== '0:00' && v !== '(none)';
-          return render(has !== n.cond.neg ? n.body : n.alt, scope, where, none, eq, fill);
+          // Something to show: not empty, not 0 or 0:00, not "(none)".
+          const v = n.cond.token === 'detail' ? detailOf(scope, n.cond.arg, fill, kind) : values()[n.cond.token];
+          const has = Boolean(v) && v !== '0' && v !== '0:00' && v !== '(none)';
+          return render(has !== n.cond.neg ? n.body : n.alt, scope, where, none, eq, fill, kind);
         }
         let value;
         if (n.token === 'ask') {
-          value = answer ? answer(n.arg, where) || '' : '';
+          let ctx;
+          if (n.bind) {
+            // What the log has now, offered as the answer.
+            const field = n.bind.kind === 'eq' ? 'equipment' : 'wo';
+            const cur = n.bind.kind === 'detail' ? detailOf(scope, n.bind.name, fill, kind)
+              : !scope.length ? linkedOf(scope, fill).map((l) => l[n.bind.kind] || '').filter(Boolean).join(', ') : values()[field];
+            ctx = { bind: n.bind, current: cur === '(none)' ? '' : cur || '', targets: targetsOf(scope, fill, kind) };
+          }
+          value = answer ? answer(n.arg, where, ctx) || '' : '';
+        } else if (n.token === 'detail') {
+          value = detailOf(scope, n.arg, fill, kind);
         } else {
           value = values()[n.token];
         }
@@ -1207,15 +1301,18 @@
         return value;
       }).join('');
     };
-    return { text: render(nodes, spans, '', ''), count: spans.length };
+    return { text: render(nodes, spans, '', '', null, null, ''), count: spans.length };
   }
 
-  // The %{ask:...} questions a template will ask, in order: [{ label, where }].
+  // The %{ask:...} questions a template will ask, in order: [{ label, where }],
+  // and for one tied to the log (%{ask:equipment}, %{ask:'Room'}) also
+  // { bind, current, targets }: what it saves, what is there now, and where
+  // it goes ({ entries: [ids] } or { cats: [{ category, day }] }).
   function formQuestions(template, entries, range, now) {
     const seen = new Map();
-    fillForm(template, entries, range, now, (label, where) => {
+    fillForm(template, entries, range, now, (label, where, ctx) => {
       const key = `${label}\n${where}`;
-      if (!seen.has(key)) seen.set(key, { label, where });
+      if (!seen.has(key)) seen.set(key, { label, where, ...(ctx || {}) });
       return '';
     });
     return Array.from(seen.values());
@@ -1307,7 +1404,7 @@
   function formatEditable(entries, range, now) {
     const items = withSpans(entries, now)
       .filter((s) => s.ts >= range.from && s.ts < range.to)
-      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid, files: s.files || '' }));
+      .map((s) => ({ n: s.n, id: s.id, ts: s.ts, text: s.text, notes: s.notes || '', wo: s.wo || '', wl: Boolean(s.wl), eq: s.eq || '', ql: Boolean(s.ql), sid: s.sid, files: s.files || '', details: s.details }));
     const lines = EDIT_HELP.slice();
     const numWidth = items.length ? Math.max(...items.map((it) => idTag(it.n).length)) : 1;
     // Every day of a range up to a month gets its header, with or without
@@ -1392,7 +1489,7 @@
     const ops = r.ops.slice();
     if (host && ops[0] && ops[0].entry.text === OFF && ops[0].entry.ts < host.end) {
       const h = entries.find((x) => x.id === host.id);
-      ops[0] = { op: 'put', entry: makeEntry({ id: uuid(), ts: ops[0].entry.ts, text: h.text, wo: h.wo, wl: h.wl, eq: h.eq, ql: h.ql }) };
+      ops[0] = { op: 'put', entry: makeEntry({ id: uuid(), ts: ops[0].entry.ts, text: h.text, wo: h.wo, wl: h.wl, eq: h.eq, ql: h.ql, details: h.details }) };
     }
     return { ops: [{ op: 'put', entry }, ...ops], entry };
   }
@@ -1506,7 +1603,7 @@
       // the one it already had (which keeps any /wolink).
       const keepsLink = Boolean(r.it && r.it.wl && r.wo === r.it.wo);
       // Equipment isn't in the text: an entry keeps its own.
-      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text, sid: r.it ? r.it.sid : undefined }, { notes, files, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
+      const entry = makeEntry({ id: r.it ? r.it.id : uuid(), ts: r.ts, text: r.text, sid: r.it ? r.it.sid : undefined, details: r.it ? r.it.details : undefined }, { notes, files, wo: r.wo, wl: keepsLink, eq: r.it ? r.it.eq : '', ql: Boolean(r.it && r.it.ql) });
       if (!r.it) {
         ops.push({ op: 'put', entry });
         added++;
@@ -1893,7 +1990,7 @@
     VERSION, REPO_URL,
     PAY_KEYS, payValue, setPay, hasPay, mergeSettings, weekStart, earnings, formatMoney, parseAmount,
     clock, clockCol, setClock, clockMode, setMidnight, midnightMode, spansIn, splitAtMidnight, hourLabel,
-    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idValue, idTag, secretLine, validSid, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, formatCategoryReport, formatWorkOrders,
+    MAX_FILES, MARKERS, clockAs, joinFiles, parseFiles, groupFiles, filesList, OFF, BREAK_PAID, BREAK_UNPAID, isMarker, isOff, LINK, isLink, linkCategory, visible, categorySlots, timelineDays, formatTimeline, editEntry, MAX_TEXT, MAX_NOTES, MAX_WO, validWo, woTag, eqTag, idText, idValue, idTag, secretLine, validSid, assignIds, findById, eqNames, normalizeEq, EQ_RULES, makeEntry, cleanDetails, formatCategoryReport, formatWorkOrders,
     parseBackup, mergeBackup, formatSearch, makeFullBackup, readFullBackup,
     FORM_TOKENS, parseForm, fillForm, formQuestions,
   };

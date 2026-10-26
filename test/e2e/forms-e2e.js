@@ -110,6 +110,35 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process
   await p.waitForTimeout(300);
   const filled = (await p.locator('#out').textContent());
   ok(/WO 4471 dev: 3:30/.test(filled) && /WO 4499 ZENITH: no work performed/.test(filled), `%{if hours}: a linked work order with no time says so (${(filled.match(/WO 4499[^\n]*/) || [''])[0]})`);
+  // Questions tied to the log: equipment (like /eqlink) and a detail of your own.
+  await send('/newform bound');
+  await p.locator('#out .editor').fill("%{each wo}\nWO %{wo}\nEquipment: %{ask:equipment}\nRoom: %{ask:'Room'}\n%{end}");
+  await p.locator('#out .editor').press('Control+Enter'); await p.waitForTimeout(200);
+  await p.fill('#entry', '/form bound 2026-09-29'); await p.press('#entry', 'Enter'); await p.waitForTimeout(250);
+  const asked = [];
+  for (let i = 0; i < 10; i++) {
+    const q = (await p.locator('#matches').textContent()) || '';
+    if (!/ for /.test(q)) break;
+    asked.push(q);
+    await p.fill('#entry', /Equipment for \[4471\]/.test(q) ? 'rig-9' : /Room for \[4471\]/.test(q) ? 'B2' : '');
+    await p.press('#entry', 'Enter'); await p.waitForTimeout(250);
+  }
+  ok(asked.length === 8 && /Equipment for no work order/.test(asked[6]), `asks for each work order, and the no-work-order section (${asked.length})`);
+  const saved = await p.evaluate(() => JSON.parse(tymleeStorage.getItem('tymlee.v2.local.entries')));
+  const link = saved.find((e) => e.text === '/wo dev' && new Date(e.ts).getDate() === 29);
+  const devs = saved.filter((e) => /^dev /.test(e.text) && new Date(e.ts).getDate() === 29 && e.wo === '4471');
+  ok(link && link.eq === 'rig-9' && link.details && link.details.Room === 'B2', `answers are saved for dev on that day (${JSON.stringify(link && { eq: link.eq, details: link.details })})`);
+  ok(devs.length && devs.every((e) => e.eq === 'rig-9'), "and the day's dev entries get the equipment, like /eqlink");
+  ok(/saved to the log/.test(await p.locator('#out').textContent()), 'it says what it saved');
+  await send('/newform shows');
+  await p.locator('#out .editor').fill("%{each wo}%{wo}: %{equipment} in %{if 'Room'}%{'Room'}%{else}?%{end}\n%{end}");
+  await p.locator('#out .editor').press('Control+Enter'); await p.waitForTimeout(200);
+  await send('/form shows 2026-09-29');
+  ok(/4471: rig-9 in B2/.test(await p.locator('#out').textContent()), "%{'Room'} shows the saved detail, without asking");
+  // Filled in again: what is saved now is offered.
+  await p.fill('#entry', '/form bound 2026-09-29'); await p.press('#entry', 'Enter'); await p.waitForTimeout(250);
+  ok(await p.inputValue('#entry') === 'rig-9', 'the saved equipment is offered next time');
+  await p.press('#entry', 'Escape'); await p.waitForTimeout(200);
   ok(!errs.length, `no errors ${errs}`);
   await b.close();
 })();

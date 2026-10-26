@@ -1302,7 +1302,75 @@ test('forms: %{if} / %{else}, and work orders linked with no time', () => {
   // Nested in %{each category}: no other category's links.
   const nested = fill('%{each category}%{each wo}%{wo};%{end}%{end}').text;
   assert.equal(nested.trim(), '4410021;');
-  assert.deepEqual(fill('%{if bogus}x%{end}').errors, ['%{if bogus}: use %{if <token>} or %{if no <token>}, e.g. %{if hours}']);
+  assert.deepEqual(fill('%{if bogus}x%{end}').errors, ["%{if bogus}: use %{if <token>} or %{if no <token>}, e.g. %{if hours} or %{if 'Room'}"]);
   assert.deepEqual(fill('%{else}').errors, ['%{else} without an %{if ...} before it']);
   assert.deepEqual(fill('%{if hours}x').errors, ['%{if hours} without an %{end}']);
+});
+
+test('forms: %{if entries} is false at 0; breaks and empty sections leave nothing', () => {
+  const at = (h) => Date.UTC(2026, 9, 22, h);
+  const day = Date.UTC(2026, 9, 22);
+  const log = [
+    { id: 'l1', ts: day, text: '/wo ACME', wo: '4410021' },
+    { id: 'l2', ts: day, text: '/wo NORTHSTAR', wo: '4410022' },
+    { id: 'a', ts: at(9), text: 'ACME drawings', wo: '4410021', wl: true },
+    { id: 'p', ts: at(10), text: '/break-paid' },
+    { id: 'c', ts: at(10.5), text: 'ACME review', wo: '4410021', wl: true },
+    { id: 'b', ts: at(11), text: '/off' },
+  ];
+  const fill = (tpl) => T.fillForm(tpl, log, T.parseRange('2026-10-22', at(18)), at(18), () => '').text;
+  // A "no work done" bumper: only the work order with no time gets text,
+  // and the empty section leaves no divider.
+  const bumper = '%{each wo}\n%{if entries}\n%{else}\nProject: %{category}\nWork Order: %{wo}\n\nNo work done. \n%{end}\n%{end}';
+  assert.equal(fill(bumper), 'Project: NORTHSTAR\nWork Order: 4410022\n\nNo work done.\n');
+  assert.equal(fill('%{each wo}%{if no entries}x%{end}%{end}'), 'x\n');
+  // A paid break is in no section, but its time counts in the day's hours.
+  assert.equal(fill('%{each category}%{category};%{end}').trim(), 'ACME;');
+  assert.equal(fill('%{each wo}%{wo};%{end}').replace(/\s+/g, ' ').trim(), '4410021; ---------------------------------------- 4410022;');
+  assert.equal(fill('%{each entry}%{titles};%{end}'), 'drawings;review;');
+  assert.equal(fill('%{hours}'), '2:00');
+});
+
+test('forms: questions tied to the log, and details', () => {
+  const at = (h) => Date.UTC(2026, 9, 22, h);
+  const day = Date.UTC(2026, 9, 22);
+  const log = [
+    { id: 'l1', ts: day, text: '/wo ACME', wo: '4410021', details: { Room: 'B2' } },
+    { id: 'l2', ts: day, text: '/wo NORTHSTAR', wo: '4410022', eq: 'rig-3' },
+    { id: 'a', ts: at(9), text: 'ACME drawings', wo: '4410021', wl: true },
+    { id: 'c', ts: at(10), text: 'ACME review', wo: '4410021', wl: true, details: { Room: 'C4' } },
+    { id: 'b', ts: at(11), text: '/off' },
+  ];
+  const range = T.parseRange('2026-10-22', at(18));
+  const qs = T.formQuestions("%{each wo}%{ask:equipment} %{ask:'Room'} %{ask:System}%{end}", log, range, at(18));
+  assert.deepEqual(qs.map((q) => [q.label, q.where, q.bind && q.bind.kind, q.current]), [
+    ['Equipment', '[4410021]', 'eq', ''], ['Room', '[4410021]', 'detail', 'B2'], ['System', '[4410021]', undefined, undefined],
+    ['Equipment', '[4410022]', 'eq', 'rig-3'], ['Room', '[4410022]', 'detail', ''], ['System', '[4410022]', undefined, undefined],
+  ]);
+  assert.deepEqual(qs[0].targets, { cats: [{ category: 'ACME', day }] });
+  assert.deepEqual(qs[3].targets, { cats: [{ category: 'NORTHSTAR', day }] });
+  // Inside %{each entry}: that entry, its own detail first.
+  const per = T.formQuestions("%{each entry}%{ask:'Room'}%{end}", log, range, at(18));
+  assert.deepEqual(per.map((q) => [q.targets.entries[0], q.current]), [['a', 'B2'], ['c', 'C4']]);
+  const fill = (tpl) => T.fillForm(tpl, log, range, at(18), () => '');
+  assert.equal(fill("%{each wo}%{wo}: %{if 'Room'}%{'Room'}%{else}?%{end}%{end}").text.replace(/\s+-+\s+/, '|'), '4410021: B2|4410022: ?\n');
+  assert.equal(fill("%{each entry}%{'Room'};%{end}").text, 'B2;C4;');
+  assert.equal(fill('%{ask:wo}').errors, undefined);
+  // Bad quoting.
+  assert.deepEqual(fill("%{ask:''}").errors, ["%{ask:''}: a name of your own goes in single quotes, up to 40 characters, e.g. %{ask:'Room'}"]);
+  assert.deepEqual(fill("%{''}").errors, ["%{''}: a name of your own goes in single quotes, up to 40 characters, e.g. %{'Room'}"]);
+  assert.ok(fill("%{if 'Room}x%{end}").errors);
+});
+
+test('entries keep their details', () => {
+  const e = T.makeEntry({ id: 'x', ts: 1, text: 'dev', details: { Room: ' B2 ', '': 'x', Empty: '' } });
+  assert.deepEqual(e.details, { Room: 'B2' });
+  assert.equal(T.makeEntry({ id: 'x', ts: 1, text: 'dev' }, { details: {} }).details, undefined);
+  assert.deepEqual(T.makeEntry(e, { wo: '4410021' }).details, { Room: 'B2' });
+  const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, 'v']));
+  assert.equal(Object.keys(T.cleanDetails(many)).length, 20);
+  assert.equal(T.cleanDetails({ [`${'x'.repeat(41)}`]: 'v' }), null);
+  assert.equal(T.cleanDetails({ a: 'v'.repeat(600) }).a.length, 500);
+  const edited = T.editEntry({ id: 'x', ts: Date.UTC(2026, 9, 22, 9), text: 'dev', details: { Room: 'B2' } }, { time: '09:00', text: 'dev more' }, Date.UTC(2026, 9, 22, 12));
+  assert.deepEqual(edited.entry.details, { Room: 'B2' });
 });

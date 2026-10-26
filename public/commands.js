@@ -114,19 +114,73 @@
       { cmd: 'eq', field: 'eq', flag: 'ql', noun: 'equipment', tag: T.eqTag, example: 'ler-resolve-07' },
     ];
 
-    function linkCommands(k) {
-      const needs = k.field === 'wo'
-        ? 'work orders need the latest supabase/schema.sql on the server; run it, then /sync'
-        : 'equipment needs end-to-end encryption on this account (/encrypt), then /sync';
-      const invalid = (typed) => (k.field === 'wo'
-        ? `"${typed.trim()}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`
-        : `"${typed.trim()}" is not valid equipment (${T.EQ_RULES})`);
-      // The typed value, cleaned up; null if it isn't valid.
-      const clean = (typed) => {
-        if (k.field === 'eq') return T.normalizeEq(typed);
-        const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
-        return !wo || T.validWo(wo) ? wo : null;
+    const codeNeeds = (k) => (k.field === 'wo'
+      ? 'work orders need the latest supabase/schema.sql on the server; run it, then /sync'
+      : 'equipment needs end-to-end encryption on this account (/encrypt), then /sync');
+    const codeInvalid = (k, typed) => (k.field === 'wo'
+      ? `"${typed.trim()}" is not a valid work order (no spaces or brackets, up to ${T.MAX_WO} characters)`
+      : `"${typed.trim()}" is not valid equipment (${T.EQ_RULES})`);
+    // The typed value, cleaned up; null if it isn't valid.
+    const codeClean = (k, typed) => {
+      if (k.field === 'eq') return T.normalizeEq(typed);
+      const wo = typed.trim().replace(/^\[(.*)\]$/, '$1');
+      return !wo || T.validWo(wo) ? wo : null;
+    };
+    const entriesOf = (category, dayTs) => {
+      const day = T.ymd(dayTs);
+      return shown().filter((e) => !T.isOff(e) && !T.isMarker(e.text) && T.ymd(e.ts) === day && sameCategory(T.parseInput(e.text).category, category));
+    };
+    // A link that has nothing left on it goes.
+    const linkEmpty = (e) => !CODES.some((o) => e[o.field]) && !(e.details && Object.keys(e.details).length);
+
+    // /wolink and /eqlink (and a form's %{ask:wo}, %{ask:equipment}): the code
+    // for a category for a day, on the hidden link (at the start of the day)
+    // and on that day's entries, except ones punched with their own. v ''
+    // unlinks.
+    function linkOps(k, category, dayTs, v) {
+      const link = linkFor(category, dayTs);
+      const set = { [k.field]: v, [k.flag]: Boolean(v) };
+      const ops = [];
+      if (v) {
+        ops.push({ op: 'put', entry: link ? T.makeEntry(link, set) : T.makeEntry({ id: T.uuid(), ts: T.startOfDay(dayTs), text: `${T.LINK}${category}` }, set) });
+        for (const e of entriesOf(category, dayTs)) if (!e[k.field] || e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
+      } else {
+        if (link) {
+          const after = T.makeEntry(link, set);
+          ops.push(linkEmpty(after) ? { op: 'del', id: link.id } : { op: 'put', entry: after });
+        }
+        for (const e of entriesOf(category, dayTs)) if (e[k.field] && e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
+      }
+      return { ops, link, updated: ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length };
+    }
+
+    // A form's %{ask:'Room'}: a detail for a category for a day (on its link)
+    // or, inside %{each entry}, on the entry. value '' removes it.
+    function detailOps(name, value, targets) {
+      const ops = [];
+      const withDetail = (e) => {
+        const details = { ...(e.details || {}) };
+        if (value) details[name] = value;
+        else delete details[name];
+        return T.makeEntry(e, { details });
       };
+      for (const id of targets.entries || []) {
+        const e = store.entries.find((x) => x.id === id);
+        if (e) ops.push({ op: 'put', entry: withDetail(e) });
+      }
+      for (const { category, day } of targets.cats || []) {
+        const link = linkFor(category, day);
+        if (!link && !value) continue;
+        const after = withDetail(link || { id: T.uuid(), ts: T.startOfDay(day), text: `${T.LINK}${category}` });
+        ops.push(link && linkEmpty(after) ? { op: 'del', id: link.id } : { op: 'put', entry: after });
+      }
+      return ops;
+    }
+
+    function linkCommands(k) {
+      const needs = codeNeeds(k);
+      const invalid = (typed) => codeInvalid(k, typed);
+      const clean = (typed) => codeClean(k, typed);
       return {
         [`${k.cmd}link`]: {
           usage: `/${k.cmd}link <category> [YYYY-MM-DD] [${k.field === 'wo' ? 'wo' : 'equipment'}]`,
@@ -146,29 +200,12 @@
             const day = T.ymd(dayTs);
             if (!(await store.supports(k.field))) return print(needs, 'err');
             const link = linkFor(category, dayTs);
-            const matching = shown().filter((e) => !T.isOff(e) && T.ymd(e.ts) === day && sameCategory(T.parseInput(e.text).category, category));
             const typed = rest.length ? rest.join(' ') : await io.ask(`${k.noun} for ${category} on ${day}`, (link && link[k.field]) || '', k.field);
             if (typed == null) return print(`${k.noun} cancelled`, 'dim');
             const v = clean(typed);
             if (v == null) return print(invalid(typed), 'err');
-            const set = { [k.field]: v, [k.flag]: Boolean(v) };
-            const ops = [];
-            if (v) {
-              // The hidden link, at the start of the day.
-              const linkEntry = link ? T.makeEntry(link, set) : T.makeEntry({ id: T.uuid(), ts: T.startOfDay(dayTs), text: `${T.LINK}${category}` }, set);
-              ops.push({ op: 'put', entry: linkEntry });
-              // Entries punched with /${k.cmd}punch keep their own.
-              for (const e of matching) if (!e[k.field] || e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
-            } else {
-              // The link goes when nothing else is linked on it.
-              if (link) {
-                const other = CODES.some((o) => o !== k && link[o.field]);
-                ops.push(other ? { op: 'put', entry: T.makeEntry(link, set) } : { op: 'del', id: link.id });
-              }
-              for (const e of matching) if (e[k.field] && e[k.flag]) ops.push({ op: 'put', entry: T.makeEntry(e, set) });
-            }
+            const { ops, updated } = linkOps(k, category, dayTs, v);
             store.apply(ops);
-            const updated = ops.filter((o) => o.op === 'put' && !T.isLink(o.entry)).length;
             if (!v) return print(link || updated ? `${k.noun} unlinked from ${category} on ${day}` : `no ${k.noun} was linked to ${category} on ${day}`, 'ok');
             print(`${k.tag(v)} linked to ${category} on ${day}: ${plural(updated, 'entry', 'entries')} updated`, 'ok');
           },
@@ -244,6 +281,7 @@
       '# %{each category} ... %{end} repeats a part per category (or wo, entry)',
       '# %{if hours} ... %{else} ... %{end} only when there is time (or notes, a wo...)',
       '# %{ask:System} asks you when the form is filled in',
+      "# %{ask:equipment} and %{ask:'Room'} also save the answer to the log; %{'Room'} shows it",
       '# lines starting with # up here are left out',
     ];
     const FORM_STARTER = 'Date: %{date}\n\n%{each category}\nProject: %{category}\nWork order: %{wo}\nHours: %{hours}\nWorked: %{in}-%{out}\nNotes:\n%{notes}\n%{end}\n';
@@ -380,7 +418,45 @@
       const range = rangeFrom(day ? [day] : []);
       if (!range) return null;
       return T.formQuestions(forms()[found], store.entries, range, Date.now())
-        .map((q) => ({ ...q, last: lastAnswer(q.label, q.where) }));
+        .map((q) => ({ ...q, last: suggestion(q) }));
+    }
+
+    // A question tied to the log (%{ask:equipment}, %{ask:'Room'}) offers
+    // what is there now; others, the last answer.
+    const suggestion = (q) => (q.bind && q.current) || lastAnswer(q.label, q.where);
+
+    // Answers to tied questions go into the log: like /eqlink and /wolink
+    // for a category's day, or /eqpunch and /wopunch inside %{each entry};
+    // %{ask:'Room'} as a detail the same way.
+    async function saveBound(questions, answers) {
+      const said = [];
+      for (const q of questions) {
+        if (!q.bind || !q.targets) continue;
+        const typed = answers.get(`${q.label}\n${q.where}`) || '';
+        if (typed === (q.current || '')) continue;
+        const where = q.where ? ` for ${q.where}` : '';
+        // Each answer is saved before the next is worked out (two questions
+        // may change the same day's link).
+        if (q.bind.kind === 'detail') {
+          const ops = detailOps(q.bind.name, typed, q.targets);
+          if (ops.length) store.apply(ops);
+          said.push(`${q.bind.name}${where}: ${typed || '(removed)'}`);
+          continue;
+        }
+        const k = CODES.find((c) => c.field === q.bind.kind);
+        if (!(await store.supports(k.field))) { print(codeNeeds(k), 'err'); continue; }
+        const v = codeClean(k, typed);
+        if (v == null) { print(codeInvalid(k, typed), 'err'); continue; }
+        const ops = (q.targets.entries || []).map((id) => store.entries.find((x) => x.id === id)).filter(Boolean)
+          .map((e) => ({ op: 'put', entry: T.makeEntry(e, { [k.field]: v, [k.flag]: false }) }));
+        if (ops.length) store.apply(ops);
+        for (const t of q.targets.cats || []) {
+          const r = linkOps(k, t.category, t.day, v);
+          if (r.ops.length) store.apply(r.ops);
+        }
+        said.push(`${k.noun}${where}: ${v ? k.tag(v) : '(removed)'}`);
+      }
+      if (said.length) print(`saved to the log · ${said.join(' · ')}`, 'dim');
     }
 
     // Answers for the next /form, in question order, instead of asking.
@@ -408,11 +484,12 @@
       for (const q of questions) {
         const typed = given
           ? given.shift() || ''
-          : await io.ask(q.where ? `${q.label} for ${q.where}` : q.label, lastAnswer(q.label, q.where), 'form');
+          : await io.ask(q.where ? `${q.label} for ${q.where}` : q.label, suggestion(q), 'form');
         if (typed == null) return print('form cancelled', 'dim');
         answers.set(`${q.label}\n${q.where}`, typed.trim());
       }
       saveAnswers(answers);
+      await saveBound(questions, answers);
       const result = T.fillForm(template, store.entries, range, now, (label, where) => answers.get(`${label}\n${where}`));
       if (result.errors) return print(result.errors.join('\n'), 'err');
       print(result.text.replace(/\s+$/, ''), 'report');
@@ -1764,6 +1841,10 @@
               'tokens (worked out from the entries they cover):',
               ...T.FORM_TOKENS.map(([t, what]) => `  ${`%{${t}}`.padEnd(width)}${what}`),
               `  ${'%{ask:Label}'.padEnd(width)}asked for when you fill it in (your last answer is offered)`,
+              '',
+              'questions that save the answer to the log (for a category\'s day, like /eqlink; per entry inside %{each entry}, like /eqpunch):',
+              '  %{ask:equipment}  %{ask:wo}    the equipment or work order (what is there now is offered)',
+              "  %{ask:'Room'}               a detail of your own, in single quotes; %{'Room'} shows it, %{if 'Room'} checks it",
               '',
               'repeat part of a form per group; tokens inside cover just that group:',
               '  %{each category} ... %{end}    also %{each wo}, %{each equipment} and %{each entry}',

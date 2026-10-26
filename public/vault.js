@@ -148,8 +148,8 @@
   const encryptText = (key, id, text) => encryptWith(PREFIX, key, id, text);
   const decryptText = (key, id, stored) => decryptWith(PREFIX, key, id, stored);
 
-  // Seal an entry's start time, text, notes, work order and equipment
-  // together.
+  // Seal an entry's start time, text, notes, work order, equipment and
+  // details together.
   function sealEntry(key, id, entry) {
     const payload = { t: entry.ts, x: entry.text };
     if (entry.sid) payload.i = entry.sid;
@@ -163,12 +163,13 @@
       payload.q = entry.eq;
       if (entry.ql) payload.k = 1;
     }
+    if (entry.details && Object.keys(entry.details).length) payload.d = entry.details;
     return encryptWith(SEALED, key, id, JSON.stringify(payload));
   }
 
-  // { ts, text } plus notes / wo / wl / eq / ql / sid when the entry has them.
+  // { ts, text } plus notes / wo / wl / eq / ql / sid / details when the entry has them.
   async function openEntry(key, id, stored) {
-    const { t, x, n, w, l, q, k, i, p } = JSON.parse(await decryptWith(SEALED, key, id, stored));
+    const { t, x, n, w, l, q, k, i, p, d } = JSON.parse(await decryptWith(SEALED, key, id, stored));
     if (typeof t !== 'number' || typeof x !== 'string') throw new Error('bad sealed entry');
     const entry = { ts: t, text: x };
     if (typeof n === 'string' && n) entry.notes = n;
@@ -182,6 +183,7 @@
     }
     if (typeof i === 'number' && Number.isFinite(i) && i > 0) entry.sid = i; // 49 or 49.002 ("000049-002")
     if (typeof p === 'string' && p) entry.files = p;
+    if (d && typeof d === 'object' && !Array.isArray(d)) entry.details = d;
     return entry;
   }
 

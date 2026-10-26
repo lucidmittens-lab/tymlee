@@ -85,3 +85,11 @@ test('a passkey secret locks the master key, bound to that passkey', async () =>
   const again = await V.wrapWithSecret(raw, secret, 'cred-A');
   assert.notEqual(again.data, blob.data, 'a fresh salt and IV each time');
 });
+
+test('sealed entries keep their details', async () => {
+  const key = await V.importMasterKey(V.newMasterKey());
+  const entry = { ts: 5, text: '/wo dev', eq: 'rig-9', ql: true, details: { Room: 'B2 north' } };
+  const stored = await V.sealEntry(key, 'id-1', entry);
+  assert.ok(!stored.includes('B2'));
+  assert.deepEqual(await V.openEntry(key, 'id-1', stored), entry);
+});
